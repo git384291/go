@@ -125,7 +125,7 @@ else
 fi
 rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out "$LOG_DIR/app_server.err"
 
-echo "== catalog audit as release_auditor (the same check deploy-production runs against the production DB)"
+echo "== catalog audit as release_auditor (the same check release-check runs against the production DB)"
 AUDIT_URL="postgresql:///$DB?host=$SOCK&port=$PORT&user=release_auditor"
 audit_expect() { # $1 라벨, $2 기대(pass | 위반 문자열 일부)
   local out rc=0

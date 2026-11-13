@@ -27,7 +27,7 @@ src/
   mock/            관리자 화면 가상 데이터
   server/          서버 전용: 서명, 암호화, 상담 신청 처리, 관리자 인증, DB 연결
 tests/unit/        node:test 단위 테스트
-.github/workflows/ ci.yml, deploy-production.yml(GitHub Environment 승인)
+.github/workflows/ ci.yml, release-check.yml(운영 배포 전 점검만, 배포 권한 없음)
 ```
 
 ## 실행
@@ -42,3 +42,12 @@ npm run dev            # 개발 서버
 ```
 
 실제 비밀번호·API 키·고객정보는 저장소에 넣지 않는다. 환경변수 목록은 `.env.example`.
+
+## 운영 배포 (REV-005)
+
+- 운영 자동 배포는 꺼져 있다. Vercel 프로젝트 설정의 Production Branch를 존재하지 않는 브랜치 `release-never`로 지정한다. `main` 푸시는 검수(Preview) 배포만 만든다.
+- GitHub 비공개 저장소의 Free·Pro·Team 요금제에서는 Environment 필수 승인자를 쓸 수 없다. 그래서 GitHub에는 Vercel 운영 배포 토큰을 두지 않는다.
+- 순서는 다음과 같다.
+  1. GitHub Actions에서 `release-check`를 실행한다(커밋, 검수 번호 입력). 점검만 하고 배포하지 않는다.
+  2. 사용자가 본인 PC에서 `bash scripts/promote-production.sh <검수 배포 URL> <커밋> <검수 번호>`를 실행한다. 본인 Vercel 로그인으로 승격하는 이 단계가 승인이다.
+- 실제 배포 환경의 고객 IP 위조 확인: 검수 배포에 `DIAG_IP_ENABLED=1`을 넣은 뒤 `bash scripts/verify-ip-spoofing.sh <검수 배포 URL>`을 실행한다. 확인이 끝나면 이 변수를 지운다.

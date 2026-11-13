@@ -1,7 +1,17 @@
-import next from 'eslint-config-next';
+// ESLint CLI(flat config) — REV-005 1항. 실행: npm run lint (= eslint .)
+// next@15 + eslint-config-next@15는 기존 형식 설정을 제공하므로 FlatCompat으로 불러온다.
+// (Next.js 16으로 올리면 'eslint-config-next/core-web-vitals'를 직접 spread하는 형식으로 바꾼다)
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { FlatCompat } from '@eslint/eslintrc';
+
+const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta.url)) });
 
 export default [
-  ...next,
+  {
+    ignores: ['.next/**', 'out/**', 'build/**', 'next-env.d.ts', 'node_modules/**', 'test-results/**', '.local-pg/**'],
+  },
+  ...compat.extends('next/core-web-vitals', 'next/typescript'),
   {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     rules: {

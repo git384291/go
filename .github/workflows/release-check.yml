@@ -1,0 +1,72 @@
+# 운영 배포 전 점검 (REV-005 5항)
+# GitHub Free·Pro·Team의 비공개 저장소에서는 Environment 필수 승인자와 Environment 비밀값을 쓸 수 없다.
+# 그래서 GitHub에는 운영 배포 권한(Vercel 토큰)을 두지 않는다. 이 워크플로는 '점검만' 하고 배포하지 않는다.
+# 운영 반영은 사용자가 본인 Vercel 로그인으로 scripts/promote-production.sh를 실행해 직접 승격한다.
+name: release-check
+run-name: release-check ${{ inputs.sha }} ${{ inputs.pm_review_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 배포할 main 커밋(40자리)
+        required: true
+      pm_review_id:
+        description: 검수 문서 번호 (예 FIDEON-PM-REV-006)
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Validate inputs
+        env:
+          SHA: ${{ inputs.sha }}
+          REVIEW: ${{ inputs.pm_review_id }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid sha"; exit 1; }
+          [[ "$REVIEW" =~ ^FIDEON-PM-REV-[0-9]{3,}$ ]] || { echo "invalid review id"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - name: Commit must be on main
+        run: |
+          git fetch origin main --quiet
+          git merge-base --is-ancestor "${{ inputs.sha }}" origin/main
+      - name: CI must have succeeded for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          c=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ inputs.sha }}&status=completed&event=push" \
+                --jq '.workflow_runs[0].conclusion')
+          [ "$c" = "success" ] || { echo "CI conclusion: $c"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Security tests on a fresh DB built from migrations
+        run: npm run test:db
+      - name: Production DB permission audit (read-only release_auditor account)
+        env:
+          PROD_DB_AUDIT_URL: ${{ secrets.PROD_DB_AUDIT_URL }}
+        run: |
+          [ -n "$PROD_DB_AUDIT_URL" ] || { echo "PROD_DB_AUDIT_URL secret missing"; exit 1; }
+          bash scripts/db-audit.sh "$PROD_DB_AUDIT_URL"
+      - name: Summary
+        run: |
+          {
+            echo "## release-check PASSED"
+            echo "- commit: \`${{ inputs.sha }}\`"
+            echo "- review: ${{ inputs.pm_review_id }}"
+            echo "- 다음 단계: 사용자가 로컬에서 scripts/promote-production.sh 실행(본인 Vercel 로그인)"
+          } >> "$GITHUB_STEP_SUMMARY"
