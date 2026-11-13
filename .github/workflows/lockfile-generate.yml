@@ -1,0 +1,49 @@
+# OI-001: package-lock.json 생성 (수동 실행 전용)
+# - 생성한 lockfile은 artifact로만 보관한다. 저장소에 커밋·push하지 않는다(쓰기 권한 없음).
+# - 비밀값을 쓰지 않는다. 배포 단계 없음.
+name: lockfile-generate
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate package-lock.json (no install scripts)
+        run: |
+          node -v; npm -v
+          test ! -f package-lock.json || { echo "package-lock.json already exists"; exit 1; }
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify lockfile works with npm ci (no install scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Lockfile report
+        run: |
+          {
+            echo "node $(node -v) / npm $(npm -v)"
+            echo "lockfileVersion: $(node -p "require('./package-lock.json').lockfileVersion")"
+            echo "packages: $(node -p "Object.keys(require('./package-lock.json').packages).length - 1")"
+            echo "missing integrity: $(node -p "Object.entries(require('./package-lock.json').packages).filter(([k,v])=>k&&!v.link&&!v.integrity).map(([k])=>k).join(',') || 'none'")"
+            echo "non-registry resolved: $(node -p "Object.entries(require('./package-lock.json').packages).filter(([k,v])=>k&&v.resolved&&!v.resolved.startsWith('https://registry.npmjs.org/')).map(([k])=>k).join(',') || 'none'")"
+            echo "--- direct dependencies"
+            npm ls --depth=0 || true
+          } | tee lockfile-report.txt
+          sha256sum package-lock.json | tee -a lockfile-report.txt
+          npm audit --omit=dev > npm-audit.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-lock
+          path: |
+            package-lock.json
+            lockfile-report.txt
+            npm-audit.txt
+          retention-days: 14
