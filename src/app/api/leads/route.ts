@@ -4,6 +4,7 @@ import { createPiiCrypto, piiKeysFromEnv } from '@/server/security/piiCrypto';
 import { signingKeyFromEnv } from '@/server/security/token';
 import { verifyTurnstile } from '@/server/leads/turnstile';
 import { withRole } from '@/server/db/client';
+import { clientIpFrom } from '@/server/http/clientIp';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
     return rejected('INVALID_JSON');
   }
 
-  const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || '0.0.0.0';
+  const ip = clientIpFrom((name) => req.headers.get(name));
   const { turnstileToken, ...lead } = body;
   if (!(await verifyTurnstile(String(turnstileToken ?? ''), ip))) return rejected('BOT_SUSPECTED', 403);
 

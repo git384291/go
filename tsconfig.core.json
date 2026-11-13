@@ -5,6 +5,7 @@
     "src/server/security/*.ts",
     "src/server/leads/intake.ts",
     "src/server/auth/staffAssertion.ts",
+    "src/server/http/*.ts",
     "src/content/*.ts",
     "src/mock/*.ts",
     "tests/unit/*.ts",

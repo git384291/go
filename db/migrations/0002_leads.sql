@@ -159,6 +159,12 @@ begin
   -- 7) 같은 연락처의 동시 신청 직렬화 후 중복 판정
   perform pg_advisory_xact_lock(hashtextextended('lead:' || p_phone_hmac, 0));
 
+  -- 같은 요청이 동시에 두 번 들어온 경우(더블 클릭 등): 5)는 잠금 전이라 둘 다 통과할 수 있으므로 잠금 후 다시 확인한다.
+  -- 이 확인이 없으면 두 번째 요청이 '재문의'로 잘못 기록된다.
+  if exists (select 1 from core.leads l where l.idempotency_key = p_idempotency_key) then
+    return 'accepted';
+  end if;
+
   v_window := coalesce((select (s.value #>> '{}')::int from core.settings s where s.key = 'duplicate_window_days'), 7);
   select l.id into v_existing
   from core.leads l join pii.customers c on c.id = l.customer_id

@@ -53,6 +53,8 @@ fingerprint "$DST" > "$OUT/after.tsv"
 # 복원 DB에서도 권한 검사 통과해야 한다
 "${PSQL[@]}" -d "$DST" -f db/tests/00_helpers.sql >/dev/null
 "${PSQL[@]}" -d "$DST" -f db/tests/10_grants.sql > /dev/null 2> "$OUT/grants-after-restore.log"
+# 운영 배포 전에 쓰는 것과 같은 점검을 같은 읽기 전용 계정으로 실행
+bash scripts/db-audit.sh "postgresql:///$DST?host=/tmp&port=$PORT&user=release_auditor" > "$OUT/audit-after-restore.log"
 
 # 잘못된 키로는 복호화되지 않아야 한다
 if openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "pass:wrong" -in "$OUT/drill.dump.enc" -out /dev/null 2>/dev/null; then
@@ -60,7 +62,7 @@ if openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "pass:wrong" -in "$OUT
 fi
 
 if diff -u "$OUT/before.tsv" "$OUT/after.tsv"; then
-  printf 'PASS | 덤프·암호화 %.1f초, 복원·권한 재적용 %.1f초, 테이블 %s개 행 수·내용 해시 일치, 복원 DB 권한 검사 %s건 통과, 잘못된 키 복호화 거부\n' \
+  printf 'PASS | 덤프·암호화 %.1f초, 복원·권한 재적용 %.1f초, 테이블 %s개 행 수·내용 해시 일치, 복원 DB 권한 검사 %s건 통과, 점검 계정 권한 점검 위반 0건, 잘못된 키 복호화 거부\n' \
     "$(echo "$t1 - $t0" | bc)" "$(echo "$t2 - $t1" | bc)" "$(wc -l < "$OUT/before.tsv")" \
     "$(grep -c 'PASS |' "$OUT/grants-after-restore.log")" | tee "$OUT/result.txt"
 else

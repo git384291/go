@@ -52,6 +52,13 @@ jobs:
       - run: npm ci
       - name: Pre-deploy security checks (fresh DB from migrations)
         run: npm run test:db
+      - name: Production DB permission audit (read-only release_auditor account)
+        # 새로 만든 테스트 DB만 보면 운영 DB에서 수동으로 바뀐 권한을 놓친다. 운영 DB 자체를 점검한다.
+        env:
+          PROD_DB_AUDIT_URL: ${{ secrets.PROD_DB_AUDIT_URL }}
+        run: |
+          [ -n "$PROD_DB_AUDIT_URL" ] || { echo "PROD_DB_AUDIT_URL secret missing"; exit 1; }
+          bash scripts/db-audit.sh "$PROD_DB_AUDIT_URL"
 
   deploy:
     needs: preflight
@@ -64,6 +71,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
+      - name: Re-audit production DB right before deploy (approval may have waited for hours)
+        env:
+          PROD_DB_AUDIT_URL: ${{ secrets.PROD_DB_AUDIT_URL }}
+        run: |
+          [ -n "$PROD_DB_AUDIT_URL" ] || { echo "PROD_DB_AUDIT_URL secret missing"; exit 1; }
+          bash scripts/db-audit.sh "$PROD_DB_AUDIT_URL"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

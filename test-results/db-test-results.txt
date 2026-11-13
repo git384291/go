@@ -1,75 +1,85 @@
-G1 모든 테이블 RLS+FORCE | 0
-G2 앱 역할 테이블 권한 0 | 0
-G3 앱 역할 USAGE는 api만 | app_public:api,app_staff:api
-G4 search_path 고정 | 0
-G5 EXECUTE 허용 목록 외 권한 0 | 
-G6 PUBLIC 실행 가능 함수 0 | <NULL>
-G7 역할 간 함수 교차 실행 불가 | falsefalsefalsefalse
-G8 api 함수 소유자 fideon_api | 0
-G9 fideon_api 서명 키 조회 불가 | false
-A1 정상 대표 세션 통과 | ok
-A2 세션 ID만 전달(서명 없음) 거부 | 42501 (FORBIDDEN)
-A3 위조 서명 거부 | 42501 (FORBIDDEN)
-A4 상담원 서명 + 대표 세션 ID 거부 | 42501 (FORBIDDEN)
-A5 상담원 서명으로 대표 행세 거부 | 42501 (FORBIDDEN)
-A6 유효 서명이라도 세션 소유자 불일치면 거부 | 42501 (FORBIDDEN)
-A7 비활성 관리자 거부 | 42501 (FORBIDDEN)
-A8 12시간 초과 세션 거부 | 42501 (FORBIDDEN)
-A9 로그아웃(취소)된 세션 거부 | 42501 (FORBIDDEN)
-A10 만료된 서명 거부 | 42501 (FORBIDDEN)
-A11 다른 용도 키(lead)로 만든 서명 거부 | 42501 (FORBIDDEN)
-A12 사용자 정의 설정값 위조 무효 | 42501 (FORBIDDEN)
-A13 일반 토큰으로 세션 생성 불가 | 42501 (FORBIDDEN)
-A14 세션 테이블 직접 조회 불가 | 42501 (permission denied for schema security)
-A15 서명 키 직접 조회 불가 | 42501 (permission denied for schema security)
-A16 서명 검증 함수 직접 호출 불가 | 42501 (permission denied for schema security)
-A17 리드 테이블 직접 조회 불가 | 42501 (permission denied for schema core)
-A18 고객 암호문 테이블 직접 조회 불가 | 42501 (permission denied for schema pii)
-A19 세션 직접 생성 불가 | 42501 (permission denied for schema security)
-A20 로그아웃 처리 | ok
-A21 로그아웃 직후 같은 토큰 거부 | 42501 (FORBIDDEN)
-L1 신규 상담 신청 | accepted
-L2 같은 번호 재신청도 같은 응답(리드 ID·중복 여부 비노출) | accepted
-L3 같은 요청 재전송 | accepted
-L4 서명 후 필드 변조 거부 | 42501 (FORBIDDEN)
-L5 서명 없는 직접 호출 거부 | 42501 (FORBIDDEN)
-L6 동의 없음 거부 | 22023 (CONSENT_REQUIRED)
-L7 처리방침 버전 불일치 거부 | 22023 (CONSENT_VERSION_MISMATCH)
-L8 공개 역할은 관리자 함수 실행 불가 | 42501 (permission denied for function list_leads)
-L9 공개 역할 고객 테이블 조회 불가 | 42501 (permission denied for schema pii)
-L10 같은 번호는 리드 1건 | 1
-L11 재문의 이력 1건 | 1
-L12 동의 기록(문서 버전 포함) | 1
-L13 상담 폼 스위치 꺼짐 → 거부 | 55000 (SERVICE_NOT_READY)
-L14 보유기간 미설정 → 거부 | 55000 (SERVICE_NOT_READY)
-L15 IP당 시간당 10건 초과 거부 | 54000 (RATE_LIMITED)
-P1 상담원: 배정된 리드 원문 조회 | ok
-P2 상담원: 다른 상담원 리드 조회 거부 | 42501 (FORBIDDEN)
-P3 상담원: 임의 리드 ID → 같은 오류(존재 여부 비노출) | 42501 (FORBIDDEN)
-P4 검수자: 원문 조회 거부 | 42501 (FORBIDDEN)
-P5 사유 없는 원문 조회 거부 | 22023 (REASON_REQUIRED)
-P6 상담원 목록은 배정분만 | 1
-P7 목록은 마스킹 번호만 | 0
-P8 상담원 내려받기 거부 | 42501 (FORBIDDEN)
-P9 대표 마스킹 내려받기 | ok
-P10 허용되지 않은 상태 전이 거부 | 22023 (INVALID_TRANSITION)
-P11 허용 상태 전이 + 메모 | ok
-P12 다른 상담원 리드 수정 거부 | 42501 (FORBIDDEN)
-P13 상담원 기능 스위치 변경 거부 | 42501 (FORBIDDEN)
-P14 원문 조회 감사 기록 정확히 1건 | 1
-P15 내려받기 감사 기록 | 1
-P16 원문 조회 시간당 30건 초과 거부 | 54000 (REVEAL_RATE_LIMITED)
-P17 보유기간 지난 가상 고객 1건 자동 파기 | 1
-P18 앱 역할은 자동 파기 함수 실행 불가 | 42501 (permission denied for schema core)
-P19 대표 수동 파기 | ok
-P20 파기된 리드 원문 조회 불가 | 42501 (FORBIDDEN)
-P21 파기 후 암호문 행 0 | 0
-P22 파기 감사 기록 2건 | 2
-S1 TS 관리자 서명 = DB 검증 통과 | true
-S2 TS 서명 + 다른 세션 ID = 거부 | false
-S3 TS 상담 신청 서명 = DB 검증 통과(특수문자 포함) | true
-S4 TS가 만든 상담 신청이 실제 역할(app_public)로 저장됨 | accepted
-S5 광고 수신 동의는 별도 이력에 기록 | 1
-C1 app_server(역할 전환 전) 테이블 직접 조회 불가 | ERROR:  permission denied for schema core
-C2 동시 10건 → 응답 10건 모두 accepted, 리드 1건, 재문의 9건
-C3 같은 IP 동시 12건 → 정확히 10건 접수, 2건 횟수 제한
+PASS | G1 모든 테이블 RLS+FORCE 
+PASS | G2 앱 역할 테이블 권한 0 
+PASS | G3 앱 역할 USAGE는 api만 
+PASS | G4 search_path 고정 
+PASS | G5 EXECUTE 허용 목록 외 권한 0 
+PASS | G6 PUBLIC 실행 가능 함수 0 
+PASS | G7 역할 간 함수 교차 실행 불가 
+PASS | G8 api 함수 소유자 fideon_api 
+PASS | G9 fideon_api 서명 키 조회 불가 
+PASS | A1 정상 대표 세션 통과 
+PASS | A2 세션 ID만 전달(서명 없음) 거부 
+PASS | A3 위조 서명 거부 
+PASS | A4 상담원 서명 + 대표 세션 ID 거부 
+PASS | A5 상담원 서명으로 대표 행세 거부 
+PASS | A6 유효 서명이라도 세션 소유자 불일치면 거부 
+PASS | A7 비활성 관리자 거부 
+PASS | A8 12시간 초과 세션 거부 
+PASS | A9 로그아웃(취소)된 세션 거부 
+PASS | A10 만료된 서명 거부 
+PASS | A11 다른 용도 키(lead)로 만든 서명 거부 
+PASS | A12 사용자 정의 설정값 위조 무효 
+PASS | A13 일반 토큰으로 세션 생성 불가 
+PASS | A14 세션 테이블 직접 조회 불가 
+PASS | A15 서명 키 직접 조회 불가 
+PASS | A16 서명 검증 함수 직접 호출 불가 
+PASS | A17 리드 테이블 직접 조회 불가 
+PASS | A18 고객 암호문 테이블 직접 조회 불가 
+PASS | A19 세션 직접 생성 불가 
+PASS | A20 로그아웃 처리 
+PASS | A21 로그아웃 직후 같은 토큰 거부 
+PASS | L1 신규 상담 신청 
+PASS | L2 같은 번호 재신청도 같은 응답(리드 ID·중복 여부 비노출) 
+PASS | L3 같은 요청 재전송 
+PASS | L4 서명 후 필드 변조 거부 
+PASS | L5 서명 없는 직접 호출 거부 
+PASS | L6 동의 없음 거부 
+PASS | L7 처리방침 버전 불일치 거부 
+PASS | L8 공개 역할은 관리자 함수 실행 불가 
+PASS | L9 공개 역할 고객 테이블 조회 불가 
+PASS | L10 같은 번호는 리드 1건 
+PASS | L11 재문의 이력 1건 
+PASS | L12 동의 기록(문서 버전 포함) 
+PASS | L13 상담 폼 스위치 꺼짐 → 거부 
+PASS | L14 보유기간 미설정 → 거부 
+PASS | L15 IP당 시간당 10건 초과 거부 
+PASS | P1 상담원: 배정된 리드 원문 조회 
+PASS | P2 상담원: 다른 상담원 리드 조회 거부 
+PASS | P3 상담원: 임의 리드 ID → 같은 오류(존재 여부 비노출) 
+PASS | P4 검수자: 원문 조회 거부 
+PASS | P5 사유 없는 원문 조회 거부 
+PASS | P6 상담원 목록은 배정분만 
+PASS | P7 목록은 마스킹 번호만 
+PASS | P8 상담원 내려받기 거부 
+PASS | P9 대표 마스킹 내려받기 
+PASS | P10 허용되지 않은 상태 전이 거부 
+PASS | P11 허용 상태 전이 + 메모 
+PASS | P12 다른 상담원 리드 수정 거부 
+PASS | P13 상담원 기능 스위치 변경 거부 
+PASS | P14 원문 조회 감사 기록 정확히 1건 
+PASS | P15 내려받기 감사 기록 
+PASS | P16 원문 조회 시간당 30건 초과 거부 
+PASS | P17 보유기간 지난 가상 고객 1건 자동 파기 
+PASS | P18 앱 역할은 자동 파기 함수 실행 불가 
+PASS | P19 대표 수동 파기 
+PASS | P20 파기된 리드 원문 조회 불가 
+PASS | P21 파기 후 암호문 행 0 
+PASS | P22 파기 감사 기록 2건 
+PASS | S1 TS 관리자 서명 = DB 검증 통과 
+PASS | S2 TS 서명 + 다른 세션 ID = 거부 
+PASS | S3 TS 상담 신청 서명 = DB 검증 통과(특수문자 포함) 
+PASS | S4 TS가 만든 상담 신청이 실제 역할(app_public)로 저장됨 
+PASS | S5 광고 수신 동의는 별도 이력에 기록 
+PASS | C1 app_server(역할 전환 전) 테이블 직접 조회 불가 
+PASS | C2 동시 10건 → 응답 10건 모두 accepted, 리드 1건, 재문의 9건
+PASS | C3 같은 IP 동시 12건 → 정확히 10건 접수, 2건 횟수 제한
+PASS | C4 같은 요청 동시 5건 → 응답 5건 accepted, 리드 1건, 재문의 0건
+PASS | X1 점검 계정으로 권한 점검 
+PASS | X2 일부러 준 테이블 권한 감지 
+PASS | X3 일부러 끈 FORCE RLS 감지 
+PASS | X4 허용 목록 밖 함수 실행 권한 감지 
+PASS | X5 허용되지 않은 스키마 USAGE 감지 
+PASS | X6 원상 복구 후 다시 0건 
+PASS | F1 수수료·정산 테이블 추가 후 권한 재적용 → 위반 0건 
+PASS | F2 공개 고객·관리자 역할 모두 수수료·정산 테이블 조회 불가(permission denied)
+PASS | F3 api 함수 중 수수료·정산 테이블을 읽는 함수 0개
