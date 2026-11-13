@@ -1,0 +1,49 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Dependency audit
+        run: npm audit --audit-level=high --omit=dev
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+      - name: DB security tests (local virtual DB, PostgreSQL from runner image)
+        run: npm run test:db
+      - name: Restore drill (virtual data)
+        run: npm run test:restore
+      - run: npm run build
+      - name: Client bundle secret scan
+        run: |
+          if grep -rEn "(sb_secret_|service_role|PII_ENC_KEYS|PII_HMAC_KEY|SIGNING_KEY|postgres(ql)?://)" .next/static; then
+            echo "secret-like string found in client bundle"; exit 1
+          fi
+      - run: npx playwright install --with-deps chromium
+      - name: Mobile screens (no price text, no horizontal overflow)
+        run: npm run test:preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results/

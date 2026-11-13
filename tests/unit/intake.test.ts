@@ -1,0 +1,91 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildCreateLeadArgs, leadIntakeGate, LeadRejected, leadSignedFields } from '../../src/server/leads/intake';
+import { createPiiCrypto } from '../../src/server/security/piiCrypto';
+import { signToken } from '../../src/server/security/token';
+
+const ctx = {
+  crypto: createPiiCrypto({
+    encKeys: { '1': Buffer.alloc(32, 1) },
+    currentVersion: '1',
+    hmacKey: Buffer.alloc(32, 3),
+    ipHashKey: Buffer.alloc(32, 4),
+  }),
+  signingKey: { keyId: 1, secret: Buffer.alloc(32, 0x22) },
+  currentPrivacyVersion: 'privacy-test-v1',
+  clientIp: '203.0.113.10',
+  nowSeconds: 1_800_000_000,
+};
+
+const valid = {
+  name: '테스트고객',
+  phone: '010-0000-0001',
+  interest: 'internet_tv',
+  contactTime: '평일 저녁',
+  consentCollection: true,
+  marketingOptIn: false,
+  privacyVersion: 'privacy-test-v1',
+  idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab',
+};
+
+const code = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    return e instanceof LeadRejected ? e.code : 'OTHER';
+  }
+  return 'NO_ERROR';
+};
+
+test('I1 정상 신청: DB로 가는 값에 이름·전화번호 평문이 없다', () => {
+  const a = buildCreateLeadArgs(valid, ctx);
+  const all = JSON.stringify(a);
+  assert.ok(!all.includes('테스트고객'));
+  assert.ok(!all.includes('01000000001') && !all.includes('010-0000-0001'));
+  assert.ok(!all.includes('203.0.113.10'));
+  assert.equal(a.nameMasked, '테***객');
+  assert.equal(a.phoneLast4, '0001');
+  assert.match(a.phoneHmac, /^[0-9a-f]{64}$/);
+});
+
+test('I2 서명은 DB로 보내는 모든 필드를 덮는다', () => {
+  const { token, ...rest } = buildCreateLeadArgs(valid, ctx);
+  assert.equal(token, signToken('lead', leadSignedFields(rest), ctx.signingKey, ctx.nowSeconds));
+  assert.notEqual(token, signToken('lead', leadSignedFields({ ...rest, interest: 'other' }), ctx.signingKey, ctx.nowSeconds));
+});
+
+test('I3 동의하지 않으면 거부(서버 검증)', () => {
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, consentCollection: false }, ctx)), 'CONSENT_REQUIRED');
+  const { consentCollection: _c, ...noConsent } = valid;
+  assert.equal(code(() => buildCreateLeadArgs(noConsent, ctx)), 'CONSENT_REQUIRED');
+});
+
+test('I4 화면의 처리방침 버전이 서버 설정과 다르면 거부', () => {
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, privacyVersion: 'privacy-old' }, ctx)), 'CONSENT_VERSION_MISMATCH');
+});
+
+test('I5 브라우저가 암호문·HMAC·리드 ID를 직접 넣으면 거부(허용 필드 외 금지)', () => {
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, phoneHmac: 'f'.repeat(64) }, ctx)), 'INVALID_INPUT');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, nameEnc: 'v1:x' }, ctx)), 'INVALID_INPUT');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, leadId: '30000000-0000-4000-8000-000000000001' }, ctx)), 'INVALID_INPUT');
+});
+
+test('I6 형식 오류 거부', () => {
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, phone: '02-123-4567' }, ctx)), 'INVALID_PHONE');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, name: '<script>' }, ctx)), 'INVALID_INPUT');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, interest: 'mobile' }, ctx)), 'INVALID_INPUT');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, idempotencyKey: 'short' }, ctx)), 'INVALID_INPUT');
+});
+
+test('I7 수집 차단 스위치: 기본·운영·검수·원격 DB에서는 꺼짐', () => {
+  const local = 'postgres://app_server@127.0.0.1:54329/fideon_test';
+  assert.equal(leadIntakeGate({}).enabled, false);
+  assert.equal(leadIntakeGate({ LEAD_INTAKE_MODE: 'live', DATABASE_URL: local }).enabled, false);
+  assert.equal(leadIntakeGate({ LEAD_INTAKE_MODE: 'local', DATABASE_URL: local, VERCEL_ENV: 'production' }).enabled, false);
+  assert.equal(leadIntakeGate({ LEAD_INTAKE_MODE: 'local', DATABASE_URL: local, VERCEL_ENV: 'preview' }).enabled, false);
+  assert.equal(
+    leadIntakeGate({ LEAD_INTAKE_MODE: 'local', DATABASE_URL: 'postgres://u@db.example.supabase.co:6543/postgres' }).enabled,
+    false,
+  );
+  assert.equal(leadIntakeGate({ LEAD_INTAKE_MODE: 'local', DATABASE_URL: local }).enabled, true);
+});

@@ -1,0 +1,74 @@
+# 운영 배포. REV-004 SEC-05:
+# - 승인은 태그 메시지·Markdown이 아니라 GitHub Environment 'production'의 필수 승인자(사용자 본인)가 한다.
+#   승인 기록(누가·언제·어느 커밋)은 GitHub가 보관하며 저장소 쓰기 권한만으로는 위조할 수 없다.
+# - main에 있는 커밋, 그 커밋의 CI 성공, 배포 전 보안 점검을 모두 통과해야 승인 단계로 넘어간다.
+# - Vercel의 Git 연동 자동 운영 배포는 끈다(vercel.json). 배포 토큰은 이 Environment의 비밀값에만 둔다.
+name: deploy-production
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 배포할 main 커밋(40자리)
+        required: true
+      pm_review_id:
+        description: 검수 문서 번호 (예 FIDEON-PM-REV-005)
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate inputs
+        run: |
+          [[ "${{ inputs.sha }}" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid sha"; exit 1; }
+          [[ "${{ inputs.pm_review_id }}" =~ ^FIDEON-PM-REV-[0-9]{3,}$ ]] || { echo "invalid review id"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - name: Commit must be on main
+        run: |
+          git fetch origin main --quiet
+          git merge-base --is-ancestor "${{ inputs.sha }}" origin/main
+      - name: CI must have succeeded for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          c=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ inputs.sha }}&status=completed&event=push" \
+                --jq '.workflow_runs[0].conclusion')
+          [ "$c" = "success" ] || { echo "CI conclusion: $c"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pre-deploy security checks (fresh DB from migrations)
+        run: npm run test:db
+
+  deploy:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    environment: production          # 필수 승인자 승인 전에는 이 작업이 시작되지 않는다
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx vercel@latest pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+      - run: npx vercel@latest build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      - run: npx vercel@latest deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      - name: Record
+        run: echo "deployed ${{ inputs.sha }} for ${{ inputs.pm_review_id }} approved via environment 'production'"

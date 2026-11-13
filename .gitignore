@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.local-pg/
+.env*
+!.env.example
+test-results/*.log
+test-results/*.sql
+test-results/restore/
+*.tsbuildinfo
+next-env.d.ts
