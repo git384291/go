@@ -51,3 +51,9 @@ npm run dev            # 개발 서버
   1. GitHub Actions에서 `release-check`를 실행한다(커밋, 검수 번호 입력). 점검만 하고 배포하지 않는다.
   2. 사용자가 본인 PC에서 `bash scripts/promote-production.sh <검수 배포 URL> <커밋> <검수 번호>`를 실행한다. 본인 Vercel 로그인으로 승격하는 이 단계가 승인이다.
 - 실제 배포 환경의 고객 IP 위조 확인: 검수 배포에 `DIAG_IP_ENABLED=1`을 넣은 뒤 `bash scripts/verify-ip-spoofing.sh <검수 배포 URL>`을 실행한다. 확인이 끝나면 이 변수를 지운다.
+
+## 개발 PC(Mac) 통합 검증 (REV-006)
+```bash
+bash scripts/verify-mac.sh   # 환경 확인 → lockfile 생성 → npm ci → 타입 검사 → ESLint → 단위 테스트 → 빌드 → next start → 실제 브라우저(iPhone 13 WebKit, Galaxy S9+ Chromium) 모바일 검사 → (PostgreSQL 있으면) DB 테스트
+```
+결과 원문은 `verify-results/<시각>/`에 단계별 로그·스크린샷·summary.txt로 남는다. 실패한 단계도 건너뛰지 않고 종료 코드와 함께 기록한다.
