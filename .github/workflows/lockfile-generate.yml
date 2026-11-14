@@ -38,12 +38,59 @@ jobs:
             npm ls --depth=0 || true
           } | tee lockfile-report.txt
           sha256sum package-lock.json | tee -a lockfile-report.txt
-          npm audit --omit=dev > npm-audit.txt 2>&1 || true
+      - name: npm audit (results printed to this log)
+        # 결과 3가지를 구분한다: CLEAN(취약점 0) / VULNERABLE(취약점 있음, 개수 보고) / ERROR(검사 실패)
+        # ERROR는 통과로 보고하지 않는다: 이 단계를 실패시킨다. 취약점은 경고로 표시하고 개수를 남긴다.
+        run: |
+          cat > "$RUNNER_TEMP/classify.js" <<'JS'
+          const fs = require('fs');
+          const [scope, file, code] = process.argv.slice(2);
+          const exit = Number(code);
+          const out = (status, detail) => { console.log(`${scope}\t${status}\t${detail}`); };
+          let j;
+          try { j = JSON.parse(fs.readFileSync(file, 'utf8')); }
+          catch (e) { out('ERROR', `JSON 파싱 실패 (exit=${exit})`); process.exit(0); }
+          if (j.error) { out('ERROR', `npm 오류: ${j.error.code || ''} ${j.error.summary || ''} (exit=${exit})`); process.exit(0); }
+          const v = j.metadata && j.metadata.vulnerabilities;
+          const keys = ['info', 'low', 'moderate', 'high', 'critical', 'total'];
+          if (!v || !keys.every((k) => Number.isInteger(v[k]))) { out('ERROR', `취약점 개수 항목 없음 (exit=${exit})`); process.exit(0); }
+          const counts = keys.map((k) => `${k}=${v[k]}`).join(' ');
+          if (exit !== 0 && exit !== 1) out('ERROR', `예상 밖 종료 코드 exit=${exit}; ${counts}`);
+          else if (exit === 1 && v.total === 0) out('ERROR', `종료 코드와 결과 불일치 exit=1; ${counts}`);
+          else if (exit === 0 && v.total > 0) out('ERROR', `종료 코드와 결과 불일치 exit=0; ${counts}`);
+          else if (v.total > 0) out('VULNERABLE', counts);
+          else out('CLEAN', counts);
+          JS
+          : > npm-audit-summary.txt
+          for scope in production all; do
+            if [ "$scope" = production ]; then flags="--omit=dev"; else flags=""; fi
+            set +e
+            npm audit $flags --json > "audit-$scope.json" 2> "audit-$scope.err"
+            code=$?
+            set -e
+            echo "=== npm audit ($scope) exit=$code"
+            [ -s "audit-$scope.err" ] && { echo "--- stderr"; cat "audit-$scope.err"; }
+            node "$RUNNER_TEMP/classify.js" "$scope" "audit-$scope.json" "$code" | tee -a npm-audit-summary.txt
+            echo "--- details"
+            npm audit $flags 2>&1 | tee "npm-audit-$scope.txt" || true
+            echo
+          done
+          echo "=== 요약 (scope / 상태 / 개수)"
+          cat npm-audit-summary.txt
+          { echo '### npm audit'; echo '```'; cat npm-audit-summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          if grep -q $'\tVULNERABLE\t' npm-audit-summary.txt; then echo "::warning::npm audit: 취약점 발견 (요약 참고)"; fi
+          if grep -q $'\tERROR\t' npm-audit-summary.txt || [ "$(wc -l < npm-audit-summary.txt)" -ne 2 ]; then
+            echo "::error::npm audit 검사 실행 오류 — 통과로 보지 않는다"; exit 1
+          fi
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: package-lock
           path: |
             package-lock.json
             lockfile-report.txt
-            npm-audit.txt
+            npm-audit-summary.txt
+            npm-audit-production.txt
+            npm-audit-all.txt
+            audit-*.json
           retention-days: 14
