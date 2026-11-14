@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: read
+  # gitleaks-action은 PR 이벤트에서 PR 커밋 목록(GET /pulls/{n}/commits)을 조회한다.
+  # contents: read만 있으면 이 조회가 403(Resource not accessible by integration)으로 실패한다(CI 실행 43628715194).
+  # 읽기 권한만 추가한다. 쓰기 권한은 주지 않는다.
+  pull-requests: read
 
 jobs:
   verify:
@@ -21,9 +25,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        # v3: Node 24 실행 환경(v2의 Node 20은 GitHub 실행기에서 제거됨). 입력·동작은 v2와 같다.
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PR 댓글 기능 끔. 댓글은 pull-requests: write 권한이 필요하고, 이 워크플로는 읽기 권한만 갖는다.
+          # 탐지 결과는 작업 실패 + 작업 요약(job summary) + SARIF 산출물로 확인한다.
+          GITLEAKS_ENABLE_COMMENTS: "false"
       - name: Dependency audit
         run: npm audit --audit-level=high --omit=dev
       - run: npm run typecheck
