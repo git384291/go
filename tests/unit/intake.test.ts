@@ -56,7 +56,8 @@ test('I2 서명은 DB로 보내는 모든 필드를 덮는다', () => {
 
 test('I3 동의하지 않으면 거부(서버 검증)', () => {
   assert.equal(code(() => buildCreateLeadArgs({ ...valid, consentCollection: false }, ctx)), 'CONSENT_REQUIRED');
-  const { consentCollection: _c, ...noConsent } = valid;
+  const noConsent: Partial<typeof valid> = { ...valid };
+  delete noConsent.consentCollection;
   assert.equal(code(() => buildCreateLeadArgs(noConsent, ctx)), 'CONSENT_REQUIRED');
 });
 

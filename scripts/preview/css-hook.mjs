@@ -4,13 +4,17 @@ export async function load(url, context, next) {
   return next(url, context);
 }
 
-// PHASE 1: next/navigation이 설치되어 있지 않을 때만 미리보기용 대체 모듈로 연결한다(ESM 경로)
+// PHASE 1: Next.js가 설치되어 있지 않을 때만 미리보기용 대체 모듈로 연결한다(ESM 경로)
+const FALLBACKS = {
+  'next/navigation': './next-navigation-stub.cjs',
+  'next/link': './next-link-stub.tsx',
+};
 export async function resolve(specifier, context, next) {
   try {
     return await next(specifier, context);
   } catch (e) {
-    if (specifier === 'next/navigation' && e && e.code === 'ERR_MODULE_NOT_FOUND') {
-      return { url: new URL('./next-navigation-stub.cjs', import.meta.url).href, format: 'commonjs', shortCircuit: true };
+    if (Object.hasOwn(FALLBACKS, specifier) && e && e.code === 'ERR_MODULE_NOT_FOUND') {
+      return { url: new URL(FALLBACKS[specifier], import.meta.url).href, shortCircuit: true };
     }
     throw e;
   }

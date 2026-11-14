@@ -25,6 +25,10 @@ const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/prod
 // PHASE 1 보완: 외부 상담 채널(카카오톡) 연결은 모든 화면(관리자 제외)에서 없어야 한다. 화면 글자와 링크 주소로 확인
 const EXTERNAL_TEXT = ['카카오'];
 const EXTERNAL_HREF = /kakao/i;
+// Mac 검증 보완 ⑧: 접수가 꺼진 동안 접수 가능으로 오해할 문구 금지, 준비 중 안내 필수(고객 화면)
+const INTAKE_PHRASES = ['무료 상담 신청', '연락처만 남겨', '이 상품으로 상담 신청', '상담 신청하기', '남기면 됩니다', '연락드려'];
+const NOTICE = '온라인 상담 서비스 준비 중';
+const NOTICE_PAGES = new Set(['01-home', '02-internet-tv', '05-consult', '09-consult-injected']);
 
 const DEVICES = [
   ['iphone13', webkit, devices['iPhone 13']],
@@ -85,6 +89,8 @@ async function main() {
         const text = await page.evaluate(() => document.body.innerText);
         const hrefs = await page.evaluate(() => [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') ?? ''));
         leaked.push(...EXTERNAL_TEXT.filter((t) => text.includes(t)), ...hrefs.filter((h) => EXTERNAL_HREF.test(h)));
+        leaked.push(...INTAKE_PHRASES.filter((t) => text.includes(t)));
+        if (NOTICE_PAGES.has(name) && !text.includes(NOTICE)) leaked.push('준비 중 안내 없음');
       }
       // 404 화면은 Next.js가 내부적으로 콘솔 오류를 남길 수 있어 오류 수를 세지 않는다
       rows.push({ device: devName, page: name, status: res?.status() ?? 0, expected, overflow, prices,

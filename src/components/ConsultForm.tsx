@@ -51,7 +51,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
     <form className="consult-form" onSubmit={onSubmit} noValidate>
       {!FORM_ENABLED && (
         <div className="form-banner" role="status">
-          <strong>온라인 신청 준비 중</strong>
+          <strong>온라인 상담 서비스 준비 중</strong>
           {kakaoUrl ? (
             <>
               <span>지금은 카카오톡으로 상담을 도와드려요. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
@@ -112,7 +112,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
         </div>
 
         <button className="btn btn-primary btn-block" type="submit" disabled={!consent || !hasOption}>
-          {state === 'sending' ? '보내는 중…' : '상담 신청하기'}
+          {!FORM_ENABLED ? '온라인 상담 서비스 준비 중' : state === 'sending' ? '보내는 중…' : '상담 신청하기'}
         </button>
       </fieldset>
 

@@ -18,6 +18,9 @@ const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/prod
   'internet_phone', 'cctv_security', 'internet_only', 'value="other"', '동판'];
 // PHASE 1 보완: 외부 상담 채널(카카오톡) 버튼·안내·링크가 모든 화면에서 없어야 한다
 const EXTERNAL_CHANNEL = ['카카오', 'btn-kakao', '#kakao-channel', 'pf.kakao.com', 'open.kakao.com'];
+// Mac 검증 보완 ⑧: 접수가 꺼진 동안 접수 가능으로 오해할 문구 금지, 준비 중 안내 필수
+const INTAKE_PHRASES = ['무료 상담 신청', '연락처만 남겨', '이 상품으로 상담 신청', '상담 신청하기', '남기면 됩니다', '연락드려'];
+const NOTICE = '온라인 상담 서비스 준비 중';
 const PUBLIC_PAGES = new Set(['01-home', '02-internet-tv', '05-consult']);
 
 /** 예약 상품 상세는 notFound()로 404가 나야 한다(Next.js 15 표식) */
@@ -36,11 +39,11 @@ const OUT = process.argv[2] ?? 'test-results/screens';
 async function main() {
   const css = await readFile('src/app/globals.css', 'utf8');
   const pages: [string, ReactElement][] = [
-    ['01-home', <Home />],
-    ['02-internet-tv', <InternetTv />],
+    ['01-home', <Home key="home" />],
+    ['02-internet-tv', <InternetTv key="internet-tv" />],
     ['05-consult', await Consult()],
-    ['06-admin-login', <AdminLogin />],
-    ['07-admin-leads', <Admin />],
+    ['06-admin-login', <AdminLogin key="admin-login" />],
+    ['07-admin-leads', <Admin key="admin" />],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),
@@ -68,9 +71,11 @@ async function main() {
     const body = html.slice(html.indexOf('<body'));
     const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => body.includes(f)) : [];
     const ext = EXTERNAL_CHANNEL.filter((f) => body.includes(f));
+    const intake = PUBLIC_PAGES.has(name) ? INTAKE_PHRASES.filter((f) => body.includes(f)) : [];
+    const notice = PUBLIC_PAGES.has(name) ? `\t준비 중 안내=${body.includes(NOTICE)}` : '';
     const fixed = name.startsWith('05')
       ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
-    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}${fixed}`);
+    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}\t접수 오해 문구=${intake.length ? intake.join(',') : '없음'}${notice}${fixed}`);
     await page.close();
   }
   await browser.close();
@@ -78,7 +83,7 @@ async function main() {
   await writeFile(`${OUT}/checks.txt`, report.join('\n') + '\n');
   console.log(report.join('\n'));
   const bad = report.filter((r) =>
-    r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r)
+    r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
     || /(404|고정)=false/.test(r));
   if (bad.length) {
     console.error('PREVIEW FAIL\n' + bad.join('\n'));

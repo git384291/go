@@ -202,3 +202,4 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
   .admin-main { max-width: 760px; margin: 0 auto; }
 }
 body:has(.admin), body:has(.login) { padding-bottom: 0; }
+.section-note { margin: -4px 0 16px; color: var(--muted); font-size: 15px; }

@@ -1,5 +1,6 @@
 import { PageShell } from '@/components/Site';
 import { ACTIVE_PRODUCTS, CARRIERS } from '@/content/products';
+import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
 
 export default function HomePage() {
   return (
@@ -15,7 +16,7 @@ export default function HomePage() {
           우리 집에 맞는 속도와 구성을 먼저 듣고, {CARRIERS.join(' · ')} 결합 조건을 나란히 놓고 설명해 드립니다.
         </p>
         <div className="hero-actions">
-          <a className="btn btn-primary btn-lg" href="/consult">무료 상담 신청</a>
+          <a className="btn btn-primary btn-lg" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
           <a className="btn btn-ghost btn-lg" href="#products">상품 둘러보기</a>
         </div>
         <ul className="carrier-row" aria-label="상담 가능 통신사">
@@ -41,15 +42,16 @@ export default function HomePage() {
       </section>
 
       <section className="section section-tint">
-        <h2 className="section-title">상담은 이렇게 진행돼요</h2>
+        <h2 className="section-title">서비스가 열리면 이렇게 진행돼요</h2>
+        <p className="section-note">현재는 {ONLINE_CONSULT_NOTICE}으로, 상담 신청과 연락처를 받지 않습니다.</p>
         <ol className="steps">
           <li>
-            <strong>상담 신청</strong>
-            <span>이름과 연락처만 남기면 됩니다. 주소는 이 단계에서 받지 않습니다.</span>
+            <strong>상담 요청</strong>
+            <span>이름과 연락처를 남기는 방식으로 운영할 예정입니다. 주소는 이 단계에서 받지 않습니다.</span>
           </li>
           <li>
             <strong>조건 비교 안내</strong>
-            <span>원하시는 시간에 연락드려 통신사별 확정 조건을 비교해 설명합니다.</span>
+            <span>통신사별 확정 조건을 나란히 비교해 설명합니다.</span>
           </li>
           <li>
             <strong>가입 접수 · 설치</strong>

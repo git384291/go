@@ -55,7 +55,7 @@ run db/tests/40_product_scope.sql >/dev/null   # PHASE 1 상품 상태·2인 승
 run db/tests/45_product_scope_hardening.sql >/dev/null   # PHASE 1 보완: 승인 서명 재사용 방지
 
 echo "== TypeScript ↔ DB signature parity"
-tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"
+npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
 run "$LOG_DIR/parity.sql" >/dev/null
 
 echo "== app_server login role has no direct table access"

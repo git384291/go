@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/Site';
 import { isActiveSlug, productBySlug, type ProductSlug } from '@/content/products';
+import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
 
 export function ProductPage({ slug }: { slug: ProductSlug }) {
   // PHASE 1: 예약 상품 상세는 주소로 직접 들어와도 404. 화면 코드는 보존한다.
@@ -12,7 +13,7 @@ export function ProductPage({ slug }: { slug: ProductSlug }) {
         <p className="eyebrow">{p.label}</p>
         <h1>{p.title}</h1>
         <p className="hero-lead">{p.lead}</p>
-        <a className="btn btn-primary btn-lg" href={`/consult?interest=${p.interest}`}>이 상품으로 상담 신청</a>
+        <a className="btn btn-primary btn-lg" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
       </section>
 
       <section className="section">

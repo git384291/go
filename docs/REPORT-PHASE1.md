@@ -173,3 +173,46 @@ PH1~PH14 통과: 즉시 재사용·소진 후 재사용 거부, 지문만 보관
 4. 같은 초에 같은 내용으로 만든 승인 서명은 동일 값이라 두 번째는 재사용으로 거부됨(정상 운영에서 문제 없음).
 5. 홈의 "무료 상담 신청" 버튼은 수집이 꺼진 미리보기 양식으로 연결됨(접수 없음). 문구 유지 여부는 PM 판단.
 6. `package-lock.json` 부재(OI-001).
+
+---
+
+# PHASE 1 Mac 검증 오류 보완 보고
+
+- Mac 검증(4838b19 = bb5c581과 같은 내용): TypeScript·단위·DB 155/155·미리보기 통과 / ESLint 오류 7·경고 2 / 빌드 실패 / E2E 미실행.
+- 원인: Next.js 15.5의 `next build`는 ESLint 오류가 있으면 빌드를 중단한다 → 빌드 실패의 직접 원인은 ESLint 오류 7건으로 판단.
+- ESLint 규칙은 하나도 끄거나 예외 처리하지 않았다(`eslint.config.mjs`는 내보내기 형식만 변경).
+
+## 변경 파일 · 수정 내용 · 원인
+
+| # | 파일 | 원인 | 수정 |
+|---|---|---|---|
+| ① | `scripts/preview/css-stub.cjs` | PHASE 1에서 추가한 `require('node:module')`, `require('node:path')` → no-require-imports 오류 2건 | `require()` 호출 제거. 현재 모듈의 생성자(`module.constructor`)와 `__dirname` 경로 사용. 미리보기 대체 모듈 기능 유지 |
+| ② | `scripts/preview/render.tsx` | 화면 목록 배열 안 JSX 4개(Home·InternetTv·AdminLogin·Admin)에 key 없음 → jsx-key 오류 4건 | 각 요소에 key 추가 |
+| ③ | `src/components/Site.tsx` | 홈 이동 `<a href="/">` → no-html-link-for-pages 오류 1건 | `next/link`의 `Link`로 변경. 카카오톡 버튼은 계속 비표시(`EXTERNAL_CONSULT_ENABLED = false`) |
+| ③-1 | `scripts/preview/next-link-stub.tsx`(신규), `css-hook.mjs` | 미리보기 실행 환경에 Next.js가 없으면 `next/link`를 못 불러옴 | Next.js가 **설치되지 않은 경우에만** 쓰는 대체 모듈(`<a href>` 출력). Mac에서는 실제 Link 사용 |
+| ④ | `eslint.config.mjs` | 이름 없는 기본 내보내기 경고 | `const eslintConfig = [...]; export default eslintConfig;` (규칙 내용 동일) |
+| ⑤ | `tests/unit/intake.test.ts` | I3의 미사용 변수 `_c` 경고 | 동의 항목을 지운 입력을 `delete`로 만듦(시험 의미 동일, I3 통과) |
+| ⑥ | `scripts/db-test.sh` | 서명 일치 단계가 `tsx`를 PATH에서 찾음 → PATH에 없으면 실패 | `npx --no-install tsx`로 프로젝트에 설치된 tsx 사용(PATH에 tsx 없는 상태로 동작 확인) |
+| ⑦ | `tsconfig.json` | Next.js 15 빌드가 빠진 기본값을 자동으로 써 넣음 | `allowJs: true`, include에 `.next/types/**/*.ts`를 미리 반영 → 빌드가 파일을 다시 고치지 않음. 시험 대상은 .ts/.tsx뿐이고 JS를 불러오는 TS 코드가 없어 기존 타입 검사 결과 영향 없음 |
+| ⑧ | `src/content/channels.ts`, `src/app/page.tsx`, `src/components/ProductPage.tsx`, `Site.tsx`, `src/app/consult/page.tsx`, `ConsultForm.tsx`, `globals.css` | '무료 상담 신청' 등이 접수 가능으로 오해를 줌 | 안내 문구 `ONLINE_CONSULT_NOTICE = '온라인 상담 서비스 준비 중'` 한 곳에서 관리. 홈 버튼·상품 상세 버튼·하단 고정 바·상담 페이지 제목·폼 안내·제출 버튼 변경, 진행 단계는 "서비스가 열리면" 미래형 안내 |
+| 시험 | `scripts/preview/render.tsx`, `tests/e2e/mobile-real.ts` | ⑧ 문구 회귀 방지 | 고객 화면에 접수 오해 문구 6종이 있으면 실패, 준비 중 안내가 없으면 실패 |
+
+무수정: DB 마이그레이션 0001~0005, DB 시험(40·45), 권한 점검, CI, 보안 헤더, 상품 상태(catalog.ts), 승인 구조.
+
+## 시험 결과 (이 작업 환경)
+
+| 항목 | 결과 |
+|---|---|
+| core 타입 검사 | 통과 |
+| 단위 시험 | 36/36 (intake I3 포함) |
+| DB 시험 | 155/155 — Mac에서 통과한 155개 항목과 같은 구성, 누락 0 |
+| 화면 미리보기 | 통과: 예약 상품·외부 상담·접수 오해 문구 0, 준비 중 안내 있음, 예약 상세 404 |
+| 옛 문구 되살림 시험 | '무료 상담 신청'을 다시 넣으면 미리보기 실패 확인 후 원복 |
+| E2E 스크립트 타입 검사 | 통과 |
+| ESLint · 전체 타입 검사 · Next.js 빌드 · 실제 브라우저 E2E | **미실행** — 작업 환경 npm 접속 차단. Mac에서 `bash scripts/verify-mac.sh` 재실행 필요 |
+
+## 남은 위험 · 검증 필요
+
+1. ESLint·빌드·E2E 통과는 Mac 재실행으로만 확인 가능. 보고된 7건·2건은 원인 위치를 코드에서 모두 확인해 수정했으나, 실제 ESLint 실행 결과로 최종 확인 필요.
+2. tsconfig 자동 변경 내용은 Next.js 15 기본 동작 기준으로 반영함. Mac에서 빌드 후 `git diff tsconfig.json`에 다른 변경이 남으면 그 내용 확인 필요.
+3. 기존 위험(DB 슈퍼유저 통제, package-lock 부재 OI-001)은 그대로.

@@ -1,3 +1,4 @@
+pg_ctl: another server might be running; trying to start server anyway
 == migrations
 psql:db/migrations/0001_security.sql:25: NOTICE:  role "app_server" has already been granted membership in role "app_public" by role "postgres"
 psql:db/migrations/0001_security.sql:25: NOTICE:  role "app_server" has already been granted membership in role "app_staff" by role "postgres"
