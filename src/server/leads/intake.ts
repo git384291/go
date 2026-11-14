@@ -25,7 +25,8 @@ export const LeadRequestSchema = z
     phone: z.string().trim().min(10).max(20),
     interest: z.enum(INTERESTS),
     contactTime: optionalShort(50),
-    consentCollection: z.literal(true, { errorMap: () => ({ message: 'CONSENT_REQUIRED' }) }),
+    // 동의 거부는 오류 위치(path)로 판별한다(buildCreateLeadArgs). Zod 4에서 errorMap 옵션이 없어져 메시지 지정은 두지 않는다
+    consentCollection: z.literal(true),
     marketingOptIn: z.boolean().default(false),
     privacyVersion: z.string().min(1).max(40),
     idempotencyKey: z.string().regex(/^[A-Za-z0-9-]{16,64}$/),
