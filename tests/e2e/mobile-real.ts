@@ -22,6 +22,9 @@ const PAGES = [
 
 // 고객 화면에 나오면 안 되는 예약 상품 흔적(관리자 화면 제외)
 const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/products/mobile', '집전화', 'CCTV', 'cctv_security', 'internet_phone', '동판'];
+// PHASE 1 보완: 외부 상담 채널(카카오톡) 연결은 모든 화면(관리자 제외)에서 없어야 한다. 화면 글자와 링크 주소로 확인
+const EXTERNAL_TEXT = ['카카오'];
+const EXTERNAL_HREF = /kakao/i;
 
 const DEVICES = [
   ['iphone13', webkit, devices['iPhone 13']],
@@ -78,6 +81,11 @@ async function main() {
       await page.screenshot({ path: `${OUT}/${devName}-${name}.png`, fullPage: true });
       const html = await page.content();
       const leaked = name.includes('admin') || expected === 404 ? [] : FORBIDDEN.filter((f) => html.includes(f));
+      if (!name.includes('admin') && expected !== 404) {
+        const text = await page.evaluate(() => document.body.innerText);
+        const hrefs = await page.evaluate(() => [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') ?? ''));
+        leaked.push(...EXTERNAL_TEXT.filter((t) => text.includes(t)), ...hrefs.filter((h) => EXTERNAL_HREF.test(h)));
+      }
       // 404 화면은 Next.js가 내부적으로 콘솔 오류를 남길 수 있어 오류 수를 세지 않는다
       rows.push({ device: devName, page: name, status: res?.status() ?? 0, expected, overflow, prices,
                   consoleErrors: expected === 404 ? 0 : consoleErrors, leaked });

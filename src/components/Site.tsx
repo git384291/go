@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ACTIVE_PRODUCTS, KAKAO_CHANNEL_URL } from '@/content/products';
+import { EXTERNAL_CONSULT_ENABLED } from '@/content/channels';
 
 export function SiteHeader() {
   return (
@@ -35,7 +36,8 @@ export function SiteFooter() {
 export function StickyCta() {
   return (
     <div className="sticky-cta" role="region" aria-label="상담 바로가기">
-      <a className="btn btn-kakao" href={KAKAO_CHANNEL_URL}>카카오톡 상담</a>
+      {/* PHASE 1 보완: 외부 상담 채널은 고객정보 수집 승인 전까지 표시하지 않는다 */}
+      {EXTERNAL_CONSULT_ENABLED && <a className="btn btn-kakao" href={KAKAO_CHANNEL_URL}>카카오톡 상담</a>}
       <a className="btn btn-primary" href="/consult">상담 신청</a>
     </div>
   );

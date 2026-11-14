@@ -16,6 +16,8 @@ import AdminLogin from '../../src/app/admin/login/page';
 // PHASE 1: 고객 화면에 나오면 안 되는 예약 상품 흔적(관리자 화면은 내부 가상 데이터라 제외)
 const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/products/mobile', '집전화', 'CCTV', 'cctv',
   'internet_phone', 'cctv_security', 'internet_only', 'value="other"', '동판'];
+// PHASE 1 보완: 외부 상담 채널(카카오톡) 버튼·안내·링크가 모든 화면에서 없어야 한다
+const EXTERNAL_CHANNEL = ['카카오', 'btn-kakao', '#kakao-channel', 'pf.kakao.com', 'open.kakao.com'];
 const PUBLIC_PAGES = new Set(['01-home', '02-internet-tv', '05-consult']);
 
 /** 예약 상품 상세는 notFound()로 404가 나야 한다(Next.js 15 표식) */
@@ -62,10 +64,13 @@ async function main() {
     // 전체 페이지 캡처에서는 하단 고정 버튼이 중간에 겹치지 않도록 문서 끝에 둔다
     await page.addStyleTag({ content: '.sticky-cta{position:static}' });
     await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
-    const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => html.includes(f)) : [];
+    // 검사는 <body>만 본다(인라인 CSS의 클래스 이름은 화면에 나오지 않으므로 제외)
+    const body = html.slice(html.indexOf('<body'));
+    const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => body.includes(f)) : [];
+    const ext = EXTERNAL_CHANNEL.filter((f) => body.includes(f));
     const fixed = name.startsWith('05')
       ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
-    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}${fixed}`);
+    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}${fixed}`);
     await page.close();
   }
   await browser.close();
@@ -73,7 +78,7 @@ async function main() {
   await writeFile(`${OUT}/checks.txt`, report.join('\n') + '\n');
   console.log(report.join('\n'));
   const bad = report.filter((r) =>
-    r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r)
+    r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r)
     || /(404|고정)=false/.test(r));
   if (bad.length) {
     console.error('PREVIEW FAIL\n' + bad.join('\n'));

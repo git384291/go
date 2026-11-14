@@ -2,6 +2,7 @@ import { PageShell } from '@/components/Site';
 import { ConsultForm } from '@/components/ConsultForm';
 import { CATALOG, fixedConsultInterest } from '@/content/catalog';
 import { KAKAO_CHANNEL_URL } from '@/content/products';
+import { EXTERNAL_CONSULT_ENABLED } from '@/content/channels';
 
 // PHASE 1: 상담 대상은 인터넷+TV로 고정한다. 주소의 ?interest= 값은 읽지 않는다(예약 상품으로 바꿀 수 없음).
 export default async function ConsultPage() {
@@ -14,7 +15,7 @@ export default async function ConsultPage() {
       </section>
       <section className="section">
         {/* 활성 상품만 넘긴다(현재 인터넷+TV 하나). 예약 상품 이름은 브라우저 코드로 내려가지 않는다 */}
-        <ConsultForm options={[{ value: fixedConsultInterest(), label: CATALOG[fixedConsultInterest()].label }]} kakaoUrl={KAKAO_CHANNEL_URL} />
+        <ConsultForm options={[{ value: fixedConsultInterest(), label: CATALOG[fixedConsultInterest()].label }]} kakaoUrl={EXTERNAL_CONSULT_ENABLED ? KAKAO_CHANNEL_URL : null} />
       </section>
     </PageShell>
   );

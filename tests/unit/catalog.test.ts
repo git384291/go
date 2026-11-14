@@ -121,3 +121,16 @@ test('G10 브라우저로 내려가는 코드(use client)에는 예약 상품 �
     assert.ok(!/휴대폰(?! 번호)/.test(src), `${f}: 상품명 '휴대폰' 포함('휴대폰 번호' 입력란은 제외)`);
   }
 });
+
+test('G11 외부 상담 채널(카카오톡)은 코드 상수로 꺼져 있고 환경변수로 켤 수 없다', async () => {
+  const { EXTERNAL_CONSULT_ENABLED } = await import('../../src/content/channels');
+  assert.equal(EXTERNAL_CONSULT_ENABLED, false);
+  assert.ok(!/process\.env/.test(readFileSync('src/content/channels.ts', 'utf8')));
+  // 버튼·링크를 그리는 곳은 모두 이 상수를 거친다
+  const site = readFileSync('src/components/Site.tsx', 'utf8');
+  assert.match(site, /\{EXTERNAL_CONSULT_ENABLED && <a className="btn btn-kakao"/);
+  const consult = readFileSync('src/app/consult/page.tsx', 'utf8');
+  assert.match(consult, /kakaoUrl=\{EXTERNAL_CONSULT_ENABLED \? KAKAO_CHANNEL_URL : null\}/);
+  // 채널 주소 상수는 보존
+  assert.match(readFileSync('src/content/products.ts', 'utf8'), /export const KAKAO_CHANNEL_URL/);
+});

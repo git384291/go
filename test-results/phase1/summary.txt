@@ -1,0 +1,14 @@
+== 1. typecheck:core
+rc=0
+== 2. test:unit
+rc=0
+# tests 36
+# pass 36
+# fail 0
+== 3. test:db
+rc=0
+== DB tests: pass=155 fail=0
+== 4. test:preview
+rc=0
+== 5. e2e 타입 검사
+rc=0

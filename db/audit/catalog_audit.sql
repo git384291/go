@@ -29,6 +29,17 @@ exec_allow(rolname, proname) as (
     ('app_staff', 'assign_lead'), ('app_staff', 'export_leads_masked'), ('app_staff', 'set_feature_flag'),
     ('app_staff', 'purge_customer')
 ),
+-- PHASE 1 보완(검수 지적 3항): 상품 비활성화 구조의 보호 장치가 실제로 켜져 있는지
+required_triggers(tbl, tgname) as (
+  values
+    ('core.product_catalog', 'product_catalog_guard'),
+    ('core.product_catalog', 'product_catalog_no_truncate'),
+    ('core.product_activation_approvals', 'product_approval_guard'),
+    ('core.product_activation_approvals', 'product_approvals_no_truncate')
+),
+required_unique_indexes(idx) as (
+  values ('product_approvals_proof_once'), ('product_approvals_one_open')
+),
 violations(v) as (
   -- V1 모든 보호 테이블은 RLS + FORCE
   select 'V1 RLS/FORCE off: ' || t.name
@@ -89,5 +100,27 @@ violations(v) as (
   where r.rolname in ('app_public', 'app_staff', 'fideon_api', 'app_server', 'release_auditor')
     and (r.rolsuper or r.rolbypassrls
          or (r.rolcanlogin and r.rolname not in ('app_server', 'release_auditor')))
+  union all
+  -- V10 상품 상태·승인 보호 트리거가 존재하고 켜져 있음(O = 일반 활성, A = 항상 활성). 꺼짐(D)·복제 전용(R)·없음은 위반
+  select 'V10 protection trigger missing or disabled: ' || r.tbl || ' ' || r.tgname
+  from required_triggers r
+  where not exists (
+    select 1 from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname || '.' || c.relname = r.tbl and t.tgname = r.tgname and t.tgenabled in ('O', 'A'))
+  union all
+  -- V11 상담 신청 함수가 DB 기준 상품 상태를 확인함(0004 이전 본문으로 되돌아가면 위반)
+  select 'V11 api.create_lead without product check'
+  where not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'api' and p.proname = 'create_lead'
+      and p.prosrc like '%core.product_catalog%' and p.prosrc like '%PRODUCT_NOT_ACTIVE%')
+  union all
+  -- V12 승인 서명 1회용·미소진 승인 1건 고유 인덱스가 존재하고 유효함
+  select 'V12 approval unique index missing or invalid: ' || r.idx
+  from required_unique_indexes r
+  where not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_index i on i.indexrelid = c.oid
+    where n.nspname = 'core' and c.relname = r.idx and i.indisunique and i.indisvalid)
 )
 select v from violations order by v;

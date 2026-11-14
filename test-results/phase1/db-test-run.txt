@@ -5,18 +5,19 @@ psql:db/migrations/0001_security.sql:25: NOTICE:  role "app_server" has already 
   applied db/migrations/0002_leads.sql
   applied db/migrations/0003_release_auditor.sql
   applied db/migrations/0004_product_scope.sql
+  applied db/migrations/0005_product_scope_hardening.sql
 psql:db/migrations/zz_grants.sql:5: NOTICE:  role "postgres" has already been granted membership in role "fideon_api" by role "postgres"
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.staff" does not exist, skipping
-psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.leads" does not exist, skipping
-psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.lead_status_history" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.settings" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.feature_flags" does not exist, skipping
+psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.leads" does not exist, skipping
+psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.lead_status_history" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.lead_notes" does not exist, skipping
-psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.product_activation_approvals" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.product_catalog" does not exist, skipping
+psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.product_activation_approvals" does not exist, skipping
+psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "pii.customers" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "pii.consents" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "pii.marketing_consents" does not exist, skipping
-psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "pii.customers" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "security.staff_sessions" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "core.audit_logs" does not exist, skipping
 psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relation "security.server_keys" does not exist, skipping
@@ -105,6 +106,10 @@ psql:db/tests/10_grants.sql:79: NOTICE:  PASS | G9 fideon_api 서명 키 조회 
 == concurrency: same phone, 10 parallel submissions
 == concurrency: same IP, 12 parallel submissions (limit 10/hour)
 == concurrency: identical request submitted 5 times at once (double click)
+== concurrency: same approval signature submitted 5 times at once
+== concurrency: 5 different valid signatures for the same approval slot at once
+== concurrency: 5 activation attempts at once (virtual DB only, reverted right after)
+== concurrency: reactivation right after with the same (consumed) approvals
 == catalog audit as release_auditor (the same check release-check runs against the production DB)
 == future internal tables (commission/settlement) are locked automatically
 psql:db/migrations/zz_grants.sql:5: NOTICE:  role "postgres" has already been granted membership in role "fideon_api" by role "postgres"
@@ -224,6 +229,20 @@ psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relati
   ✓ PS44 활성 상태로 새 상품 행 추가 거부 
   ✓ PS45 활성 시각 임의 변경 거부 
   ✓ PS46 시험 종료 후 활성 상품은 다시 인터넷+TV 하나 
+  ✓ PH1 사용자 승인 기록(서명 A) 
+  ✓ PH2 같은 서명 A 즉시 재사용 거부 
+  ✓ PH3 서명 원문은 저장하지 않고 지문만 보관 
+  ✓ PH4 새 서명이라도 같은 칸에 미소진 승인이 있으면 거부(중복 대기 금지) 
+  ✓ PH5 지문 변경 거부(재사용 기록 지우기 불가) 
+  ✓ PH6 승인 소진 표시(무효화) 
+  ✓ PH7 소진 뒤에도 같은 서명 A 재사용 거부(유효 시간 5분 안) 
+  ✓ PH8 PM 승인 기록(서명 B) 
+  ✓ PH9 사용자 승인이 재사용으로 막혀 활성화 불가 
+  ✓ PH10 PM 승인 소진 표시 
+  ✓ PH11 소진 뒤 같은 서명 B 재사용 거부 
+  ✓ PH12 승인 행은 서명당 1건(A 1건, B 1건) 
+  ✓ PH13 최후 방어선 고유 인덱스 2개 
+  ✓ PH14 집전화는 계속 예약, 활성화 기록 0건 
   ✓ S1 TS 관리자 서명 = DB 검증 통과 
   ✓ S2 TS 서명 + 다른 세션 ID = 거부 
   ✓ S3 TS 상담 신청 서명 = DB 검증 통과(특수문자 포함) 
@@ -234,13 +253,22 @@ psql:db/migrations/zz_grants.sql:60: NOTICE:  policy "fideon_api_all" for relati
   ✓ C2 동시 10건 → 응답 10건 모두 accepted, 리드 1건, 재문의 9건
   ✓ C3 같은 IP 동시 12건 → 정확히 10건 접수, 2건 횟수 제한
   ✓ C4 같은 요청 동시 5건 → 응답 5건 accepted, 리드 1건, 재문의 0건
+  ✓ K1 같은 승인 서명 동시 5건 → 1건만 기록, 4건 재사용 거부
+  ✓ K2 같은 승인 칸에 서로 다른 서명 동시 5건 → 미소진 승인 1건만
+  ✓ K3 동시 활성화 5건 → 활성화 기록 1건, 승인 2건 모두 소진, 즉시 예약 복귀(활성 상품 internet_tv만)
+  ✓ K4 소진된 승인으로 동시 재활성화 3건 → 모두 거부, 예약 유지
   ✓ X1 점검 계정으로 권한 점검 
   ✓ X2 일부러 준 테이블 권한 감지 
   ✓ X3 일부러 끈 FORCE RLS 감지 
   ✓ X4 허용 목록 밖 함수 실행 권한 감지 
   ✓ X5 허용되지 않은 스키마 USAGE 감지 
+  ✓ X7 꺼진 상품 상태 보호 트리거 감지 
+  ✓ X8 꺼진 승인 기록 보호 트리거 감지 
+  ✓ X9 복제 전용으로 바꾼 트리거 감지(일반 세션에서 안 돎) 
+  ✓ X10 지워진 승인 서명 1회용 인덱스 감지 
+  ✓ X11 상품 확인이 빠진 옛 상담 신청 함수로 되돌린 상태 감지 
   ✓ X6 원상 복구 후 다시 0건 
   ✓ F1 수수료·정산 테이블 추가 후 권한 재적용 → 위반 0건 
   ✓ F2 공개 고객·관리자 역할 모두 수수료·정산 테이블 조회 불가(permission denied)
   ✓ F3 api 함수 중 수수료·정산 테이블을 읽는 함수 0개
-== DB tests: pass=132 fail=0
+== DB tests: pass=155 fail=0

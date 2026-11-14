@@ -11,7 +11,8 @@ const PRIVACY_VERSION = process.env.NEXT_PUBLIC_PRIVACY_POLICY_VERSION ?? '';
 // src/content/catalog.ts(서버 쪽)에 그대로 보존되어 있다.
 export type ConsultOption = { value: string; label: string };
 
-export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string }) {
+// kakaoUrl: 외부 상담 채널 주소. 서버가 채널을 열지 않으면 null을 넘긴다(PHASE 1 보완: 현재 null).
+export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string | null }) {
   const hasOption = options.length > 0;
   const [consent, setConsent] = useState(false);
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
@@ -42,7 +43,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       setMessage('신청이 접수되었습니다. 남겨 주신 시간에 연락드릴게요.');
     } else {
       setState('error');
-      setMessage('지금은 신청을 받을 수 없습니다. 카카오톡으로 문의해 주세요.');
+      setMessage(kakaoUrl ? '지금은 신청을 받을 수 없습니다. 카카오톡으로 문의해 주세요.' : '지금은 신청을 받을 수 없습니다.');
     }
   }
 
@@ -51,8 +52,14 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       {!FORM_ENABLED && (
         <div className="form-banner" role="status">
           <strong>온라인 신청 준비 중</strong>
-          <span>지금은 카카오톡으로 상담을 도와드려요. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
-          <a className="btn btn-kakao" href={kakaoUrl}>카카오톡으로 상담하기</a>
+          {kakaoUrl ? (
+            <>
+              <span>지금은 카카오톡으로 상담을 도와드려요. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
+              <a className="btn btn-kakao" href={kakaoUrl}>카카오톡으로 상담하기</a>
+            </>
+          ) : (
+            <span>지금은 상담 신청을 받지 않습니다. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
+          )}
         </div>
       )}
 

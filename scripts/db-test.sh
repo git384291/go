@@ -52,6 +52,7 @@ cat "$LOG_DIR/db-grants-report.txt"
 run db/tests/20_staff_auth.sql >/dev/null
 run db/tests/30_leads_pii.sql >/dev/null
 run db/tests/40_product_scope.sql >/dev/null   # PHASE 1 상품 상태·2인 승인
+run db/tests/45_product_scope_hardening.sql >/dev/null   # PHASE 1 보완: 승인 서명 재사용 방지
 
 echo "== TypeScript ↔ DB signature parity"
 tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"
@@ -129,6 +130,94 @@ else
 fi
 rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out "$LOG_DIR/app_server.err"
 
+# ===== PHASE 1 보완(검수 지적 2항): 승인·활성화 동시성 =====
+# 승인 기록과 활성화는 앱 역할에 열려 있지 않으므로(관리자 직접 실행만 가능) 관리자 연결로 동시 실행한다.
+# 서명은 미리 만들어 둔다(같은 서명 = 글자까지 같은 값).
+PSQL_ADMIN=(psql -X -q -At -h "$SOCK" -p "$PORT" -U postgres -d "$DB" -v ON_ERROR_STOP=1)
+APPROVE_SQL() { # $1 상품 $2 종류 $3 직원 $4 세션 $5 서명 유효시간(초) → insert 문 출력
+  "${PSQL[@]}" -d "$DB" -At -c "select test.approval_sql('$3'::uuid, '$4'::uuid, '$1', '$2', p_ttl => $5)"
+}
+OWNER_ID=00000000-0000-4000-8000-000000000001; OWNER_SES=10000000-0000-4000-8000-000000000001
+PM_ID=00000000-0000-4000-8000-000000000005;    PM_SES=10000000-0000-4000-8000-000000000005
+
+echo "== concurrency: same approval signature submitted 5 times at once"
+# 1번은 기록 후 1.5초 동안 확정하지 않고, 그 사이 2~5번이 같은 서명으로 들어온다.
+rm -f "$LOG_DIR"/conc-*
+APPROVE_SQL internet_only owner $OWNER_ID $OWNER_SES 100 > "$LOG_DIR/conc-same.sql"
+( "${PSQL_ADMIN[@]}" -c "begin" -f "$LOG_DIR/conc-same.sql" -c "select pg_sleep(1.5)" -c "commit" > "$LOG_DIR/conc-1.out" 2>&1; echo "rc=$?" >> "$LOG_DIR/conc-1.out" ) &
+pids=($!); sleep 0.4
+for i in $(seq 2 5); do
+  ( "${PSQL_ADMIN[@]}" -f "$LOG_DIR/conc-same.sql" > "$LOG_DIR/conc-$i.out" 2>&1; echo "rc=$?" >> "$LOG_DIR/conc-$i.out" ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+ok=$(grep -l '^rc=0$' "$LOG_DIR"/conc-*.out | wc -l | tr -d ' ')
+reused=$(cat "$LOG_DIR"/conc-*.out | grep -c 'APPROVAL_PROOF_REUSED' || true)
+rows=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.product_activation_approvals where product_key = 'internet_only'")
+if [ "$ok" = 1 ] && [ "$reused" = 4 ] && [ "$rows" = 1 ]; then
+  echo "NOTICE:  PASS | K1 같은 승인 서명 동시 5건 → 1건만 기록, 4건 재사용 거부" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | K1 ok=$ok reused=$reused rows=$rows" | tee -a "$LOG_DIR/db-test.log"; cat "$LOG_DIR"/conc-*.out; exit 1
+fi
+
+echo "== concurrency: 5 different valid signatures for the same approval slot at once"
+rm -f "$LOG_DIR"/conc-*
+for i in $(seq 1 5); do APPROVE_SQL other owner $OWNER_ID $OWNER_SES $((100 - i)) > "$LOG_DIR/conc-$i.sql"; done
+pids=()
+for i in $(seq 1 5); do
+  ( "${PSQL_ADMIN[@]}" -f "$LOG_DIR/conc-$i.sql" > "$LOG_DIR/conc-$i.out" 2>&1; echo "rc=$?" >> "$LOG_DIR/conc-$i.out" ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+ok=$(grep -l '^rc=0$' "$LOG_DIR"/conc-*.out | wc -l | tr -d ' ')
+pending=$(cat "$LOG_DIR"/conc-*.out | grep -c 'APPROVAL_ALREADY_PENDING' || true)
+open_rows=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.product_activation_approvals where product_key = 'other' and approval_kind = 'owner' and consumed_at is null")
+if [ "$ok" = 1 ] && [ "$pending" = 4 ] && [ "$open_rows" = 1 ]; then
+  echo "NOTICE:  PASS | K2 같은 승인 칸에 서로 다른 서명 동시 5건 → 미소진 승인 1건만" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | K2 ok=$ok pending=$pending open=$open_rows" | tee -a "$LOG_DIR/db-test.log"; cat "$LOG_DIR"/conc-*.out; exit 1
+fi
+
+echo "== concurrency: 5 activation attempts at once (virtual DB only, reverted right after)"
+# 가상 시험 DB에서 '중복 활성화 방지'만 확인하고 즉시 예약으로 되돌린다. 운영 DB·운영 코드와 무관.
+APPROVE_SQL other pm $PM_ID $PM_SES 100 > "$LOG_DIR/conc-pm.sql"
+"${PSQL_ADMIN[@]}" -f "$LOG_DIR/conc-pm.sql" >/dev/null
+rm -f "$LOG_DIR"/conc-*.out
+pids=()
+for i in $(seq 1 5); do
+  ( "${PSQL_ADMIN[@]}" -c "begin" -c "update core.product_catalog set status = 'active' where product_key = 'other'" \
+      -c "select pg_sleep(0.3)" -c "commit" > "$LOG_DIR/conc-$i.out" 2>&1; echo "rc=$?" >> "$LOG_DIR/conc-$i.out" ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+acts=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.audit_logs where action = 'product.activate' and detail->>'product' = 'other'")
+open_rows=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.product_activation_approvals where product_key = 'other' and consumed_at is null")
+errs=$(grep -L '^rc=0$' "$LOG_DIR"/conc-*.out | wc -l | tr -d ' ')
+"${PSQL[@]}" -d "$DB" -c "update core.product_catalog set status = 'reserved' where product_key = 'other'" >/dev/null
+after=$("${PSQL[@]}" -d "$DB" -At -c "select string_agg(product_key, ',' order by product_key) from core.product_catalog where status = 'active'")
+if [ "$acts" = 1 ] && [ "$open_rows" = 0 ] && [ "$errs" = 0 ] && [ "$after" = internet_tv ]; then
+  echo "NOTICE:  PASS | K3 동시 활성화 5건 → 활성화 기록 1건, 승인 2건 모두 소진, 즉시 예약 복귀(활성 상품 internet_tv만)" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | K3 activations=$acts open=$open_rows errors=$errs active_after=$after" | tee -a "$LOG_DIR/db-test.log"; cat "$LOG_DIR"/conc-*.out; exit 1
+fi
+
+echo "== concurrency: reactivation right after with the same (consumed) approvals"
+rm -f "$LOG_DIR"/conc-*.out
+pids=()
+for i in $(seq 1 3); do
+  ( "${PSQL_ADMIN[@]}" -c "update core.product_catalog set status = 'active' where product_key = 'other'" > "$LOG_DIR/conc-$i.out" 2>&1; echo "rc=$?" >> "$LOG_DIR/conc-$i.out" ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+denied=$(cat "$LOG_DIR"/conc-*.out | grep -c 'PRODUCT_ACTIVATION_REQUIRES_APPROVAL' || true)
+st=$("${PSQL[@]}" -d "$DB" -At -c "select status from core.product_catalog where product_key = 'other'")
+if [ "$denied" = 3 ] && [ "$st" = reserved ]; then
+  echo "NOTICE:  PASS | K4 소진된 승인으로 동시 재활성화 3건 → 모두 거부, 예약 유지" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | K4 denied=$denied status=$st" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out
+
 echo "== catalog audit as release_auditor (the same check release-check runs against the production DB)"
 AUDIT_URL="postgresql:///$DB?host=$SOCK&port=$PORT&user=release_auditor"
 audit_expect() { # $1 라벨, $2 기대(pass | 위반 문자열 일부)
@@ -158,6 +247,22 @@ SQL "revoke execute on function core.purge_expired() from app_public"
 SQL "grant usage on schema core to app_public"
 audit_expect "X5 허용되지 않은 스키마 USAGE 감지" "V3 schema usage: app_public on core"
 SQL "revoke usage on schema core from app_public"
+# PHASE 1 보완: 상품 보호 장치가 꺼지거나 사라지면 배포 전 점검이 막아야 한다
+SQL "alter table core.product_catalog disable trigger product_catalog_guard"
+audit_expect "X7 꺼진 상품 상태 보호 트리거 감지" "V10 protection trigger missing or disabled: core.product_catalog product_catalog_guard"
+SQL "alter table core.product_catalog enable trigger product_catalog_guard"
+SQL "alter table core.product_activation_approvals disable trigger product_approval_guard"
+audit_expect "X8 꺼진 승인 기록 보호 트리거 감지" "V10 protection trigger missing or disabled: core.product_activation_approvals product_approval_guard"
+SQL "alter table core.product_activation_approvals enable trigger product_approval_guard"
+SQL "alter table core.product_catalog enable replica trigger product_catalog_no_truncate"
+audit_expect "X9 복제 전용으로 바꾼 트리거 감지(일반 세션에서 안 돎)" "V10 protection trigger missing or disabled: core.product_catalog product_catalog_no_truncate"
+SQL "alter table core.product_catalog enable trigger product_catalog_no_truncate"
+SQL "drop index core.product_approvals_proof_once"
+audit_expect "X10 지워진 승인 서명 1회용 인덱스 감지" "V12 approval unique index missing or invalid: product_approvals_proof_once"
+SQL "create unique index product_approvals_proof_once on core.product_activation_approvals (proof_sha256)"
+"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0002_leads.sql) >/dev/null
+audit_expect "X11 상품 확인이 빠진 옛 상담 신청 함수로 되돌린 상태 감지" "V11 api.create_lead without product check"
+"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql) >/dev/null
 audit_expect "X6 원상 복구 후 다시 0건" pass
 
 echo "== future internal tables (commission/settlement) are locked automatically"

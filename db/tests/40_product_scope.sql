@@ -18,12 +18,13 @@ $$;
 -- 승인 기록 SQL. p_sign_* 를 주면 서명 대상과 실제 값을 다르게 만든다(재사용·변조 시험)
 create function test.approval_sql(p_staff uuid, p_session uuid, p_product text, p_kind text,
                                   p_sign_product text default null, p_sign_kind text default null,
-                                  p_proof text default '') returns text
+                                  p_proof text default '', p_ttl int default 120) returns text
 language plpgsql as $$
 declare
+  -- p_ttl: 유효 시간을 달리해 '새로 발급한 서명'을 만든다(0005 이후 같은 서명은 1회용)
   v_proof text := case when p_proof = '' then
     test.token('staff', array['product-approve', p_staff::text, p_session::text,
-                              coalesce(p_sign_product, p_product), coalesce(p_sign_kind, p_kind)])
+                              coalesce(p_sign_product, p_product), coalesce(p_sign_kind, p_kind)], p_ttl)
     else p_proof end;
 begin
   return format('insert into core.product_activation_approvals (product_key, approval_kind, staff_id, session_id, reason, proof, created_at)'
@@ -123,8 +124,8 @@ select test.expect_error($$update core.product_catalog set status = 'active', ac
   '42501', 'PS32 7일 지난 승인으로는 활성화 거부');
 
 -- 두 승인이 모두 유효하면 활성화(가상 DB에서 구조 검증만) → 접수 허용 → 다시 예약 → 접수 차단
-select test.expect_ok(test.approval_sql(:OWNER, 'cctv_security', 'owner'), 'PS33 사용자 승인 재기록');
-select test.expect_ok(test.approval_sql(:PM, 'cctv_security', 'pm'), 'PS34 PM 승인 재기록');
+select test.expect_ok(test.approval_sql(:OWNER, 'cctv_security', 'owner', p_ttl => 119), 'PS33 사용자 승인 재기록');
+select test.expect_ok(test.approval_sql(:PM, 'cctv_security', 'pm', p_ttl => 119), 'PS34 PM 승인 재기록');
 select test.expect_ok($$update core.product_catalog set status = 'active' where product_key = 'cctv_security'$$,
   'PS35 사용자 + PM 승인이 모두 있을 때만 활성화 성공');
 select test.expect_eq($$select count(*)::text from core.product_activation_approvals where product_key = 'cctv_security' and consumed_at is null$$,
