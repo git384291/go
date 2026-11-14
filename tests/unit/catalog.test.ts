@@ -25,7 +25,8 @@ const valid = {
   interest: 'internet_tv',
   consentCollection: true,
   privacyVersion: 'privacy-test-v1',
-  idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab',
+  // 시험 전용 가짜 요청 중복 방지 ID(형식 [A-Za-z0-9-]{16,64}만 맞춤). 비밀값 아님, 실제 접수 키와 무관
+  idempotencyKey: 'test-only-catalog-idem-g6',
 };
 const code = (fn: () => unknown) => {
   try {
