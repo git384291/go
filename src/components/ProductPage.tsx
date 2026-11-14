@@ -1,7 +1,10 @@
+import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/Site';
-import { productBySlug, type ProductSlug } from '@/content/products';
+import { isActiveSlug, productBySlug, type ProductSlug } from '@/content/products';
 
 export function ProductPage({ slug }: { slug: ProductSlug }) {
+  // PHASE 1: 예약 상품 상세는 주소로 직접 들어와도 404. 화면 코드는 보존한다.
+  if (!isActiveSlug(slug)) notFound();
   const p = productBySlug(slug);
   return (
     <PageShell>

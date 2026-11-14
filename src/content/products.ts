@@ -1,4 +1,7 @@
 // 상품 소개 문구. 금액·사은품은 표시하지 않는다(정책 승인 구조 완성 전, REV-001 BIZ-01 / REV-004).
+// PHASE 1: 모든 상품 문구는 보존한다. 노출 여부는 catalog.ts의 상태로만 정한다(ACTIVE_PRODUCTS).
+import { isActiveInterest } from './catalog';
+
 export type ProductSlug = 'internet-tv' | 'internet-phone' | 'cctv-security';
 
 export type Product = {
@@ -70,6 +73,12 @@ export const PRODUCTS: Product[] = [
     ],
   },
 ];
+
+/** 고객에게 보여 줄 상품(홈·메뉴·상세). 예약 상품은 포함하지 않는다. */
+export const ACTIVE_PRODUCTS: readonly Product[] = Object.freeze(PRODUCTS.filter((p) => isActiveInterest(p.interest)));
+
+/** 상세 페이지 노출 가능 여부. 예약 상품이나 알 수 없는 주소는 false → 404 */
+export const isActiveSlug = (slug: string) => ACTIVE_PRODUCTS.some((p) => p.slug === slug);
 
 export const productBySlug = (slug: ProductSlug) => {
   const p = PRODUCTS.find((x) => x.slug === slug);

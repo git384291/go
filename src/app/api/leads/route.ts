@@ -5,6 +5,7 @@ import { signingKeyFromEnv } from '@/server/security/token';
 import { verifyTurnstile } from '@/server/leads/turnstile';
 import { withRole } from '@/server/db/client';
 import { clientIpFrom } from '@/server/http/clientIp';
+import { isActiveInterest } from '@/content/catalog';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,8 @@ export async function POST(req: Request) {
 
   const ip = clientIpFrom((name) => req.headers.get(name));
   const { turnstileToken, ...lead } = body;
+  // PHASE 1: 예약 상품은 외부 확인(Turnstile) 호출 전에 바로 거부한다
+  if (!isActiveInterest(lead.interest)) return rejected('PRODUCT_NOT_ACTIVE', 403);
   if (!(await verifyTurnstile(String(turnstileToken ?? ''), ip))) return rejected('BOT_SUSPECTED', 403);
 
   try {
@@ -46,11 +49,12 @@ export async function POST(req: Request) {
                              ${a.idempotencyKey}, ${a.privacyVersion}, ${a.consentCollection}, ${a.marketingOptIn}, ${a.ipHash})`);
     return accepted();
   } catch (e) {
-    if (e instanceof LeadRejected) return rejected(e.code);
+    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : 400);
     const code = (e as { code?: string }).code;
     if (code === '54000') return rejected('RATE_LIMITED', 429);
     if (code === '55000') return rejected('SERVICE_NOT_READY', 503);
     if (code === '22023') return rejected('INVALID_INPUT');
+    if (code === 'FP001') return rejected('PRODUCT_NOT_ACTIVE', 403); // DB 상품 상태가 예약(코드와 불일치 포함)
     console.error('[lead] unexpected', code); // 개인정보를 로그에 남기지 않는다
     return rejected('INTERNAL', 500);
   }

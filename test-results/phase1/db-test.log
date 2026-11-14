@@ -1,0 +1,894 @@
+--- [보고용] SECURITY DEFINER 함수와 EXECUTE 권한 보유 역할 ---
+          function           |   owner    |     execute_roles      | search_path_fixed 
+-----------------------------+------------+------------------------+-------------------
+ api.assign_lead             | fideon_api | app_staff, fideon_api  | t
+ api.create_lead             | fideon_api | app_public, fideon_api | t
+ api.export_leads_masked     | fideon_api | app_staff, fideon_api  | t
+ api.list_leads              | fideon_api | app_staff, fideon_api  | t
+ api.purge_customer          | fideon_api | app_staff, fideon_api  | t
+ api.reveal_contact          | fideon_api | app_staff, fideon_api  | t
+ api.set_feature_flag        | fideon_api | app_staff, fideon_api  | t
+ api.staff_session_open      | fideon_api | app_staff, fideon_api  | t
+ api.staff_session_revoke    | fideon_api | app_staff, fideon_api  | t
+ api.update_lead             | fideon_api | app_staff, fideon_api  | t
+ api.whoami                  | fideon_api | app_staff, fideon_api  | t
+ core.block_truncate         | postgres   |                        | t
+ core.product_approval_guard | postgres   |                        | t
+ core.product_catalog_guard  | postgres   |                        | t
+ security.assert_staff       | postgres   | fideon_api             | t
+ security.verify_token       | postgres   | fideon_api             | t
+(16 rows)
+
+psql:db/tests/10_grants.sql:21: NOTICE:  PASS | G1 모든 테이블 RLS+FORCE | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:27: NOTICE:  PASS | G2 앱 역할 테이블 권한 0 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:34: NOTICE:  PASS | G3 앱 역할 USAGE는 api만 | app_public:api,app_staff:api
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:40: NOTICE:  PASS | G4 search_path 고정 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:59: NOTICE:  PASS | G5 EXECUTE 허용 목록 외 권한 0 | 
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:64: NOTICE:  PASS | G6 PUBLIC 실행 가능 함수 0 | <NULL>
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:72: NOTICE:  PASS | G7 역할 간 함수 교차 실행 불가 | falsefalsefalsefalse
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:77: NOTICE:  PASS | G8 api 함수 소유자 fideon_api | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:79: NOTICE:  PASS | G9 fideon_api 서명 키 조회 불가 | false
+ expect_eq 
+-----------
+ 
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.d34cea497d6aa3f27e8b9fa7e5f6146fc26da6887661ae08c2fab3185c3f8501
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.244e6f2b12d47d71e502274175e187fbf16e592e637e36b70cf8d2f3167bd3e9
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.3e01d0d3e2bff8f61a1c94e7f6f41b0fc6eb7bddc23afdaf67d2795b4652fdbc
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.ba9eb76ef71c0c7be0b65360264a160615d243cddd97469e0155a4bdeb159ad5
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.cf5187ee92ca8d91a32eae731f52c7e4e568a57fa0523955a67f64d5ce8c912a
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.f7527df689d728be5b55db90d41c645b5bab42706b49b021884a3afa9704b899
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794635938.e07a312b1eeab77ab8a840963104151a412048827d9579d32c793c070ab20dd7
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.05793e19cf872a81ba0dc2eeef8c0bd5d3a56d45e764d09f706b83345f10b280
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:18: NOTICE:  PASS | A1 정상 대표 세션 통과 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:22: NOTICE:  PASS | A2 세션 ID만 전달(서명 없음) 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:24: NOTICE:  PASS | A3 위조 서명 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:28: NOTICE:  PASS | A4 상담원 서명 + 대표 세션 ID 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:30: NOTICE:  PASS | A5 상담원 서명으로 대표 행세 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:32: NOTICE:  PASS | A6 유효 서명이라도 세션 소유자 불일치면 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:36: NOTICE:  PASS | A7 비활성 관리자 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:38: NOTICE:  PASS | A8 12시간 초과 세션 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:40: NOTICE:  PASS | A9 로그아웃(취소)된 세션 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:42: NOTICE:  PASS | A10 만료된 서명 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:44: NOTICE:  PASS | A11 다른 용도 키(lead)로 만든 서명 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+ set_config |              set_config              |          set_config           
+------------+--------------------------------------+-------------------------------
+ owner      | 00000000-0000-4000-8000-000000000001 | {"role":"owner","aal":"aal2"}
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:50: NOTICE:  PASS | A12 사용자 정의 설정값 위조 무효 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:54: NOTICE:  PASS | A13 일반 토큰으로 세션 생성 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:57: NOTICE:  PASS | A14 세션 테이블 직접 조회 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:58: NOTICE:  PASS | A15 서명 키 직접 조회 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:59: NOTICE:  PASS | A16 서명 검증 함수 직접 호출 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:60: NOTICE:  PASS | A17 리드 테이블 직접 조회 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:61: NOTICE:  PASS | A18 고객 암호문 테이블 직접 조회 불가 | 42501 (permission denied for schema pii)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:63: NOTICE:  PASS | A19 세션 직접 생성 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.a5d5dc8ae075ed94e5326525463accfb5b83ebdb7337ba51b85cece6dcde682b
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:71: NOTICE:  PASS | A20 로그아웃 처리 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:73: NOTICE:  PASS | A21 로그아웃 직후 같은 토큰 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.84ea2c9d388b6161fa9e16338a1dd6aec9b609b8b5d4c6d8444e1c5f277fbeaf', 'v1:enc-name', '테*고', 'v1:enc-phone', '1111111111111111111111111111111111111111111111111111111111111111', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000001', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.c04e9220736a82f9142255fcff2a4553fb2694d7abcef255b99f5c751c263dfa', 'v1:enc-name', '테*고', 'v1:enc-phone', '1111111111111111111111111111111111111111111111111111111111111111', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000002', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.b4f78d6ba3f7f4b756014220f9c93ce06d6e13b581a451b2b1b1aaeea8b67c38', 'v1:attacker', '테*고', 'v1:enc-phone', '3333333333333333333333333333333333333333333333333333333333333333', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000003', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.defc20c8313c38b47cf77d2b354346ee4501b8283c763e728edca03f9ffa92f7', 'v1:enc-name', '테*고', 'v1:enc-phone', '4444444444444444444444444444444444444444444444444444444444444444', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000004', 'privacy-test-v1', 'false'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                          set_config                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.db9765371edda108da006c9288aa324d093bde0685bc5460a5b8c79e5d6cbb9b', 'v1:enc-name', '테*고', 'v1:enc-phone', '5555555555555555555555555555555555555555555555555555555555555555', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000005', 'privacy-old', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.9930d19bbe630165e3691489a1fcd15e6a909d77d8110cdc440b0821d6118de0', 'v1:enc-name', '테*고', 'v1:enc-phone', '6666666666666666666666666666666666666666666666666666666666666666', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000006', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.5abfcd6d45977b497f8da5d6c7ad8f35c07607eeda91291b94bd716131dc660f', 'v1:enc-name', '테*고', 'v1:enc-phone', '7777777777777777777777777777777777777777777777777777777777777777', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000007', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:31: NOTICE:  PASS | L1 신규 상담 신청 | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:32: NOTICE:  PASS | L2 같은 번호 재신청도 같은 응답(리드 ID·중복 여부 비노출) | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:33: NOTICE:  PASS | L3 같은 요청 재전송 | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:34: NOTICE:  PASS | L4 서명 후 필드 변조 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:36: NOTICE:  PASS | L5 서명 없는 직접 호출 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:37: NOTICE:  PASS | L6 동의 없음 거부 | 22023 (CONSENT_REQUIRED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:38: NOTICE:  PASS | L7 처리방침 버전 불일치 거부 | 22023 (CONSENT_VERSION_MISMATCH)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:39: NOTICE:  PASS | L8 공개 역할은 관리자 함수 실행 불가 | 42501 (permission denied for function list_leads)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:40: NOTICE:  PASS | L9 공개 역할 고객 테이블 조회 불가 | 42501 (permission denied for schema pii)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:44: NOTICE:  PASS | L10 같은 번호는 리드 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:47: NOTICE:  PASS | L11 재문의 이력 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:50: NOTICE:  PASS | L12 동의 기록(문서 버전 포함) | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:55: NOTICE:  PASS | L13 상담 폼 스위치 꺼짐 → 거부 | 55000 (SERVICE_NOT_READY)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:60: NOTICE:  PASS | L14 보유기간 미설정 → 거부 | 55000 (SERVICE_NOT_READY)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:68: NOTICE:  PASS | L15 IP당 시간당 10건 초과 거부 | 54000 (RATE_LIMITED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.d34cea497d6aa3f27e8b9fa7e5f6146fc26da6887661ae08c2fab3185c3f8501
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.244e6f2b12d47d71e502274175e187fbf16e592e637e36b70cf8d2f3167bd3e9
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1794636068.b6f1e0b40e43952a54494fd2a88884aad4c328f55985c7ee639c8ceb0e3a7c84
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:82: NOTICE:  PASS | P1 상담원: 배정된 리드 원문 조회 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:84: NOTICE:  PASS | P2 상담원: 다른 상담원 리드 조회 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:86: NOTICE:  PASS | P3 상담원: 임의 리드 ID → 같은 오류(존재 여부 비노출) | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:88: NOTICE:  PASS | P4 검수자: 원문 조회 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:90: NOTICE:  PASS | P5 사유 없는 원문 조회 거부 | 22023 (REASON_REQUIRED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:91: NOTICE:  PASS | P6 상담원 목록은 배정분만 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:93: NOTICE:  PASS | P7 목록은 마스킹 번호만 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:95: NOTICE:  PASS | P8 상담원 내려받기 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:97: NOTICE:  PASS | P9 대표 마스킹 내려받기 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:99: NOTICE:  PASS | P10 허용되지 않은 상태 전이 거부 | 22023 (INVALID_TRANSITION)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:101: NOTICE:  PASS | P11 허용 상태 전이 + 메모 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:103: NOTICE:  PASS | P12 다른 상담원 리드 수정 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:105: NOTICE:  PASS | P13 상담원 기능 스위치 변경 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:108: NOTICE:  PASS | P14 원문 조회 감사 기록 정확히 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:109: NOTICE:  PASS | P15 내려받기 감사 기록 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:116: NOTICE:  PASS | P16 원문 조회 시간당 30건 초과 거부 | 54000 (REVEAL_RATE_LIMITED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:120: NOTICE:  PASS | P17 보유기간 지난 가상 고객 1건 자동 파기 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:122: NOTICE:  PASS | P18 앱 역할은 자동 파기 함수 실행 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:124: NOTICE:  PASS | P19 대표 수동 파기 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:126: NOTICE:  PASS | P20 파기된 리드 원문 조회 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:129: NOTICE:  PASS | P21 파기 후 암호문 행 0 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:130: NOTICE:  PASS | P22 파기 감사 기록 2건 | 2
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:41: NOTICE:  PASS | PS1 DB 활성 상품은 인터넷+TV 하나 | internet_tv
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:43: NOTICE:  PASS | PS2 예약 상품(집전화·인터넷만·CCTV·기타·휴대폰), 동판 키 없음 | cctv_security,internet_only,internet_phone,mobile,other
+ expect_eq 
+-----------
+ 
+(1 row)
+
+                                                                                                                                                                                                         set_config                                                                                                                                                                                                         
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.8968818d193a7472db49350e8cff60e455c9115fb473cffe878db0be0b75d4d4', 'v1:enc-name', '테*고', 'v1:enc-phone', 'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', '1234', 'internet_phone', '', 'naver', 'cpc', 'test', 'idem-scope-00000001', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1')
+(1 row)
+
+                                                                                                                                                                                                        set_config                                                                                                                                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.c52ab5e8adc3e390f165522701e6cf5591fa9475e190e52c63fa98625b37260c', 'v1:enc-name', '테*고', 'v1:enc-phone', 'a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2', '1234', 'internet_only', '', 'naver', 'cpc', 'test', 'idem-scope-00000002', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2')
+(1 row)
+
+                                                                                                                                                                                                        set_config                                                                                                                                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.a99b8356012182c86ecae65ad006a20afb1bb7bf4ef598e4950cf567c937b6ae', 'v1:enc-name', '테*고', 'v1:enc-phone', 'a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3', '1234', 'cctv_security', '', 'naver', 'cpc', 'test', 'idem-scope-00000003', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3')
+(1 row)
+
+                                                                                                                                                                                                    set_config                                                                                                                                                                                                     
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.65e665fc7d93933314605b079540856d19d698caefea15f6b94237782ec8c596', 'v1:enc-name', '테*고', 'v1:enc-phone', 'a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4', '1234', 'other', '', 'naver', 'cpc', 'test', 'idem-scope-00000004', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4')
+(1 row)
+
+                                                                                                                                                                                                     set_config                                                                                                                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.581c396251d0ddfa26483d34fdc04d08e6556ac90595e918d9ed7b91f9e504bd', 'v1:enc-name', '테*고', 'v1:enc-phone', 'a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5', '1234', 'mobile', '', 'naver', 'cpc', 'test', 'idem-scope-00000005', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5')
+(1 row)
+
+                                                                                                                                                                                                       set_config                                                                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.b26a59af6acebbbaa3e35b676c4bfc20d3a0360ef9ffba614733edce3a6efc20', 'v1:enc-name', '테*고', 'v1:enc-phone', 'a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6', '1234', 'internet_tv', '', 'naver', 'cpc', 'test', 'idem-scope-00000006', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa6')
+(1 row)
+
+psql:db/tests/40_product_scope.sql:54: NOTICE:  PASS | PS3 집전화 접수 → DB 거부(코드가 활성이라 잘못 판단해도 차단) | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:55: NOTICE:  PASS | PS4 인터넷만 접수 → DB 거부 | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:56: NOTICE:  PASS | PS5 CCTV 접수 → DB 거부 | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:57: NOTICE:  PASS | PS6 기타 접수 → DB 거부 | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:58: NOTICE:  PASS | PS7 휴대폰 접수 → DB 거부 | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:59: NOTICE:  PASS | PS8 인터넷+TV 접수는 그대로 동작(가상 DB) | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:60: NOTICE:  PASS | PS9 공개 역할은 상품 상태 조회·변경 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:64: NOTICE:  PASS | PS10 관리자 역할도 상품 상태 직접 변경 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:67: NOTICE:  PASS | PS11 관리자 역할은 승인 기록 직접 입력 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:70: NOTICE:  PASS | PS12 예약 상품 리드 저장 0건 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:74: NOTICE:  PASS | PS13 승인 0건 → 활성화 거부 | 42501 (PRODUCT_ACTIVATION_REQUIRES_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:77: NOTICE:  PASS | PS14 승인자 ID만 적어 넣은 승인 기록 거부(서명 없음) | 42501 (APPROVAL_PROOF_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:79: NOTICE:  PASS | PS15 위조 서명 거부 | 42501 (APPROVAL_PROOF_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:81: NOTICE:  PASS | PS16 다른 상품용 서명 재사용 거부 | 42501 (APPROVAL_PROOF_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:83: NOTICE:  PASS | PS17 사용자(owner)가 PM 승인으로 기록 시도 거부 | 42501 (APPROVER_ROLE_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:85: NOTICE:  PASS | PS18 상담원(counselor)의 사용자 승인 거부 | 42501 (APPROVER_ROLE_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:87: NOTICE:  PASS | PS19 비활성 계정의 승인 거부 | 42501 (APPROVER_ROLE_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:89: NOTICE:  PASS | PS20 폐기된 세션의 승인 거부 | 42501 (APPROVER_ROLE_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:91: NOTICE:  PASS | PS21 만료(12시간 초과) 세션의 승인 거부 | 42501 (APPROVER_ROLE_INVALID)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:93: NOTICE:  PASS | PS22 이미 활성인 상품에는 승인 기록 불가 | 22023 (PRODUCT_NOT_RESERVED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:96: NOTICE:  PASS | PS23 유효한 사용자 승인 기록 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:99: NOTICE:  PASS | PS24 승인 시각은 DB가 정함(과거 날짜 입력 무시), 서명은 저장 안 함 | true
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:101: NOTICE:  PASS | PS25 사용자 승인 1건만으로는 활성화 거부 | 42501 (PRODUCT_ACTIVATION_REQUIRES_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:105: NOTICE:  PASS | PS26 승인 기록 승인자 변경 거부 | 42501 (APPROVAL_IMMUTABLE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:107: NOTICE:  PASS | PS27 승인 종류 변경(사용자 → PM) 거부 | 42501 (APPROVAL_IMMUTABLE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:108: NOTICE:  PASS | PS28 승인 기록 삭제 거부 | 42501 (APPROVAL_IMMUTABLE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:109: NOTICE:  PASS | PS29 승인 기록 일괄 삭제(TRUNCATE) 거부 | 42501 (TRUNCATE_NOT_ALLOWED on core.product_activation_approvals)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:112: NOTICE:  PASS | PS30 유효한 PM 승인 기록 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:115: NOTICE:  PASS | PS31 승인 후 승인자 계정이 비활성화되면 활성화 거부 | 42501 (PRODUCT_ACTIVATION_REQUIRES_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:123: NOTICE:  PASS | PS32 7일 지난 승인으로는 활성화 거부 | 42501 (PRODUCT_ACTIVATION_REQUIRES_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:126: NOTICE:  PASS | PS33 사용자 승인 재기록 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:127: NOTICE:  PASS | PS34 PM 승인 재기록 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:129: NOTICE:  PASS | PS35 사용자 + PM 승인이 모두 있을 때만 활성화 성공 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:131: NOTICE:  PASS | PS36 활성화에 쓰인 승인은 모두 소진 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:133: NOTICE:  PASS | PS37 활성화 감사 기록(승인자 2명 포함) | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+                                                                                                                                                                                                        set_config                                                                                                                                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.80d8d8214e123f76cd29d5582930a5514a8f8f8f9409631057ed447ee45a1717', 'v1:enc-name', '테*고', 'v1:enc-phone', 'b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3', '1234', 'cctv_security', '', 'naver', 'cpc', 'test', 'idem-scope-00000013', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb3')
+(1 row)
+
+psql:db/tests/40_product_scope.sql:136: NOTICE:  PASS | PS38 DB 활성화 후에만 DB 단계 통과(코드 상태는 별도 차단) | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:140: NOTICE:  PASS | PS39 다시 예약 전환(안전 방향)은 승인 없이 가능 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+                                                                                                                                                                                                        set_config                                                                                                                                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1794636068.d8784c88898643d14860dc711895d53ed9d0812e3c203d7c1bb6e5a7216c96e3', 'v1:enc-name', '테*고', 'v1:enc-phone', 'c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3', '1234', 'cctv_security', '', 'naver', 'cpc', 'test', 'idem-scope-00000023', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc3')
+(1 row)
+
+psql:db/tests/40_product_scope.sql:143: NOTICE:  PASS | PS40 예약 전환 후 다시 접수 차단 | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:146: NOTICE:  PASS | PS41 소진된 승인으로 재활성화 거부(1회용) | 42501 (PRODUCT_ACTIVATION_REQUIRES_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:149: NOTICE:  PASS | PS42 상품 행 삭제 거부 | 42501 (PRODUCT_CATALOG_IMMUTABLE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:150: NOTICE:  truncate cascades to table "product_activation_approvals"
+psql:db/tests/40_product_scope.sql:150: NOTICE:  PASS | PS43 상품 테이블 일괄 삭제 거부 | 42501 (TRUNCATE_NOT_ALLOWED on core.product_catalog)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:152: NOTICE:  PASS | PS44 활성 상태로 새 상품 행 추가 거부 | 42501 (PRODUCT_ACTIVATION_REQUIRES_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:154: NOTICE:  PASS | PS45 활성 시각 임의 변경 거부 | 42501 (PRODUCT_CATALOG_IMMUTABLE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+ purge_customer_internal 
+-------------------------
+ 
+(1 row)
+
+psql:db/tests/40_product_scope.sql:159: NOTICE:  PASS | PS46 시험 종료 후 활성 상품은 다시 인터넷+TV 하나 | internet_tv
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:test-results/phase1/parity.sql:1: NOTICE:  PASS | S1 TS 관리자 서명 = DB 검증 통과 | true
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:test-results/phase1/parity.sql:2: NOTICE:  PASS | S2 TS 서명 + 다른 세션 ID = 거부 | false
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:test-results/phase1/parity.sql:3: NOTICE:  PASS | S3 TS 상담 신청 서명 = DB 검증 통과(특수문자 포함) | true
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:test-results/phase1/parity.sql:5: NOTICE:  PASS | S4 TS가 만든 상담 신청이 실제 역할(app_public)로 저장됨 | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:test-results/phase1/parity.sql:7: NOTICE:  PASS | S5 광고 수신 동의는 별도 이력에 기록 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:test-results/phase1/parity.sql:9: NOTICE:  PASS | S6 서버 검사를 우회한 정상 서명 CCTV 신청도 DB가 거부 | FP001 (PRODUCT_NOT_ACTIVE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+NOTICE:  PASS | C1 app_server(역할 전환 전) 테이블 직접 조회 불가 | ERROR:  permission denied for schema core
+NOTICE:  PASS | C2 동시 10건 → 응답 10건 모두 accepted, 리드 1건, 재문의 9건
+NOTICE:  PASS | C3 같은 IP 동시 12건 → 정확히 10건 접수, 2건 횟수 제한
+NOTICE:  PASS | C4 같은 요청 동시 5건 → 응답 5건 accepted, 리드 1건, 재문의 0건
+NOTICE:  PASS | X1 점검 계정으로 권한 점검 | 위반 0건
+NOTICE:  PASS | X2 일부러 준 테이블 권한 감지 | 감지: V2 table privilege: app_staff on core.leads
+NOTICE:  PASS | X3 일부러 끈 FORCE RLS 감지 | 감지: V1 RLS/FORCE off: pii.consents
+NOTICE:  PASS | X4 허용 목록 밖 함수 실행 권한 감지 | 감지: V5 execute not allowed: app_public -> core.purge_expired
+NOTICE:  PASS | X5 허용되지 않은 스키마 USAGE 감지 | 감지: V3 schema usage: app_public on core
+NOTICE:  PASS | X6 원상 복구 후 다시 0건 | 위반 0건
+NOTICE:  PASS | F1 수수료·정산 테이블 추가 후 권한 재적용 → 위반 0건 | 위반 0건
+NOTICE:  PASS | F2 공개 고객·관리자 역할 모두 수수료·정산 테이블 조회 불가(permission denied)
+NOTICE:  PASS | F3 api 함수 중 수수료·정산 테이블을 읽는 함수 0개

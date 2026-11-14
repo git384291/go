@@ -1,0 +1,204 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root {
+  --ink: #0f2a3d;
+  --ink-2: #3b5162;
+  --muted: #6b7f8e;
+  --line: #dfe5ea;
+  --paper: #ffffff;
+  --wash: #f3f6f8;
+  --signal: #ff6a3d;
+  --signal-ink: #ffffff;
+  --signal-soft: #fff1ec;
+  --ok: #1f8a5b;
+  --warn: #b7791f;
+  --kakao: #fee500;
+  --kakao-ink: #191600;
+  --radius: 14px;
+  --font: 'Pretendard', 'Noto Sans KR', 'Noto Sans CJK KR', system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--paper);
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  padding-bottom: 84px; /* 하단 고정 버튼 높이 */
+}
+a { color: inherit; }
+h1, h2, h3 { line-height: 1.3; letter-spacing: -0.03em; margin: 0; }
+
+/* header */
+.site-header {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px; letter-spacing: 0.06em; text-decoration: none; }
+.brand-sm { font-size: 15px; }
+.brand-mark {
+  width: 18px; height: 18px; border-radius: 5px; background: var(--ink);
+  box-shadow: inset -6px -6px 0 var(--signal);
+}
+.site-nav { display: flex; gap: 14px; font-size: 14px; color: var(--ink-2); }
+.site-nav a { text-decoration: none; }
+
+/* buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 48px; padding: 0 18px; border-radius: 12px; border: 0;
+  font: inherit; font-weight: 700; font-size: 15px; text-decoration: none; cursor: pointer;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-lg { min-height: 54px; font-size: 16px; padding: 0 22px; }
+.btn-block { width: 100%; }
+.btn-primary { background: var(--signal); color: var(--signal-ink); }
+.btn-ghost { background: var(--wash); color: var(--ink); }
+.btn-kakao { background: var(--kakao); color: var(--kakao-ink); }
+
+/* hero */
+.hero { padding: 36px 16px 32px; background: var(--ink); color: #fff; }
+.hero-compact { padding: 28px 16px 26px; }
+.eyebrow { margin: 0 0 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: #ffb59c; }
+.hero h1 { font-size: 30px; font-weight: 800; }
+.hero h1 em { font-style: normal; color: var(--signal); }
+.hero-lead { margin: 14px 0 22px; color: #c9d6df; font-size: 15px; }
+.hero-actions { display: grid; gap: 10px; }
+.hero .btn-ghost { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.carrier-row { display: flex; gap: 8px; list-style: none; margin: 22px 0 0; padding: 0; flex-wrap: wrap; }
+.carrier-row li { font-size: 12px; padding: 5px 10px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; color: #dbe5ec; }
+
+/* sections */
+.section { padding: 32px 16px; }
+.section-tint { background: var(--wash); }
+.section-title { font-size: 21px; font-weight: 800; margin-bottom: 16px; }
+
+.card-list { display: grid; gap: 12px; }
+.product-card {
+  display: grid; gap: 4px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius);
+  text-decoration: none; background: var(--paper); position: relative;
+}
+.card-index { position: absolute; top: 16px; right: 18px; font-size: 13px; font-weight: 800; color: var(--line); }
+.card-label { font-size: 12px; font-weight: 700; color: var(--signal); }
+.card-title { font-size: 18px; font-weight: 800; }
+.card-lead { font-size: 14px; color: var(--ink-2); }
+.card-more { margin-top: 6px; font-size: 14px; font-weight: 700; }
+
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; display: grid; gap: 14px; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 36px 1fr; column-gap: 12px; }
+.steps li::before {
+  content: counter(step); grid-row: span 2; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--ink); color: #fff; font-weight: 800; display: grid; place-items: center;
+}
+.steps strong { font-size: 16px; }
+.steps span { font-size: 14px; color: var(--ink-2); }
+
+.notice-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.notice-list li { position: relative; padding: 12px 14px 12px 34px; background: var(--wash); border-radius: 10px; font-size: 14px; color: var(--ink-2); }
+.notice-list li::before { content: '!'; position: absolute; left: 12px; top: 12px; width: 16px; height: 16px; border-radius: 50%; background: var(--warn); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; line-height: 1; }
+
+.tag-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.tag-list li { padding: 8px 12px; border-radius: 999px; background: var(--signal-soft); color: #9a3412; font-size: 14px; font-weight: 600; }
+.option-list { margin: 0; display: grid; gap: 10px; }
+.option-list div { padding: 14px 16px; background: var(--paper); border-radius: 12px; border: 1px solid var(--line); }
+.option-list dt { font-weight: 800; }
+.option-list dd { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
+.price-note { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+
+/* footer & sticky cta */
+.site-footer { padding: 28px 16px 36px; background: #0b1f2d; color: #9fb2c0; font-size: 13px; }
+.site-footer p { margin: 0 0 6px; }
+.footer-brand { font-weight: 800; letter-spacing: 0.08em; color: #fff; }
+.footer-links { display: flex; gap: 14px; margin-top: 12px !important; }
+.footer-muted { color: #6f8494; }
+.sticky-cta {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid var(--line);
+}
+
+/* consult form */
+.consult-form { display: grid; gap: 16px; }
+.consult-form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; }
+.form-banner { display: grid; gap: 8px; padding: 16px; border-radius: var(--radius); background: var(--signal-soft); border: 1px solid #ffd4c4; }
+.form-banner strong { font-size: 16px; }
+.form-banner span { font-size: 14px; color: var(--ink-2); }
+.field { display: grid; gap: 6px; font-size: 14px; font-weight: 700; }
+.field em { font-style: normal; font-weight: 400; color: var(--muted); }
+.field input, .field select, .note-input {
+  width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px;
+  font: inherit; font-size: 16px; font-weight: 400; color: var(--ink); background: #fff;
+}
+.note-input { padding: 12px 14px; }
+.field-fixed {
+  margin: 0; min-height: 48px; display: flex; align-items: center; padding: 0 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--wash);
+  font-size: 16px; font-weight: 700; color: var(--ink);
+}
+fieldset:disabled .field input, fieldset:disabled .field select { background: var(--wash); }
+.consent-box { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.check input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--signal); }
+.consent-box details { font-size: 13px; color: var(--muted); padding-left: 30px; }
+.consent-box details p { margin: 4px 0; }
+.form-result { padding: 12px; border-radius: 10px; background: var(--wash); font-size: 14px; }
+
+/* admin */
+.admin { min-height: 100vh; background: var(--wash); padding-bottom: 24px; }
+.admin-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--ink); color: #fff; }
+.mock-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #fde68a; color: #713f12; }
+.admin-main { padding: 14px 16px; display: grid; gap: 14px; }
+.admin-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.admin-kpis div { background: #fff; border-radius: 12px; padding: 12px; display: grid; }
+.admin-kpis b { font-size: 24px; }
+.admin-kpis span { font-size: 12px; color: var(--muted); }
+.filter-row { display: flex; gap: 6px; overflow-x: auto; }
+.chip { flex: none; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; }
+.chip-on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.lead-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.lead-row { background: #fff; border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 4px; border: 2px solid transparent; }
+.lead-row-on { border-color: var(--signal); }
+.lead-main { display: flex; gap: 10px; align-items: baseline; }
+.lead-name { font-weight: 800; }
+.lead-phone { font-size: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.lead-meta { grid-column: 1; display: flex; gap: 8px; font-size: 12px; color: var(--muted); }
+.status { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--wash); }
+.status-new { background: var(--signal-soft); color: #9a3412; }
+.status-contacting { background: #e0f2fe; color: #075985; }
+.status-no_answer { background: #fef3c7; color: #92400e; }
+.status-consulted { background: #ede9fe; color: #5b21b6; }
+.status-converted { background: #dcfce7; color: #166534; }
+.status-declined { background: #f1f5f9; color: #475569; }
+.lead-detail { background: #fff; border-radius: var(--radius); padding: 16px; display: grid; gap: 12px; }
+.lead-detail h2 { font-size: 18px; }
+.lead-detail h3 { font-size: 15px; }
+.detail-sub { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+.reveal { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--wash); }
+.hint { margin: 0; font-size: 12px; color: var(--muted); }
+.notes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.notes li { display: grid; padding: 10px 12px; border-left: 3px solid var(--signal); background: var(--wash); border-radius: 0 8px 8px 0; }
+.notes span { font-size: 12px; color: var(--muted); }
+.admin-locked { padding: 48px 16px; text-align: center; }
+
+/* login */
+.login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--ink); }
+.login-card { width: 100%; max-width: 380px; background: #fff; border-radius: 18px; padding: 24px; display: grid; gap: 14px; }
+.login-card h1 { font-size: 22px; }
+.login-card fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; }
+.login-steps { display: flex; gap: 8px; list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
+.login-steps li { flex: 1; padding-top: 6px; border-top: 3px solid var(--line); }
+.login-steps li.on { border-color: var(--signal); color: var(--ink); font-weight: 700; }
+
+@media (min-width: 720px) {
+  .section, .hero { padding-left: max(16px, calc(50% - 360px)); padding-right: max(16px, calc(50% - 360px)); }
+  .hero-actions { grid-template-columns: auto auto; justify-content: start; }
+  .card-list { grid-template-columns: repeat(3, 1fr); }
+  .sticky-cta { display: none; }
+  body { padding-bottom: 0; }
+  .admin-main { max-width: 760px; margin: 0 auto; }
+}
+body:has(.admin), body:has(.login) { padding-bottom: 0; }
+</style></head><head></head><body><header class="site-header"><a href="/" class="brand" aria-label="FIDEON 홈"><span class="brand-mark" aria-hidden="true"></span>FIDEON</a><nav class="site-nav" aria-label="상품"><a href="/products/internet-tv">인터넷 + TV</a></nav></header><main><section class="hero hero-compact"><p class="eyebrow">인터넷 + TV</p><h1>인터넷과 TV를 한 번에</h1><p class="hero-lead">집에서 쓰는 인터넷 속도와 보고 싶은 채널 구성을 먼저 듣고, 통신사별 결합 조건을 비교해 드립니다.</p><a class="btn btn-primary btn-lg" href="/consult?interest=internet_tv">이 상품으로 상담 신청</a></section><section class="section"><h2 class="section-title">이런 분께 맞아요</h2><ul class="tag-list"><li>이사·신규 설치를 앞둔 집</li><li>약정 만료가 다가오는 집</li><li>TV 채널 구성을 바꾸고 싶은 집</li></ul></section><section class="section section-tint"><h2 class="section-title">상담에서 함께 정하는 것</h2><dl class="option-list"><div><dt>인터넷 속도</dt><dd>100M · 500M · 1G 중 사용 기기 수와 생활 패턴에 맞춰 상담</dd></div><div><dt>TV 구성</dt><dd>기본 채널부터 키즈·스포츠·영화 중심 구성까지</dd></div><div><dt>셋톱박스·공유기</dt><dd>설치 대수와 와이파이 범위를 함께 확인</dd></div></dl><p class="price-note">요금·사은품은 화면에 게시하지 않고 상담 때 확정 조건으로 안내합니다.</p></section><section class="section"><h2 class="section-title">가입 전 확인 사항</h2><ul class="notice-list"><li>요금과 사은품은 상담 시점의 확정 조건으로 안내합니다.</li><li>약정 기간 안에 해지하면 통신사 약관에 따른 위약금이 생길 수 있습니다.</li><li>통신사를 옮기는 경우 기존 회선 유지 조건은 상품마다 다르며 상담 때 안내합니다.</li></ul></section></main><footer class="site-footer"><p class="footer-brand">FIDEON</p><p>인터넷 + TV 가입 상담 및 접수 대행 서비스입니다.</p><p>요금·사은품·설치 조건은 상담 시점에 통신사 확정 조건으로 안내합니다.</p><p class="footer-links"><a href="/privacy">개인정보처리방침</a></p><p class="footer-muted">사업자 정보는 개인정보 처리 주체 확정 후 게시합니다.</p></footer><div class="sticky-cta" role="region" aria-label="상담 바로가기"><a class="btn btn-kakao" href="#kakao-channel">카카오톡 상담</a><a class="btn btn-primary" href="/consult">상담 신청</a></div></body></html>

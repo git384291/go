@@ -13,6 +13,22 @@ import Consult from '../../src/app/consult/page';
 import Admin from '../../src/app/admin/page';
 import AdminLogin from '../../src/app/admin/login/page';
 
+// PHASE 1: 고객 화면에 나오면 안 되는 예약 상품 흔적(관리자 화면은 내부 가상 데이터라 제외)
+const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/products/mobile', '집전화', 'CCTV', 'cctv',
+  'internet_phone', 'cctv_security', 'internet_only', 'value="other"', '동판'];
+const PUBLIC_PAGES = new Set(['01-home', '02-internet-tv', '05-consult']);
+
+/** 예약 상품 상세는 notFound()로 404가 나야 한다(Next.js 15 표식) */
+function expect404(label: string, render: () => unknown): string {
+  try {
+    renderToStaticMarkup(render() as ReactElement);
+  } catch (e) {
+    const digest = String((e as { digest?: string }).digest ?? (e as Error).message);
+    return `${label}\t404=${digest.includes('404')}`;
+  }
+  return `${label}\t404=false(렌더링됨)`;
+}
+
 const OUT = process.argv[2] ?? 'test-results/screens';
 
 async function main() {
@@ -20,12 +36,16 @@ async function main() {
   const pages: [string, ReactElement][] = [
     ['01-home', <Home />],
     ['02-internet-tv', <InternetTv />],
-    ['03-internet-phone', <InternetPhone />],
-    ['04-cctv-security', <Cctv />],
-    ['05-consult', await Consult({ searchParams: Promise.resolve({ interest: 'internet_tv' }) })],
+    ['05-consult', await Consult()],
     ['06-admin-login', <AdminLogin />],
     ['07-admin-leads', <Admin />],
   ];
+  const routeChecks = [
+    expect404('03-internet-phone', () => <InternetPhone />),
+    expect404('04-cctv-security', () => <Cctv />),
+  ];
+  // 상담 페이지는 주소의 ?interest= 값을 읽지 않는다(실제 주소 주입은 tests/e2e/mobile-real.ts 09번이 서버에서 확인).
+  // 브라우저로 내려가는 폼 코드에 예약 상품 이름이 없는지는 tests/unit/catalog.test.ts G10이 확인한다.
   await mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -42,13 +62,23 @@ async function main() {
     // 전체 페이지 캡처에서는 하단 고정 버튼이 중간에 겹치지 않도록 문서 끝에 둔다
     await page.addStyleTag({ content: '.sticky-cta{position:static}' });
     await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
-    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}`);
+    const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => html.includes(f)) : [];
+    const fixed = name.startsWith('05')
+      ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
+    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}${fixed}`);
     await page.close();
   }
   await browser.close();
+  report.push(...routeChecks);
   await writeFile(`${OUT}/checks.txt`, report.join('\n') + '\n');
   console.log(report.join('\n'));
-  if (report.some((r) => r.includes('가로 넘침=true') || !r.endsWith('금액 표기=0'))) process.exit(1);
+  const bad = report.filter((r) =>
+    r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r)
+    || /(404|고정)=false/.test(r));
+  if (bad.length) {
+    console.error('PREVIEW FAIL\n' + bad.join('\n'));
+    process.exit(1);
+  }
 }
 
 main().catch((e) => {

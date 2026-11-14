@@ -1,11 +1,11 @@
 import { PageShell } from '@/components/Site';
-import { CARRIERS, PRODUCTS } from '@/content/products';
+import { ACTIVE_PRODUCTS, CARRIERS } from '@/content/products';
 
 export default function HomePage() {
   return (
     <PageShell>
       <section className="hero">
-        <p className="eyebrow">인터넷 · TV · 집전화 · CCTV</p>
+        <p className="eyebrow">인터넷 + TV 결합</p>
         <h1>
           통신사 세 곳의 조건,
           <br />
@@ -28,7 +28,7 @@ export default function HomePage() {
       <section id="products" className="section">
         <h2 className="section-title">무엇을 알아보고 계세요?</h2>
         <div className="card-list">
-          {PRODUCTS.map((p, i) => (
+          {ACTIVE_PRODUCTS.map((p, i) => (
             <a key={p.slug} className="product-card" href={`/products/${p.slug}`}>
               <span className="card-index">0{i + 1}</span>
               <span className="card-label">{p.label}</span>
@@ -45,7 +45,7 @@ export default function HomePage() {
         <ol className="steps">
           <li>
             <strong>상담 신청</strong>
-            <span>이름과 연락처, 관심 상품만 남기면 됩니다. 주소는 이 단계에서 받지 않습니다.</span>
+            <span>이름과 연락처만 남기면 됩니다. 주소는 이 단계에서 받지 않습니다.</span>
           </li>
           <li>
             <strong>조건 비교 안내</strong>

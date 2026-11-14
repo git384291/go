@@ -1,28 +1,25 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { KAKAO_CHANNEL_URL } from '@/content/products';
 
 // REV-004: 실제 고객정보 수집은 재검수 통과 전까지 비활성. 화면만 제공한다.
 const FORM_ENABLED = process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED === 'true';
 const PRIVACY_VERSION = process.env.NEXT_PUBLIC_PRIVACY_POLICY_VERSION ?? '';
 
-const INTEREST_OPTIONS = [
-  { value: 'internet_tv', label: '인터넷 + TV' },
-  { value: 'internet_phone', label: '인터넷 + 집전화' },
-  { value: 'internet_only', label: '인터넷만' },
-  { value: 'cctv_security', label: 'CCTV · 보안' },
-  { value: 'other', label: '잘 모르겠어요' },
-];
+// PHASE 1: 이 파일은 브라우저로 내려가는 코드다. 예약 상품의 이름·값을 여기에 두지 않는다.
+// 선택지는 서버(상담 페이지)가 활성 상품만 골라 넘긴다. 예약 상품을 포함한 전체 선택지는
+// src/content/catalog.ts(서버 쪽)에 그대로 보존되어 있다.
+export type ConsultOption = { value: string; label: string };
 
-export function ConsultForm({ defaultInterest = 'internet_tv' }: { defaultInterest?: string }) {
+export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string }) {
+  const hasOption = options.length > 0;
   const [consent, setConsent] = useState(false);
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [message, setMessage] = useState('');
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!FORM_ENABLED || !consent) return;
+    if (!FORM_ENABLED || !consent || !hasOption) return;
     const f = new FormData(e.currentTarget);
     setState('sending');
     const res = await fetch('/api/leads', {
@@ -55,7 +52,7 @@ export function ConsultForm({ defaultInterest = 'internet_tv' }: { defaultIntere
         <div className="form-banner" role="status">
           <strong>온라인 신청 준비 중</strong>
           <span>지금은 카카오톡으로 상담을 도와드려요. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
-          <a className="btn btn-kakao" href={KAKAO_CHANNEL_URL}>카카오톡으로 상담하기</a>
+          <a className="btn btn-kakao" href={kakaoUrl}>카카오톡으로 상담하기</a>
         </div>
       )}
 
@@ -68,14 +65,22 @@ export function ConsultForm({ defaultInterest = 'internet_tv' }: { defaultIntere
           <span>휴대폰 번호</span>
           <input name="phone" type="tel" inputMode="numeric" autoComplete="tel" maxLength={13} placeholder="010-0000-0000" required />
         </label>
-        <label className="field">
-          <span>관심 상품</span>
-          <select name="interest" defaultValue={defaultInterest}>
-            {INTEREST_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </label>
+        {options.length > 1 ? (
+          <label className="field">
+            <span>관심 상품</span>
+            <select name="interest" defaultValue={options[0].value}>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : hasOption ? (
+          <div className="field">
+            <span>상담 상품</span>
+            <p className="field-fixed">{options[0].label}</p>
+            <input type="hidden" name="interest" value={options[0].value} />
+          </div>
+        ) : null}
         <label className="field">
           <span>연락 받기 좋은 시간 <em>(선택)</em></span>
           <input name="contactTime" maxLength={50} placeholder="예: 평일 저녁 7시 이후" />
@@ -99,7 +104,7 @@ export function ConsultForm({ defaultInterest = 'internet_tv' }: { defaultIntere
           </label>
         </div>
 
-        <button className="btn btn-primary btn-block" type="submit" disabled={!consent}>
+        <button className="btn btn-primary btn-block" type="submit" disabled={!consent || !hasOption}>
           {state === 'sending' ? '보내는 중…' : '상담 신청하기'}
         </button>
       </fieldset>

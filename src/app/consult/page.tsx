@@ -1,10 +1,10 @@
 import { PageShell } from '@/components/Site';
 import { ConsultForm } from '@/components/ConsultForm';
+import { CATALOG, fixedConsultInterest } from '@/content/catalog';
+import { KAKAO_CHANNEL_URL } from '@/content/products';
 
-const ALLOWED = new Set(['internet_tv', 'internet_phone', 'internet_only', 'cctv_security', 'other']);
-
-export default async function ConsultPage({ searchParams }: { searchParams?: Promise<{ interest?: string }> }) {
-  const interest = (await searchParams)?.interest;
+// PHASE 1: 상담 대상은 인터넷+TV로 고정한다. 주소의 ?interest= 값은 읽지 않는다(예약 상품으로 바꿀 수 없음).
+export default async function ConsultPage() {
   return (
     <PageShell>
       <section className="hero hero-compact">
@@ -13,7 +13,8 @@ export default async function ConsultPage({ searchParams }: { searchParams?: Pro
         <p className="hero-lead">통신사별 확정 조건을 비교해 원하시는 시간에 안내해 드립니다.</p>
       </section>
       <section className="section">
-        <ConsultForm defaultInterest={interest && ALLOWED.has(interest) ? interest : 'internet_tv'} />
+        {/* 활성 상품만 넘긴다(현재 인터넷+TV 하나). 예약 상품 이름은 브라우저 코드로 내려가지 않는다 */}
+        <ConsultForm options={[{ value: fixedConsultInterest(), label: CATALOG[fixedConsultInterest()].label }]} kakaoUrl={KAKAO_CHANNEL_URL} />
       </section>
     </PageShell>
   );

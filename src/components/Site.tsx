@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { KAKAO_CHANNEL_URL } from '@/content/products';
+import { ACTIVE_PRODUCTS, KAKAO_CHANNEL_URL } from '@/content/products';
 
 export function SiteHeader() {
   return (
@@ -9,9 +9,10 @@ export function SiteHeader() {
         FIDEON
       </a>
       <nav className="site-nav" aria-label="상품">
-        <a href="/products/internet-tv">인터넷·TV</a>
-        <a href="/products/internet-phone">집전화</a>
-        <a href="/products/cctv-security">CCTV</a>
+        {/* PHASE 1: 활성 상품만 메뉴에 표시 */}
+        {ACTIVE_PRODUCTS.map((p) => (
+          <a key={p.slug} href={`/products/${p.slug}`}>{p.label}</a>
+        ))}
       </nav>
     </header>
   );
@@ -21,7 +22,7 @@ export function SiteFooter() {
   return (
     <footer className="site-footer">
       <p className="footer-brand">FIDEON</p>
-      <p>인터넷·TV·집전화·CCTV 가입 상담 및 접수 대행 서비스입니다.</p>
+      <p>인터넷 + TV 가입 상담 및 접수 대행 서비스입니다.</p>
       <p>요금·사은품·설치 조건은 상담 시점에 통신사 확정 조건으로 안내합니다.</p>
       <p className="footer-links">
         <a href="/privacy">개인정보처리방침</a>

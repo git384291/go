@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { maskName, normalizeMobile, type PiiCrypto } from '../security/piiCrypto';
 import { signToken, type SigningKey } from '../security/token';
+import { isActiveInterest } from '../../content/catalog';
 
 export const INTERESTS = ['internet_tv', 'internet_phone', 'internet_only', 'cctv_security', 'other'] as const;
 
@@ -81,6 +82,8 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
     throw new LeadRejected(consentIssue ? 'CONSENT_REQUIRED' : 'INVALID_INPUT');
   }
   const input = parsed.data;
+  // PHASE 1: 형식상 허용 값이어도 예약 상품이면 거부(DB api.create_lead도 별도로 다시 검사)
+  if (!isActiveInterest(input.interest)) throw new LeadRejected('PRODUCT_NOT_ACTIVE');
   if (input.privacyVersion !== ctx.currentPrivacyVersion) throw new LeadRejected('CONSENT_VERSION_MISMATCH');
 
   let phone: string;

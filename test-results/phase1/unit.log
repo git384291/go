@@ -1,0 +1,220 @@
+TAP version 13
+# Subtest: G1 활성 상품은 인터넷+TV 하나, 상담 대상도 인터넷+TV 고정
+ok 1 - G1 활성 상품은 인터넷+TV 하나, 상담 대상도 인터넷+TV 고정
+  ---
+  duration_ms: 1.377229
+  type: 'test'
+  ...
+# Subtest: G2 집전화·CCTV·인터넷만·기타·휴대폰은 예약, 동판 키는 없음
+ok 2 - G2 집전화·CCTV·인터넷만·기타·휴대폰은 예약, 동판 키는 없음
+  ---
+  duration_ms: 0.281179
+  type: 'test'
+  ...
+# Subtest: G3 상태값은 실행 중 바꿀 수 없다(동결 객체)
+ok 3 - G3 상태값은 실행 중 바꿀 수 없다(동결 객체)
+  ---
+  duration_ms: 0.35272
+  type: 'test'
+  ...
+# Subtest: G4 알 수 없는 값·변형 값·프로토타입 키는 모두 비활성
+ok 4 - G4 알 수 없는 값·변형 값·프로토타입 키는 모두 비활성
+  ---
+  duration_ms: 0.232761
+  type: 'test'
+  ...
+# Subtest: G5 상태값은 환경변수로 바꿀 수 없다(catalog.ts에 process.env 없음)
+ok 5 - G5 상태값은 환경변수로 바꿀 수 없다(catalog.ts에 process.env 없음)
+  ---
+  duration_ms: 0.137775
+  type: 'test'
+  ...
+# Subtest: G6 서버 접수: 예약 상품은 PRODUCT_NOT_ACTIVE, 인터넷+TV는 정상
+ok 6 - G6 서버 접수: 예약 상품은 PRODUCT_NOT_ACTIVE, 인터넷+TV는 정상
+  ---
+  duration_ms: 3.917049
+  type: 'test'
+  ...
+# Subtest: G7 화면 노출 상품은 인터넷+TV 하나, 기존 상품 문구는 보존
+ok 7 - G7 화면 노출 상품은 인터넷+TV 하나, 기존 상품 문구는 보존
+  ---
+  duration_ms: 0.280814
+  type: 'test'
+  ...
+# Subtest: G8 코드 기준값 = DB 기준값(0004 마이그레이션) — 불일치하면 실패
+ok 8 - G8 코드 기준값 = DB 기준값(0004 마이그레이션) — 불일치하면 실패
+  ---
+  duration_ms: 0.661014
+  type: 'test'
+  ...
+# Subtest: G9 기존 마이그레이션의 상담 신청 함수 본문은 그대로이고, 0004는 상품 확인 한 단계만 추가
+ok 9 - G9 기존 마이그레이션의 상담 신청 함수 본문은 그대로이고, 0004는 상품 확인 한 단계만 추가
+  ---
+  duration_ms: 0.615679
+  type: 'test'
+  ...
+# Subtest: G10 브라우저로 내려가는 코드(use client)에는 예약 상품 이름·값이 없고 상품 목록 모듈을 불러오지 않는다
+ok 10 - G10 브라우저로 내려가는 코드(use client)에는 예약 상품 이름·값이 없고 상품 목록 모듈을 불러오지 않는다
+  ---
+  duration_ms: 1.265042
+  type: 'test'
+  ...
+# Subtest: T20 Vercel: x-real-ip(Vercel이 설정)만 사용
+ok 11 - T20 Vercel: x-real-ip(Vercel이 설정)만 사용
+  ---
+  duration_ms: 0.850651
+  type: 'test'
+  ...
+# Subtest: T21 Vercel: x-real-ip가 없으면 x-forwarded-for로 대체하지 않고 공용 버킷
+ok 12 - T21 Vercel: x-real-ip가 없으면 x-forwarded-for로 대체하지 않고 공용 버킷
+  ---
+  duration_ms: 0.173863
+  type: 'test'
+  ...
+# Subtest: T22 로컬: 요청자가 x-forwarded-for 앞부분에 넣은 가짜 IP는 쓰지 않는다
+ok 13 - T22 로컬: 요청자가 x-forwarded-for 앞부분에 넣은 가짜 IP는 쓰지 않는다
+  ---
+  duration_ms: 0.120603
+  type: 'test'
+  ...
+# Subtest: T23 형식이 아니면 공용 버킷(0.0.0.0)으로 안전하게 실패
+ok 14 - T23 형식이 아니면 공용 버킷(0.0.0.0)으로 안전하게 실패
+  ---
+  duration_ms: 0.151973
+  type: 'test'
+  ...
+# Subtest: T24 IPv6 허용
+ok 15 - T24 IPv6 허용
+  ---
+  duration_ms: 0.141636
+  type: 'test'
+  ...
+# Subtest: T25 IP 진단 경로는 Vercel 검수 배포에서 명시적으로 켰을 때만 열린다
+ok 16 - T25 IP 진단 경로는 Vercel 검수 배포에서 명시적으로 켰을 때만 열린다
+  ---
+  duration_ms: 0.110307
+  type: 'test'
+  ...
+# Subtest: I1 정상 신청: DB로 가는 값에 이름·전화번호 평문이 없다
+ok 17 - I1 정상 신청: DB로 가는 값에 이름·전화번호 평문이 없다
+  ---
+  duration_ms: 5.110652
+  type: 'test'
+  ...
+# Subtest: I2 서명은 DB로 보내는 모든 필드를 덮는다
+ok 18 - I2 서명은 DB로 보내는 모든 필드를 덮는다
+  ---
+  duration_ms: 0.913256
+  type: 'test'
+  ...
+# Subtest: I3 동의하지 않으면 거부(서버 검증)
+ok 19 - I3 동의하지 않으면 거부(서버 검증)
+  ---
+  duration_ms: 1.074374
+  type: 'test'
+  ...
+# Subtest: I4 화면의 처리방침 버전이 서버 설정과 다르면 거부
+ok 20 - I4 화면의 처리방침 버전이 서버 설정과 다르면 거부
+  ---
+  duration_ms: 0.160726
+  type: 'test'
+  ...
+# Subtest: I5 브라우저가 암호문·HMAC·리드 ID를 직접 넣으면 거부(허용 필드 외 금지)
+ok 21 - I5 브라우저가 암호문·HMAC·리드 ID를 직접 넣으면 거부(허용 필드 외 금지)
+  ---
+  duration_ms: 0.377656
+  type: 'test'
+  ...
+# Subtest: I6 형식 오류 거부
+ok 22 - I6 형식 오류 거부
+  ---
+  duration_ms: 0.54508
+  type: 'test'
+  ...
+# Subtest: I7 수집 차단 스위치: 기본·운영·검수·원격 DB에서는 꺼짐
+ok 23 - I7 수집 차단 스위치: 기본·운영·검수·원격 DB에서는 꺼짐
+  ---
+  duration_ms: 0.221583
+  type: 'test'
+  ...
+# Subtest: T1 서명 토큰: 같은 입력이면 같은 토큰, 형식은 <kid>.<exp>.<64hex>
+ok 24 - T1 서명 토큰: 같은 입력이면 같은 토큰, 형식은 <kid>.<exp>.<64hex>
+  ---
+  duration_ms: 1.547639
+  type: 'test'
+  ...
+# Subtest: T2 서명 토큰: 필드 경계를 옮겨도 같은 서명이 나오지 않는다
+ok 25 - T2 서명 토큰: 필드 경계를 옮겨도 같은 서명이 나오지 않는다
+  ---
+  duration_ms: 0.309341
+  type: 'test'
+  ...
+# Subtest: T3 서명 토큰: 용도가 다르면 다른 서명
+ok 26 - T3 서명 토큰: 용도가 다르면 다른 서명
+  ---
+  duration_ms: 0.157741
+  type: 'test'
+  ...
+# Subtest: T4 서명 키가 32바이트 미만이면 거부
+ok 27 - T4 서명 키가 32바이트 미만이면 거부
+  ---
+  duration_ms: 0.271133
+  type: 'test'
+  ...
+# Subtest: T5 암호화 왕복, 매번 다른 암호문, 현재 키 버전 표시
+ok 28 - T5 암호화 왕복, 매번 다른 암호문, 현재 키 버전 표시
+  ---
+  duration_ms: 1.076037
+  type: 'test'
+  ...
+# Subtest: T6 이전 키 버전 암호문도 복호화
+ok 29 - T6 이전 키 버전 암호문도 복호화
+  ---
+  duration_ms: 0.315886
+  type: 'test'
+  ...
+# Subtest: T7 변조된 암호문은 인증 태그 오류
+ok 30 - T7 변조된 암호문은 인증 태그 오류
+  ---
+  duration_ms: 0.237315
+  type: 'test'
+  ...
+# Subtest: T8 전화번호 정규화와 HMAC: 표기가 달라도 같은 해시
+ok 31 - T8 전화번호 정규화와 HMAC: 표기가 달라도 같은 해시
+  ---
+  duration_ms: 0.469962
+  type: 'test'
+  ...
+# Subtest: T9 이름 마스킹
+ok 32 - T9 이름 마스킹
+  ---
+  duration_ms: 0.347237
+  type: 'test'
+  ...
+# Subtest: T10 관리자 인증: 2단계 인증(aal2) 아니면 거부
+ok 33 - T10 관리자 인증: 2단계 인증(aal2) 아니면 거부
+  ---
+  duration_ms: 0.398252
+  type: 'test'
+  ...
+# Subtest: T11 관리자 인증: 사용자·세션 ID 없거나 형식 오류면 거부
+ok 34 - T11 관리자 인증: 사용자·세션 ID 없거나 형식 오류면 거부
+  ---
+  duration_ms: 0.272871
+  type: 'test'
+  ...
+# Subtest: T12 관리자 인증: 사용자와 세션을 함께 서명, 세션 열기 토큰과 일반 토큰은 서로 다르다
+ok 35 - T12 관리자 인증: 사용자와 세션을 함께 서명, 세션 열기 토큰과 일반 토큰은 서로 다르다
+  ---
+  duration_ms: 0.255999
+  type: 'test'
+  ...
+1..35
+# tests 35
+# suites 0
+# pass 35
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 592.356492

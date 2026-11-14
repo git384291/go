@@ -51,6 +51,7 @@ run db/tests/10_grants.sql > "$LOG_DIR/db-grants-report.txt"
 cat "$LOG_DIR/db-grants-report.txt"
 run db/tests/20_staff_auth.sql >/dev/null
 run db/tests/30_leads_pii.sql >/dev/null
+run db/tests/40_product_scope.sql >/dev/null   # PHASE 1 상품 상태·2인 승인
 
 echo "== TypeScript ↔ DB signature parity"
 tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"
