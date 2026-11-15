@@ -9,3 +9,9 @@ test-results/restore/
 *.tsbuildinfo
 next-env.d.ts
 verify-results/
+
+# PHASE 1 최종 보완: 자동 생성 시험 결과물(로그·HTML·스크린샷)은 저장소에 넣지 않는다.
+#   - CI는 actions/upload-artifact로 test-results/ 전체를 실행마다 보관한다.
+#   - Mac 검증(scripts/verify-mac.sh)은 verify-results/(위에서 이미 제외)에 남긴다.
+#   - 이미 추적 중인 이전 단계 증빙(test-results/screens, rev-005, *.txt)은 이 규칙과 관계없이 그대로 유지된다.
+test-results/**

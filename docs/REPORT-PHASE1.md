@@ -13,7 +13,7 @@
 | 신규 | `db/tests/40_product_scope.sql` | DB 시험 46건(PS1~PS46) |
 | 신규 | `tests/unit/catalog.test.ts` | 단위 시험 10건(G1~G10) |
 | 신규 | `scripts/preview/next-navigation-stub.cjs` | Next.js 미설치 환경의 미리보기 전용 404 대체 모듈 |
-| 신규 | `docs/REPORT-PHASE1.md`, `test-results/phase1/*` | 이 보고서, 시험 기록·화면 캡처 |
+| 신규 | `docs/REPORT-PHASE1.md`, `test-results/phase1/*` | 이 보고서, 시험 기록·화면 캡처 (최종 검수 보완에서 저장소에서 제외 — 같은 결과물은 CI artifact `test-results`와 Mac `verify-results/`에 남음) |
 | 수정 | `src/content/products.ts` | `ACTIVE_PRODUCTS`, `isActiveSlug` 추가(상품 문구 3종 모두 보존) |
 | 수정 | `src/app/page.tsx`, `src/components/Site.tsx`, `src/app/layout.tsx` | 홈·메뉴·푸터·검색 설명에서 예약 상품 제거 |
 | 수정 | `src/components/ProductPage.tsx` | 예약 상품이면 `notFound()` → 404 |
