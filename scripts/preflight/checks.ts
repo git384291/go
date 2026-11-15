@@ -78,7 +78,7 @@ export function runChecks(env: Env, files: { layoutSource: string }): Check[] {
   }
   if (has(env, 'FIDEON_STAFF_SIGNING_KEY')) {
     let ok = true;
-    try { signingKeyFromEnv('staff', env); } catch { ok = false; }
+    try { signingKeyFromEnv('staff', env as NodeJS.ProcessEnv); } catch { ok = false; } // 형식만 확인(Next가 ProcessEnv에 NODE_ENV를 필수로 추가)
     add({ id: 'A3', area: '인증', name: '직원 서명 키 형식', status: ok ? 'OK' : 'INVALID', note: ok ? '<key_id>:<base64 32바이트 이상> 형식(값 미표시). DB server_keys와 일치 여부는 미확인' : '형식 오류' });
   }
   if (has(env, 'NEXT_PUBLIC_SUPABASE_URL')) {
