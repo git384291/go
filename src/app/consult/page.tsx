@@ -3,6 +3,13 @@ import { ConsultForm } from '@/components/ConsultForm';
 import { CATALOG, fixedConsultInterest } from '@/content/catalog';
 import { KAKAO_CHANNEL_URL } from '@/content/products';
 import { EXTERNAL_CONSULT_ENABLED, ONLINE_CONSULT_NOTICE } from '@/content/channels';
+import type { Metadata } from 'next';
+import { pageMetadata } from '@/content/seo';
+
+// 공식 주소 확정 전에는 canonical·OG URL 없음, 검색 차단은 layout이 유지
+export function generateMetadata(): Metadata {
+  return pageMetadata('consult');
+}
 
 // PHASE 1: 상담 대상은 인터넷+TV로 고정한다. 주소의 ?interest= 값은 읽지 않는다(예약 상품으로 바꿀 수 없음).
 export default async function ConsultPage() {

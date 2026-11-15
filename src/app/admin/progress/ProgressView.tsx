@@ -30,7 +30,7 @@ export function ProgressView({ snapshot, now }: { snapshot: ProgressSnapshot; no
           <h2>검사</h2>
           <ul className="progress-checks">
             {snapshot.checks.map((c) => (
-              <li key={c.name}><span>{c.name}</span><b className={`check check-${mark(c.passed)}`}>{mark(c.passed)}</b></li>
+              <li key={c.name}><span>{c.name}</span><b className={`pcheck pcheck-${mark(c.passed)}`}>{mark(c.passed)}</b></li>
             ))}
           </ul>
         </section>
