@@ -54,13 +54,16 @@ jobs:
           prompt: |
             FIDEON Draft PR #1에 대한 읽기 전용 검토입니다.
             검토 커밋: ${{ github.event.pull_request.head.sha }}
-            docs/PHASE1-STATUS.md와 docs/OPEN-ISSUES.md를 먼저 읽으세요.
-            OI-002 관리자 로그인 → TOTP → openStaffSession 연결의 누락과
-            Supabase 개발 환경에서 필요한 검증을 코드 경로와 함께 한국어로 설명하세요.
+            docs/AUTH-SESSION-FOUNDATION.md와 docs/OPEN-ISSUES.md를 먼저 읽으세요.
+            이번 검토는 src/server/auth/staffSession.ts, requireStaff.ts,
+            tests/unit/staff-session.test.ts의 DB 인증·원자적 세션 등록 변경에 집중하세요.
+            DB 계약 확인은 db/migrations/0001_security.sql의 세션 함수 부분을 읽으세요.
+            읽기는 가능하면 묶어서 수행하세요. 실제 결함과 추가 검증 필요 사항을
+            코드 경로와 함께 한국어로 설명하세요. 미완료 로그인 UI 전체를 다시 조사하지 마세요.
             코드 변경, 커밋, push, main 병합, 운영 배포, PHASE 2 활성화,
             실제 고객정보 수집은 하지 마세요. 비밀값을 읽거나 출력하지 마세요.
             검토 결과와 검토한 커밋을 이 PR의 진행 댓글에 남기세요.
           claude_args: |
-            --max-turns 10
+            --max-turns 16
             --tools "Read,Glob,Grep"
             --disallowedTools "Bash,Edit,Write,NotebookEdit"
