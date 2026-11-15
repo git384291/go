@@ -63,7 +63,9 @@ jobs:
             코드 변경, 커밋, push, main 병합, 운영 배포, PHASE 2 활성화,
             실제 고객정보 수집은 하지 마세요. 비밀값을 읽거나 출력하지 마세요.
             검토 결과와 검토한 커밋을 이 PR의 진행 댓글에 남기세요.
+          # 보안: Claude Action은 실행 중 GitHub 토큰을 .git/config(원격 주소)에 둔다.
+          # 파일 읽기 도구로 .git을 읽지 못하게 막아, 저장소 내용에 섞인 지시로 토큰이 댓글에 옮겨지는 경로를 차단한다.
           claude_args: |
             --max-turns 16
             --tools "Read,Glob,Grep"
-            --disallowedTools "Bash,Edit,Write,NotebookEdit"
+            --disallowedTools "Bash,Edit,Write,NotebookEdit,Read(./.git/**),Read(./.git)"
