@@ -111,7 +111,7 @@ Claude 작업 환경(PostgreSQL 16, 로컬 유닉스 소켓 클러스터)에서 
 | ID | 위치 | 제안 |
 |---|---|---|
 | P-1 | 0001 `security.server_keys` 제약 | `purpose in ('staff','lead','login')`. 운영 키 생성·등록 절차 별도 승인 |
-| P-2 | `zz_grants` 4)항 | `grant select, insert, update on security.login_attempts to fideon_api`, `grant usage on sequence security.login_settle_seq`(identity 순번 포함) `to fideon_api` |
+| P-2 | `zz_grants` 4)항 | `grant select, insert, update on security.login_attempts to fideon_api`, `grant usage on sequence security.login_settle_seq to fideon_api`(identity 열 `created_seq`는 로컬 실행에서 별도 sequence 권한 없이 INSERT 권한만으로 동작) |
 | P-3 | `zz_grants` 7)항 | `grant execute on function api.login_attempt_reserve(text,text,text,text,text), api.login_attempt_settle(uuid,text,text) to app_public`, 보조 함수 4개 execute는 `fideon_api`에(E2 근거: 없으면 재적용 때 회수됨) |
 | P-4 | `catalog_audit` V5 `exec_allow` | (app_public, login_attempt_reserve), (app_public, login_attempt_settle) 추가(E1 근거). 함수 본문 고정이 필요하면 V13 `pinned_funcs`에 2개 추가하고 단위 시험 갱신 |
 | P-5 | 한도 상수 | 함수 상수 유지 또는 `core.settings`로 이동(변경 시 감사 대상) |
