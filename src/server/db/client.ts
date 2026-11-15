@@ -31,8 +31,15 @@ const ROLE_SQL = {
   staff: 'set local role app_staff',
 } as const;
 
-export async function withRole<T>(role: keyof typeof ROLE_SQL, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
-  return db().begin(async (tx) => {
+export type DbRole = keyof typeof ROLE_SQL;
+
+export async function withRole<T>(role: DbRole, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+  return withRoleOn(db(), role, fn);
+}
+
+/** withRole과 같은 트랜잭션 배선. 통합 시험이 로컬 가상 DB 연결을 넘길 수 있도록 분리했다. */
+export async function withRoleOn<T>(sql: postgres.Sql, role: DbRole, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+  return sql.begin(async (tx) => {
     await tx.unsafe(ROLE_SQL[role]); // 고정 문자열만 사용
     await tx.unsafe("set local statement_timeout = '5s'");
     await tx.unsafe("set local idle_in_transaction_session_timeout = '10s'");

@@ -17,6 +17,16 @@ export type StaffSessionStore = {
   whoami: (auth: StaffAuth) => Promise<unknown>;
 };
 
+/** 로그아웃: DB 자체 세션을 폐기한다. 이미 폐기·만료된 세션이면 403(FORBIDDEN). */
+export async function revokeStaffSession(
+  claims: VerifiedClaims,
+  key: SigningKey,
+  revoke: (auth: StaffAuth) => Promise<unknown>,
+): Promise<void> {
+  const auth = staffAssertion(claims, key);
+  await databaseCall(() => revoke(auth));
+}
+
 function identity(auth: StaffAuth, rows: unknown): StaffIdentity {
   if (!Array.isArray(rows) || rows.length !== 1) throw new StaffAuthError(403, 'FORBIDDEN');
   const row = rows[0] as { user_id?: unknown; role?: unknown } | null;

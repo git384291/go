@@ -398,6 +398,26 @@ fi
 SQL "drop table core.commissions_probe, core.settlement_ledger_probe"
 rm -f "$LOG_DIR/probe.err"
 
+echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"
+# 앱과 같은 TypeScript 배선을 실제 가상 DB에 실행한다. postgres 드라이버가 없으면 통과로 처리하지 않고 실패한다.
+if ! node -e "require.resolve('postgres')" >/dev/null 2>&1; then
+  if [ "${FIDEON_ALLOW_SKIP_DB_INTEGRATION:-}" = 1 ]; then
+    echo "SKIP  | I* 통합 시험: postgres 드라이버 미설치(npm ci 필요) — 통과로 세지 않음" | tee -a "$LOG_DIR/db-test.log"
+  else
+    echo "FAIL | I* postgres 드라이버 미설치: npm ci 후 다시 실행" | tee -a "$LOG_DIR/db-test.log"; exit 1
+  fi
+else
+  if FIDEON_TEST_PGSOCK="$SOCK" FIDEON_TEST_PGPORT="$PORT" FIDEON_TEST_PGDATABASE="$DB" \
+       node --conditions=react-server --import tsx --test --test-reporter=tap tests/integration/*.test.ts > "$LOG_DIR/db-integration.log" 2>&1; then
+    n=$(grep -c '^ok ' "$LOG_DIR/db-integration.log" || true)
+    grep '^ok ' "$LOG_DIR/db-integration.log" | sed 's/^ok [0-9]* - /NOTICE:  PASS | /' >> "$LOG_DIR/db-test.log"
+    echo "  integration: $n passed"
+  else
+    tail -40 "$LOG_DIR/db-integration.log"
+    echo "FAIL | I* 앱 ↔ DB 통합 시험 실패 (test-results/db-integration.log)" | tee -a "$LOG_DIR/db-test.log"; exit 1
+  fi
+fi
+
 pass=$(grep -c 'PASS |' "$LOG_DIR/db-test.log" || true)
 fail=$(grep -c 'FAIL |' "$LOG_DIR/db-test.log" || true)
 grep -o 'PASS | [^|]*' "$LOG_DIR/db-test.log" | sed 's/^PASS | /  ✓ /'

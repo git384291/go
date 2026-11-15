@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizeStaffSession, establishStaffSession, StaffSessionUnavailable, type StaffSessionStore } from '../../src/server/auth/staffSession';
+import { authorizeStaffSession, establishStaffSession, revokeStaffSession, StaffSessionUnavailable, type StaffSessionStore } from '../../src/server/auth/staffSession';
 import { StaffAuthError, type StaffAuth } from '../../src/server/auth/staffAssertion';
 
 const actor = '00000000-0000-4000-8000-000000000001';
@@ -106,4 +106,19 @@ test('세션 등록: open의 DB 거부 후 whoami를 호출하지 않음', async
   };
   await assert.rejects(establishStaffSession(claims, key, (run) => run(store)), forbidden);
   assert.equal(lookups, 0);
+});
+
+test('로그아웃: aal1이면 DB 호출 없이 거부, 정상이면 본인 서명으로 1회 호출', async () => {
+  let calls = 0;
+  await assert.rejects(revokeStaffSession({ ...claims, aal: 'aal1' }, key, async () => { calls++; }), StaffAuthError);
+  assert.equal(calls, 0);
+  await revokeStaffSession(claims, key, async (auth) => { calls++; assert.equal(auth.actor, actor); assert.equal(auth.session, session); });
+  assert.equal(calls, 1);
+});
+
+test('로그아웃: 이미 폐기·만료(42501)는 403, DB 장애는 정보 없는 오류', async () => {
+  await assert.rejects(revokeStaffSession(claims, key, async () => { throw Object.assign(new Error('private'), { code: '42501' }); }), forbidden);
+  await assert.rejects(revokeStaffSession(claims, key, async () => { throw Object.assign(new Error('private'), { query: 'q' }); }), (e) => {
+    assert.ok(e instanceof StaffSessionUnavailable); assert.equal('query' in e, false); return true;
+  });
 });
