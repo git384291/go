@@ -27,7 +27,9 @@ exec_allow(rolname, proname) as (
     ('app_staff', 'staff_session_open'), ('app_staff', 'staff_session_revoke'), ('app_staff', 'whoami'),
     ('app_staff', 'list_leads'), ('app_staff', 'reveal_contact'), ('app_staff', 'update_lead'),
     ('app_staff', 'assign_lead'), ('app_staff', 'export_leads_masked'), ('app_staff', 'set_feature_flag'),
-    ('app_staff', 'purge_customer')
+    ('app_staff', 'purge_customer'),
+    -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
+    ('release_auditor', 'release_probe_product_scope')
 ),
 -- PHASE 1 보완(검수 지적 3항): 상품 비활성화 구조의 보호 장치가 실제로 켜져 있는지
 required_triggers(tbl, tgname) as (
@@ -36,6 +38,18 @@ required_triggers(tbl, tgname) as (
     ('core.product_catalog', 'product_catalog_no_truncate'),
     ('core.product_activation_approvals', 'product_approval_guard'),
     ('core.product_activation_approvals', 'product_approvals_no_truncate')
+),
+-- PHASE 1 최종 보완: 상품 차단에 관여하는 함수 본문은 검수된 마이그레이션과 '완전히 같아야' 한다(V11의 문자열 포함 검사 보강).
+-- 값 = md5(마이그레이션 파일에서 각 함수의 마지막 정의 본문). tests/unit/release-probe.test.ts가 파일에서 다시 계산해 대조한다.
+-- 함수를 고치면 이 값도 같은 커밋에서 바꿔야 하며, 바꾸지 않으면 배포 전 점검이 막는다.
+-- 점검 계정은 core 스키마 USAGE가 없으므로 이름 해석(to_regprocedure) 대신 시스템 카탈로그를 직접 조인한다(인자는 타입 목록으로 비교).
+pinned_funcs(nsp, fname, args, body_md5) as (
+  values
+    ('api', 'create_lead', 'text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text', 'a99eddfc2884a4e7e588925a5664c811'),
+    ('core', 'product_catalog_guard', '', '197931d02b9aa30e9fe7406aba652784'),
+    ('core', 'product_approval_guard', '', '9ef087dbd466ef5e1c2f57836a2fff7e'),
+    ('core', 'block_truncate', '', '21175b027aefee1a01758c8feb061da8'),
+    ('api', 'release_probe_product_scope', '', '6727db2084fb25adc4cbed5503c08f38')
 ),
 required_unique_indexes(idx) as (
   values ('product_approvals_proof_once'), ('product_approvals_one_open')
@@ -61,7 +75,7 @@ violations(v) as (
   from app_roles r cross join pg_namespace s
   where s.nspname in ('core', 'pii', 'security', 'api', 'extensions')
     and has_schema_privilege(r.rolname, s.oid, 'USAGE')
-    and not (r.rolname in ('app_public', 'app_staff') and s.nspname = 'api')
+    and not (r.rolname in ('app_public', 'app_staff', 'release_auditor') and s.nspname = 'api')
   union all
   -- V4 SECURITY DEFINER 함수는 search_path 고정
   select 'V4 search_path not fixed: ' || f.name
@@ -122,5 +136,26 @@ violations(v) as (
   where not exists (
     select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_index i on i.indexrelid = c.oid
     where n.nspname = 'core' and c.relname = r.idx and i.indisunique and i.indisvalid)
+  union all
+  -- V13 상품 차단 함수 본문이 검수본과 다르거나 없음(주석 한 글자 변경도 감지)
+  select 'V13 function body differs from reviewed migration: ' || p.nsp || '.' || p.fname || '(' || p.args || ')'
+  from pinned_funcs p
+  where not exists (
+    select 1 from pg_proc f join pg_namespace n on n.oid = f.pronamespace
+    where n.nspname = p.nsp and f.proname = p.fname
+      and oidvectortypes(f.proargtypes) = p.args and md5(f.prosrc) = p.body_md5)
+  union all
+  -- V14 점검 함수 자체가 읽기 전용(STABLE)·SECURITY DEFINER·집합 반환 형태를 유지
+  select 'V14 release probe must be STABLE SECURITY DEFINER returning setof text'
+  where not exists (
+    select 1 from pg_proc f join pg_namespace n on n.oid = f.pronamespace
+    where n.nspname = 'api' and f.proname = 'release_probe_product_scope'
+      and oidvectortypes(f.proargtypes) = ''
+      and f.provolatile = 's' and f.prosecdef and f.proretset and f.prorettype = 'text'::regtype)
+  union all
+  -- V15 실제 차단 동작: 운영 데이터에 상담 신청 함수와 같은 조건식을 적용한 결과(읽기 전용)
+  --     예약 상품이 접수 가능, 인터넷+TV가 차단, 상품 목록 변경, 진행 중인 활성화 승인 → 위반
+  select 'V15 ' || probe.v
+  from api.release_probe_product_scope() as probe(v)
 )
 select v from violations order by v;

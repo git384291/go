@@ -217,6 +217,8 @@ else
   echo "FAIL | K4 denied=$denied status=$st" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
 rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out
+# 시험이 남긴 미소진 승인(K1 등)을 허용된 '소진 표시'로 정리한다(배포 전 점검 P4는 진행 중인 승인을 위반으로 본다)
+"${PSQL[@]}" -d "$DB" -c "update core.product_activation_approvals set consumed_at = now() where consumed_at is null" >/dev/null
 
 echo "== catalog audit as release_auditor (the same check release-check runs against the production DB)"
 AUDIT_URL="postgresql:///$DB?host=$SOCK&port=$PORT&user=release_auditor"
@@ -263,6 +265,58 @@ SQL "create unique index product_approvals_proof_once on core.product_activation
 "${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0002_leads.sql) >/dev/null
 audit_expect "X11 상품 확인이 빠진 옛 상담 신청 함수로 되돌린 상태 감지" "V11 api.create_lead without product check"
 "${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql) >/dev/null
+# PHASE 1 최종 보완: 점검이 '실제 차단 동작(운영 데이터 기준)'과 함수 본문 동일성을 확인하는지
+# X12 운영 DB에서 누군가 보호 장치를 우회해 CCTV를 활성으로 바꾼 상황(시험 DB에서만 재현) → 접수 허용 상태 감지
+SQL "alter table core.product_catalog disable trigger product_catalog_guard"
+SQL "update core.product_catalog set status = 'active', activated_at = now() where product_key = 'cctv_security'"
+SQL "alter table core.product_catalog enable trigger product_catalog_guard"
+audit_expect "X12 예약 상품(CCTV)이 운영 데이터에서 접수 가능 상태 → 감지" "V15 P1 lead accepted for reserved product: cctv_security"
+SQL "update core.product_catalog set status = 'reserved' where product_key = 'cctv_security'"   # 보호 장치가 허용하는 안전 방향 복구
+# X13 인터넷+TV가 차단된 상태(서비스 중단) → 감지
+SQL "update core.product_catalog set status = 'reserved' where product_key = 'internet_tv'"
+audit_expect "X13 활성 상품(인터넷+TV)이 차단된 상태 → 감지" "V15 P1 lead blocked for active product: internet_tv"
+SQL "alter table core.product_catalog disable trigger product_catalog_guard"
+SQL "update core.product_catalog set status = 'active', activated_at = now() where product_key = 'internet_tv'"
+SQL "alter table core.product_catalog enable trigger product_catalog_guard"
+# X14 진행 중인 활성화 승인(휴대폰)이 있는 상태 → 감지. 정상 서명으로 기록한 뒤 허용된 '소진 표시'로 정리
+SQL "$("${PSQL[@]}" -d "$DB" -At -c "select test.approval_sql('00000000-0000-4000-8000-000000000001'::uuid, '10000000-0000-4000-8000-000000000001'::uuid, 'mobile', 'owner', p_ttl => 97)")"
+audit_expect "X14 진행 중인 예약 상품 활성화 승인 → 감지" "V15 P4 pending activation approval: mobile (owner)"
+SQL "update core.product_activation_approvals set consumed_at = now() where product_key = 'mobile' and consumed_at is null"
+# X15 기준에 없는 상품(정의 미확정인 동판)이 DB에 추가된 상태 → 감지. 허용 키 제약을 잠시 풀어 재현한 뒤 원상 복구
+SQL "alter table core.product_catalog drop constraint product_catalog_product_key_check"
+SQL "insert into core.product_catalog (product_key, label, status) values ('dongpan', '동판', 'reserved')"
+audit_expect "X15 상품 목록이 기준과 달라짐(미승인 상품 추가) → 감지" "V15 P2 product keys differ from baseline: cctv_security,dongpan,internet_only,internet_phone,internet_tv,mobile,other"
+SQL "alter table core.product_catalog disable trigger product_catalog_guard"
+SQL "delete from core.product_catalog where product_key = 'dongpan'"
+SQL "alter table core.product_catalog enable trigger product_catalog_guard"
+SQL "alter table core.product_catalog add constraint product_catalog_product_key_check check (product_key in ('internet_tv', 'internet_phone', 'internet_only', 'cctv_security', 'other', 'mobile'))"
+# X16 상품 차단 함수 본문에 주석 한 줄만 추가해도 → 검수본과 다름 감지(문자열 포함 검사 V11은 통과하는 변경)
+"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql \
+  | sed '0,/^begin$/s//begin\n  -- 검수 후 몰래 추가한 주석/') >/dev/null
+audit_expect "X16 상담 신청 함수 본문 1줄 변경 → 감지(V11은 통과하는 변경)" "V13 function body differs from reviewed migration: api.create_lead(text, text"
+"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql) >/dev/null
+# X17 점검 함수를 VOLATILE(쓰기 가능)로 바꾼 상태 → 감지
+SQL "alter function api.release_probe_product_scope() volatile"
+audit_expect "X17 점검 함수가 읽기 전용(STABLE)이 아님 → 감지" "V14 release probe must be STABLE SECURITY DEFINER returning setof text"
+SQL "alter function api.release_probe_product_scope() stable"
+# X18 STABLE 함수는 운영 데이터를 바꿀 수 없다(점검 함수와 같은 방식의 시험 함수로 확인)
+SQL "create function test.stable_write_probe() returns void language plpgsql stable as \$f\$ begin update core.product_catalog set label = label where product_key = 'internet_tv'; end \$f\$"
+if "${PSQL[@]}" -d "$DB" -c "select test.stable_write_probe()" >/dev/null 2>"$LOG_DIR/stable.err"; then
+  echo "FAIL | X18 STABLE function was able to write" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+grep -q 'not allowed in a non-volatile function' "$LOG_DIR/stable.err" \
+  && echo "NOTICE:  PASS | X18 STABLE 함수 안의 UPDATE는 PostgreSQL이 거부(점검 함수는 쓰기 불가)" >> "$LOG_DIR/db-test.log" \
+  || { echo "FAIL | X18 $(cat "$LOG_DIR/stable.err")" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+SQL "drop function test.stable_write_probe()"; rm -f "$LOG_DIR/stable.err"
+# X19 점검 계정은 여전히 상품·승인 테이블을 직접 읽지 못한다(함수 결과 문장만 받음)
+for t in core.product_catalog core.product_activation_approvals core.leads; do
+  if psql -X -q -At "$AUDIT_URL" -c "select count(*) from $t" >/dev/null 2>"$LOG_DIR/aud.err"; then
+    echo "FAIL | X19 release_auditor read $t" | tee -a "$LOG_DIR/db-test.log"; exit 1
+  fi
+  grep -q 'permission denied' "$LOG_DIR/aud.err" || { echo "FAIL | X19 $t: $(cat "$LOG_DIR/aud.err")" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+done
+rm -f "$LOG_DIR/aud.err"
+echo "NOTICE:  PASS | X19 점검 계정은 상품·승인·리드 테이블 직접 조회 불가(permission denied)" >> "$LOG_DIR/db-test.log"
 audit_expect "X6 원상 복구 후 다시 0건" pass
 
 echo "== future internal tables (commission/settlement) are locked automatically"
