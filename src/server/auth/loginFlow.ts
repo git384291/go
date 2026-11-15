@@ -1,5 +1,6 @@
 import type { VerifiedClaims } from './staffAssertion';
 import { StaffAuthError } from './staffAssertion';
+import type { SessionResult } from './authErrors';
 import type { LoginError, LoginState, LogoutOutcome } from '../../content/adminLogin';
 
 /**
@@ -16,8 +17,8 @@ export type AuthPort = {
   nextLevel: () => Promise<string | null>;
   verifiedTotpFactorId: () => Promise<string | null>;
   challengeAndVerify: (factorId: string, code: string) => Promise<boolean>;
-  /** 서명 검증된 접근 토큰 클레임. 로그인 안 됨이면 null */
-  claims: () => Promise<VerifiedClaims | null>;
+  /** 서명 검증된 세션 조회: none(세션 없음) / invalid(검증 실패) / ok. 인증 서버 장애는 예외 */
+  session: () => Promise<SessionResult<VerifiedClaims>>;
   /** Supabase 로그아웃. SDK가 오류를 돌려주면 예외(원문 오류는 담지 않음) */
   signOut: () => Promise<void>;
   /** 이 브라우저의 Supabase 인증 쿠키를 직접 지운다(로그아웃 API 실패 시 대비) */
@@ -25,6 +26,16 @@ export type AuthPort = {
 };
 
 export type { LoginError, LoginState, LogoutOutcome };
+
+/** 로그인 경로용: 정상 세션의 클레임만, 그 외(없음·무효·장애)는 null */
+async function claimsOf(port: AuthPort): Promise<VerifiedClaims | null> {
+  try {
+    const r = await port.session();
+    return r.kind === 'ok' ? r.claims : null;
+  } catch {
+    return null;
+  }
+}
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
@@ -69,7 +80,7 @@ export async function totpStep(
 ): Promise<LoginState> {
   const code = typeof input.code === 'string' ? input.code.trim() : '';
   if (!/^\d{6}$/.test(code)) return { step: 'totp', error: 'INVALID_CODE' };
-  const before = await port.claims().catch(() => null);
+  const before = await claimsOf(port);
   if (!before) return { step: 'password', error: 'SESSION_EXPIRED' };
   const factorId = await port.verifiedTotpFactorId().catch(() => null);
   if (!factorId) {
@@ -77,7 +88,7 @@ export async function totpStep(
     return { step: 'password', error: 'INVALID_CREDENTIALS' };
   }
   if (!(await port.challengeAndVerify(factorId, code).catch(() => false))) return { step: 'totp', error: 'INVALID_CODE' };
-  const claims = await port.claims().catch(() => null);
+  const claims = await claimsOf(port);
   if (!claims || claims.aal !== 'aal2') {
     await quietSignOut(port);
     return { step: 'password', error: 'SESSION_EXPIRED' };
@@ -93,14 +104,22 @@ export async function totpStep(
 /**
  * 로그아웃: DB 세션 폐기 → Supabase 로그아웃(실패 시 로컬 쿠키 삭제).
  * 결과를 숨기지 않는다. 'complete'가 아니면 화면이 로그아웃 완료로 보이지 않게 한다.
- * - DB 폐기 성공이면 그 세션으로는 관리자 접근 불가(모든 요청이 DB whoami 확인).
- * - DB 폐기를 확인 못 하면 세션은 최대 12시간 뒤 DB에서 만료된다(그 전에 같은 토큰을 가진 사람은 접근 가능).
+ * - DB 폐기 확인 = 세션 조회가 정상(ok)이고 revoke가 성공한 경우뿐.
+ *   세션 없음(none)만 '폐기할 세션 없음'으로 본다. 검증 실패·조회 장애·예외는 폐기 미확인.
+ * - 쿠키 삭제는 이 브라우저의 연결만 끝낸다. 이미 복사된 접근 토큰이나 DB 세션이 즉시 무효화됐다고 보장하지 않는다.
+ * - DB 폐기를 확인 못 하면 DB 세션은 최대 12시간 뒤 만료된다(그 전에 같은 토큰을 가진 사람은 접근 가능).
  */
 export async function logoutFlow(port: AuthPort, revoke: (claims: VerifiedClaims) => Promise<void>): Promise<LogoutOutcome> {
-  const claims = await port.claims().catch(() => null);
-  let dbOk = true; // 이 브라우저에 로그인 정보가 없으면 폐기할 세션도 없다
-  if (claims) {
-    try { await revoke(claims); } catch { dbOk = false; }
+  let dbOk: boolean;
+  try {
+    const s = await port.session();
+    if (s.kind === 'ok') {
+      try { await revoke(s.claims); dbOk = true; } catch { dbOk = false; }
+    } else {
+      dbOk = s.kind === 'none';
+    }
+  } catch {
+    dbOk = false; // 인증 서버 장애: 세션 존재 여부를 모른다
   }
   const auth = await endAuth(port);
   if (!auth.localCleared) return 'local_not_cleared';

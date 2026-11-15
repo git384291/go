@@ -7,6 +7,7 @@ import { adminAuthMode, adminMockVisible } from '../../src/server/auth/adminAuth
 import { logoutFlow, passwordStep, totpStep, type AuthPort } from '../../src/server/auth/loginFlow';
 import { StaffAuthError, type VerifiedClaims } from '../../src/server/auth/staffAssertion';
 import { StaffSessionUnavailable } from '../../src/server/auth/staffSession';
+import { classifyClaims } from '../../src/server/auth/authErrors';
 import { LOGIN_MESSAGES, LOGOUT_MESSAGES, logoutNotice } from '../../src/content/adminLogin';
 
 const FULL = {
@@ -39,7 +40,7 @@ const USER = '00000000-0000-4000-8000-000000000001';
 const SESSION = '10000000-0000-4000-8000-000000000001';
 
 /** 가짜 Supabase: 등록 계정 1개(비밀번호 + 검증된 TOTP) */
-function fakeAuth(opts: { totp?: boolean; verifyOk?: boolean; upgrade?: boolean; signOutFails?: boolean; clearFails?: boolean } = {}) {
+function fakeAuth(opts: { totp?: boolean; verifyOk?: boolean; upgrade?: boolean; signOutFails?: boolean; clearFails?: boolean; session?: 'throw' | 'invalid' } = {}) {
   const calls: string[] = [];
   let aal: string | null = null;
   const port: AuthPort = {
@@ -56,7 +57,11 @@ function fakeAuth(opts: { totp?: boolean; verifyOk?: boolean; upgrade?: boolean;
       if (opts.upgrade !== false) aal = 'aal2';
       return true;
     },
-    claims: async (): Promise<VerifiedClaims | null> => (aal ? { sub: USER, session_id: SESSION, aal } : null),
+    session: async () => {
+      if (opts.session === 'throw') throw new Error('AUTH_UNAVAILABLE');
+      if (opts.session === 'invalid' && aal) return { kind: 'invalid' as const };
+      return aal ? { kind: 'ok' as const, claims: { sub: USER, session_id: SESSION, aal } as VerifiedClaims } : { kind: 'none' as const };
+    },
     signOut: async () => {
       calls.push('signOut');
       if (opts.signOutFails) throw new Error('AUTH_SIGNOUT_FAILED');
@@ -148,6 +153,34 @@ test('로그아웃: DB 폐기·Auth 로그아웃 성공/실패 조합마다 결�
   // 이미 로그인 정보가 없으면 폐기할 세션도 없다: DB 호출 없이 complete
   const none = fakeAuth();
   assert.equal(await logoutFlow(none.port, async () => { throw new Error('must not call'); }), 'complete');
+});
+
+test('로그아웃: 세션 조회 장애·검증 실패는 미로그인으로 오인하지 않음(complete 금지), signOut 성공/실패 조합', async () => {
+  for (const session of ['throw', 'invalid'] as const) {
+    for (const signOutFails of [false, true]) {
+      const f = fakeAuth({ signOutFails });
+      await passwordStep({ email: 'staff@example.com', password: 'correct-horse' }, f.port);
+      await totpStep({ code: '123456' }, f.port, async () => 'owner');
+      const broken = { ...f.port, session: fakeAuth({ session }).port.session };
+      if (session === 'invalid') broken.session = async () => ({ kind: 'invalid' as const });
+      let revoked = 0;
+      const out = await logoutFlow(broken, async () => { revoked++; });
+      assert.equal(revoked, 0, '검증된 세션 없이 폐기를 호출하지 않음');
+      assert.equal(out, signOutFails ? 'both_unconfirmed' : 'db_unconfirmed', `${session}/${signOutFails}`);
+      assert.equal(f.aal(), null, '로컬 로그인 정보는 지움');
+    }
+  }
+});
+
+test('classifyClaims: 세션 없음·검증 실패·정상 구분, 장애는 원문 없는 예외', () => {
+  assert.deepEqual(classifyClaims({ data: null, error: null }), { kind: 'none' });
+  assert.deepEqual(classifyClaims({ data: null, error: { name: 'AuthSessionMissingError', status: 400 } }), { kind: 'none' });
+  assert.deepEqual(classifyClaims({ data: null, error: { name: 'AuthInvalidJwtError' } }), { kind: 'invalid' });
+  assert.deepEqual(classifyClaims({ data: null, error: { name: 'AuthApiError', status: 401 } }), { kind: 'invalid' });
+  assert.deepEqual(classifyClaims({ data: { claims: { sub: USER } }, error: null }), { kind: 'ok', claims: { sub: USER } });
+  for (const error of [{ name: 'AuthRetryableFetchError', status: 0, message: 'secret-detail' }, { name: 'X', status: 503, message: 'secret-detail' }, { name: 'X', message: 'secret-detail' }]) {
+    assert.throws(() => classifyClaims({ data: null, error }), (e: Error) => e.message === 'AUTH_UNAVAILABLE' && !('cause' in e));
+  }
 });
 
 test('로그인 실패 경로에서 Supabase 로그아웃이 실패하면 로컬 쿠키를 지운다', async () => {

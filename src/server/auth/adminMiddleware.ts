@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { adminAuthMode } from './adminAuthMode';
+import { isAuthOutage } from './authErrors';
+
+export { isAuthOutage };
 
 /**
  * /admin 경로 middleware 본체. Supabase 클라이언트 생성은 주입받아 실제 NextRequest로 시험한다.
@@ -18,15 +21,6 @@ export type CreateClaimsClient = (cookies: {
 
 const NO_STORE = 'private, no-store';
 export const ADMIN_UNAVAILABLE_BODY = '잠시 후 다시 시도해 주세요.';
-
-/** 인증 서버에 닿지 못한 오류인가(로그인 안 됨·토큰 무효와 구분). 판정이 불확실하면 장애로 본다. */
-export function isAuthOutage(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const e = error as { name?: unknown; status?: unknown };
-  if (e.name === 'AuthRetryableFetchError') return true;
-  if (e.name === 'AuthSessionMissingError' || e.name === 'AuthInvalidJwtError') return false;
-  return typeof e.status !== 'number' || e.status === 0 || e.status >= 500;
-}
 
 export async function adminMiddleware(
   request: NextRequest,

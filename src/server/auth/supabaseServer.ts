@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import type { AuthPort } from './loginFlow';
 import type { VerifiedClaims } from './staffAssertion';
+import { classifyClaims, type SessionResult } from './authErrors';
 
 /**
  * 요청 쿠키 기반 Supabase 서버 클라이언트.
@@ -32,11 +33,21 @@ export async function supabaseServer() {
 
 type Supabase = Awaited<ReturnType<typeof supabaseServer>>;
 
-/** 서명 검증된 클레임만 사용한다(쿠키 내용을 그대로 믿지 않음) */
+/** 서명 검증된 세션 조회. 장애(예외·재시도 오류·5xx)는 원문 없는 예외 AUTH_UNAVAILABLE */
+export async function sessionFrom(supabase: Supabase): Promise<SessionResult<VerifiedClaims>> {
+  let result: Awaited<ReturnType<Supabase['auth']['getClaims']>>;
+  try {
+    result = await supabase.auth.getClaims();
+  } catch {
+    throw new Error('AUTH_UNAVAILABLE');
+  }
+  return classifyClaims<VerifiedClaims>(result);
+}
+
+/** 서명 검증된 클레임만 사용한다(쿠키 내용을 그대로 믿지 않음). 세션 없음·무효는 null, 장애는 예외 */
 export async function verifiedClaimsFrom(supabase: Supabase): Promise<VerifiedClaims | null> {
-  const { data, error } = await supabase.auth.getClaims();
-  if (error || !data?.claims) return null;
-  return data.claims as VerifiedClaims;
+  const r = await sessionFrom(supabase);
+  return r.kind === 'ok' ? r.claims : null;
 }
 
 /** loginFlow.ts가 쓰는 최소 기능만 Supabase에 연결한다 */
@@ -59,7 +70,7 @@ export function authPort(supabase: Supabase): AuthPort {
       const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
       return !error;
     },
-    claims: () => verifiedClaimsFrom(supabase),
+    session: () => sessionFrom(supabase),
     signOut: async () => {
       const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw new Error('AUTH_SIGNOUT_FAILED'); // SDK 원문 오류·토큰은 싣지 않는다
