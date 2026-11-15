@@ -41,16 +41,39 @@ export const SITEMAP_PATHS: readonly string[] = [PAGE_META.home.path, PAGE_META.
 /** 어떤 경우에도 검색 허용하지 않는 경로 */
 export const NEVER_INDEX = ['/admin', '/api'] as const;
 
-const BLOCKED_HOST = /(^|\.)(example\.(com|org|net)|localhost|vercel\.app|invalid|test|local)$/i;
+/**
+ * 공식 주소 정책(형식 검사일 뿐, 도메인 소유권 검증이 아니다. 소유 확인은 도메인 확정 후 별도로 한다).
+ * - https 원본만(경로·쿼리·조각·포트·사용자 정보 없음)
+ * - 호스트는 공개 DNS 이름만: IP 리터럴(IPv4·IPv6 [..])·단일 라벨 호스트 거부
+ * - 라벨: 영소문자·숫자·하이픈 1~63자, 하이픈으로 시작·끝 불가, 전체 253자 이하
+ * - 최상위 도메인: 영문 2자 이상 또는 IDN(xn--). 숫자 TLD 거부
+ * - 내부·예약·예시 이름 거부: localhost, local, internal, intranet, lan, home, corp, test, example, invalid, onion, arpa,
+ *   example.com/net/org, 미리보기 호스팅(vercel.app)
+ */
+const RESERVED_TLD = new Set(['localhost', 'local', 'internal', 'intranet', 'lan', 'home', 'corp', 'test', 'example', 'invalid', 'onion', 'arpa', 'localdomain']);
+const BLOCKED_SUFFIX = ['example.com', 'example.net', 'example.org', 'vercel.app'];
+const LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
 
-/** 공식 주소: https 원본(경로·쿼리·포트·사용자 정보 없음)만 인정 */
+export function isPublicDnsHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (!h || h.length > 253 || h.startsWith('[') || h.includes(':')) return false; // IPv6 리터럴
+  const labels = h.split('.');
+  if (labels.length < 2 || !labels.every((l) => LABEL.test(l))) return false; // 단일 라벨·빈 라벨
+  if (labels.every((l) => /^\d+$/.test(l))) return false; // IPv4 리터럴
+  const tld = labels[labels.length - 1];
+  if (!(/^[a-z]{2,63}$/.test(tld) || /^xn--[a-z0-9-]{2,59}$/.test(tld))) return false;
+  if (RESERVED_TLD.has(tld)) return false;
+  return !BLOCKED_SUFFIX.some((suf) => h === suf || h.endsWith(`.${suf}`));
+}
+
+/** 공식 주소: https 원본(경로·쿼리·포트·사용자 정보 없음) + 공개 DNS 이름만 인정 */
 export function publicSiteOrigin(env: Env = process.env): string | null {
   const raw = (env.PUBLIC_SITE_ORIGIN ?? '').trim();
   if (!raw) return null;
   let u: URL;
   try { u = new URL(raw); } catch { return null; }
   if (u.protocol !== 'https:' || u.username || u.password || u.port || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) return null;
-  if (BLOCKED_HOST.test(u.hostname) || /^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)) return null;
+  if (!isPublicDnsHost(u.hostname)) return null;
   return u.origin;
 }
 

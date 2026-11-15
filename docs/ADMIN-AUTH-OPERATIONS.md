@@ -301,3 +301,29 @@ Claude 작업 환경에 남아 있는 패치 9개를 대조했다. 각 패치에
 1. 0007: 시도 제한 테이블·함수, 서명 목적 `login`과 그 서버 키
 2. 0008: 등록 grant 테이블·함수, `core.staff.totp_factor_id`, `staff_session_open` factor 확인(V13 해시 갱신), 서명 목적 `enroll`
 3. 앱: 로그인 단계 예약·정산 연결, 등록 화면(인증 스위치 하위·기본 꺼짐), 실DB 동시성·멱등 시험
+
+### 8-5. 추가 명시 (PM 6899283226 — 여전히 구현·새 서명 목적 미승인)
+
+**잠금 키 네임스페이스와 전체 획득 순서**
+- advisory lock 키는 `hashtextextended('<네임스페이스>:<값>', 0)`으로 만든다. 네임스페이스는 고정 문자열이다.
+  - `fideon.login.subject:<대상 HMAC>`
+  - `fideon.login.ip:<IP 해시>`
+  - `fideon.login.user:<user_id>`(TOTP 단계)
+  - 기존 승인 함수의 잠금 키와 겹치지 않게 네임스페이스 접두사 `fideon.login.`을 쓴다.
+- 획득 순서는 항상 `subject → ip → user`(해당 단계에 있는 것만)이다. `reserve`·`settle`·만료 정리·owner 해제가 모두 같은 순서를 쓴다. 한 트랜잭션에서 이 순서를 어기는 호출은 만들지 않는다.
+
+**`reserve` 자체의 서명 검증과 허용 호출자**
+- `reserve`도 서버 서명이 필요하다.
+  - `signToken('login', ['reserve-request', 단계, 대상HMAC, IP해시, 요청nonce], key)`
+  - DB가 서명·60초 만료를 확인하고, 같은 요청 nonce는 1회만 쓴다(재사용 거부).
+- 실행 권한은 `app_public`에만 준다. 서명 키는 서버 환경변수와 DB `security.server_keys`에만 있다. 따라서 DB 역할을 얻어도 서명 없이 예약을 만들거나 다른 대상 이름으로 예약을 만들 수 없다.
+
+**`settle success` 경계**
+- `success`는 서버가 Supabase 응답을 직접 받아 확인한 경우에만 보낸다. 이 경우는 다음 둘뿐이다.
+  - 비밀번호 단계: `signInWithPassword` 성공 + 다음 단계 aal2 가능
+  - TOTP 단계: `challengeAndVerify` 성공 + 클레임 aal2
+- 브라우저가 보낸 값이나 화면 단계값으로 success를 정하지 않는다.
+- `settle` 서명에는 `'success'|'failure'` 결과 자체를 포함한다(`['settle', 예약ID, 결과]`). DB는 서명된 결과만 기록한다. 이미 확정된 예약과 다른 결과는 거부하고 감사 기록을 남긴다.
+- 서버 키 유출은 이 경계 밖이다(기존 서명 체계와 같은 신뢰 경계).
+
+기존 로그인 절차와 권한은 완화하지 않는다. 구현 순서는 회귀·입력 검증·출시 준비 문서 다음이다.

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { NEVER_INDEX, PAGE_META, SITEMAP_PATHS, pageMetadata, publicSiteOrigin, robotsRules, searchIndexingAllowed, sitemapEntries } from '../../src/content/seo';
+import { NEVER_INDEX, PAGE_META, SITEMAP_PATHS, isPublicDnsHost, pageMetadata, publicSiteOrigin, robotsRules, searchIndexingAllowed, sitemapEntries } from '../../src/content/seo';
 import { CATALOG } from '../../src/content/catalog';
 
 const OPEN = { VERCEL_ENV: 'production', SEARCH_INDEXING: 'allow', PUBLIC_SITE_ORIGIN: 'https://www.fideon-real.kr' };
@@ -54,4 +54,19 @@ test('S5 루트 layout의 noindex는 유지, robots·sitemap은 동적이며 con
     assert.match(s, /export const dynamic = 'force-dynamic'/);
     assert.match(s, /from '@\/content\/seo'/);
   }
+});
+
+test('S6 공식 주소: IP 리터럴(IPv4·IPv6)·단일 라벨·내부·예약 이름 거부(형식 검사이며 소유권 검증 아님)', () => {
+  for (const bad of ['https://[::1]', 'https://[2001:db8::1]', 'https://[::ffff:127.0.0.1]', 'https://127.0.0.1', 'https://10.0.0.1', 'https://0x7f.1',
+    'https://intranet', 'https://fideon', 'https://fideon.local', 'https://fideon.internal', 'https://fideon.lan', 'https://a.corp', 'https://a.home',
+    'https://a.test', 'https://a.example', 'https://a.invalid', 'https://a.onion', 'https://1.in-addr.arpa', 'https://localhost.localdomain',
+    'https://a.123', 'https://-a.kr', 'https://a-.kr', 'https://a..kr', 'https://www.example.net', 'https://preview.vercel.app']) {
+    assert.equal(publicSiteOrigin({ PUBLIC_SITE_ORIGIN: bad }), null, bad);
+  }
+  for (const ok of ['https://fideon-real.kr', 'https://www.fideon-real.co.kr', 'https://xn--3e0b707e.xn--3e0b707e']) {
+    assert.ok(publicSiteOrigin({ PUBLIC_SITE_ORIGIN: ok }), ok);
+  }
+  // 한글 도메인은 URL이 punycode로 바꾼 뒤 검사한다
+  assert.match(publicSiteOrigin({ PUBLIC_SITE_ORIGIN: 'https://피데온.한국' }) ?? '', /^https:\/\/xn--[a-z0-9-]+\.xn--3e0b707e$/);
+  assert.equal(isPublicDnsHost('a'.repeat(64) + '.kr'), false);
 });
