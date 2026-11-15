@@ -46,6 +46,7 @@ jobs:
         with:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          label_trigger: claude-review
           track_progress: true
           include_fix_links: false
           prompt: |
