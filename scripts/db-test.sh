@@ -236,6 +236,33 @@ audit_expect() { # $1 라벨, $2 기대(pass | 위반 문자열 일부)
 }
 SQL() { "${PSQL[@]}" -d "$DB" -c "$1" >/dev/null; }
 
+# ---- 함수 본문 변조·복원 도구(X11·X16). macOS BSD sed / Linux GNU sed 공통: POSIX sed -n 범위 출력과 awk만 사용 ----
+# psql -f <(…) 형태는 앞단(sed 등)이 실패해도 psql이 빈 입력을 받아 rc=0으로 끝나 '조용히' 넘어가므로 쓰지 않는다.
+# 정의를 파일로 뽑아 내용이 온전한지 확인한 뒤 적용하고, 적용 후 DB의 실제 본문 해시로 결과를 확인한다.
+CREATE_LEAD_SIG="api.create_lead(text,text,text,text,text,text,text,text,text,text,text,text,text,boolean,boolean,text)"
+# 배포 전 점검(V13)에 고정된 검수본 해시. 시험 기준값도 같은 곳에서 읽어 둘이 어긋날 수 없게 한다
+PINNED_CREATE_LEAD_MD5=$(grep -E "^ +\('api', 'create_lead'," db/audit/catalog_audit.sql | grep -oE "'[0-9a-f]{32}'" | tr -d "'")
+[ "${#PINNED_CREATE_LEAD_MD5}" = 32 ] || { echo "FAIL | create_lead 고정 해시를 catalog_audit.sql에서 찾지 못함" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+fn_md5() { "${PSQL[@]}" -d "$DB" -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure"; }
+extract_create_lead() { # $1 마이그레이션 파일 → 표준출력: create_lead 정의(시작~끝 줄이 모두 있어야 함)
+  local out
+  out=$(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' "$1")
+  if ! printf '%s\n' "$out" | head -n 1 | grep -q '^create or replace function api.create_lead(' \
+     || ! printf '%s\n' "$out" | tail -n 1 | grep -q '^\$\$;$'; then
+    echo "FAIL | create_lead 정의 추출 실패: $1" | tee -a "$LOG_DIR/db-test.log" >&2; exit 1
+  fi
+  printf '%s\n' "$out"
+}
+apply_sql_file() { # $1 SQL 파일(비어 있으면 실패)
+  [ -s "$1" ] || { echo "FAIL | 적용할 SQL이 비어 있음: $1" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+  "${PSQL[@]}" -d "$DB" -f "$1" >/dev/null
+}
+restore_create_lead() { # 0004 검수본으로 복원하고, 실제 본문이 고정 해시와 같은지 확인
+  extract_create_lead db/migrations/0004_product_scope.sql > "$LOG_DIR/fn-create_lead.sql"
+  apply_sql_file "$LOG_DIR/fn-create_lead.sql"; rm -f "$LOG_DIR/fn-create_lead.sql"
+  [ "$(fn_md5)" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | $1 create_lead 복원 실패(본문이 검수본과 다름)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+}
+
 audit_expect "X1 점검 계정으로 권한 점검" pass
 SQL "grant select on core.leads to app_staff"
 audit_expect "X2 일부러 준 테이블 권한 감지" "V2 table privilege: app_staff on core.leads"
@@ -262,9 +289,13 @@ SQL "alter table core.product_catalog enable trigger product_catalog_no_truncate
 SQL "drop index core.product_approvals_proof_once"
 audit_expect "X10 지워진 승인 서명 1회용 인덱스 감지" "V12 approval unique index missing or invalid: product_approvals_proof_once"
 SQL "create unique index product_approvals_proof_once on core.product_activation_approvals (proof_sha256)"
-"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0002_leads.sql) >/dev/null
+[ "$(fn_md5)" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | X11 시작 전 create_lead가 검수본 상태가 아님" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+extract_create_lead db/migrations/0002_leads.sql > "$LOG_DIR/fn-create_lead.sql"
+apply_sql_file "$LOG_DIR/fn-create_lead.sql"; rm -f "$LOG_DIR/fn-create_lead.sql"
+"${PSQL[@]}" -d "$DB" -At -c "select position('PRODUCT_NOT_ACTIVE' in prosrc) = 0 from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure" | grep -qx t \
+  || { echo "FAIL | X11 변조 주입 실패: 옛 함수(상품 확인 없음)로 바뀌지 않음 — 점검(V11)과 무관한 시험 준비 오류" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 audit_expect "X11 상품 확인이 빠진 옛 상담 신청 함수로 되돌린 상태 감지" "V11 api.create_lead without product check"
-"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql) >/dev/null
+restore_create_lead X11
 # PHASE 1 최종 보완: 점검이 '실제 차단 동작(운영 데이터 기준)'과 함수 본문 동일성을 확인하는지
 # X12 운영 DB에서 누군가 보호 장치를 우회해 CCTV를 활성으로 바꾼 상황(시험 DB에서만 재현) → 접수 허용 상태 감지
 SQL "alter table core.product_catalog disable trigger product_catalog_guard"
@@ -291,10 +322,31 @@ SQL "delete from core.product_catalog where product_key = 'dongpan'"
 SQL "alter table core.product_catalog enable trigger product_catalog_guard"
 SQL "alter table core.product_catalog add constraint product_catalog_product_key_check check (product_key in ('internet_tv', 'internet_phone', 'internet_only', 'cctv_security', 'other', 'mobile'))"
 # X16 상품 차단 함수 본문에 주석 한 줄만 추가해도 → 검수본과 다름 감지(문자열 포함 검사 V11은 통과하는 변경)
-"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql \
-  | sed '0,/^begin$/s//begin\n  -- 검수 후 몰래 추가한 주석/') >/dev/null
+#   준비: 0004 검수본 정의에서 첫 'begin' 줄 바로 뒤에 주석 1줄 추가(awk — BSD·GNU 공통). GNU 전용 sed 문법(0,/re/ 주소, 치환 안 \n)을 쓰지 않는다.
+#   단계마다 확인: ① 시작 전 검수본 ② 주입 후 본문이 실제로 바뀌고 표식 주석 포함 ③ V13 감지 + V11 미감지 ④ 복원 후 검수본
+X16_MARK='-- 검수 후 몰래 추가한 주석'
+[ "$(fn_md5)" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | X16 시작 전 create_lead가 검수본 상태가 아님" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+extract_create_lead db/migrations/0004_product_scope.sql \
+  | awk -v mark="  $X16_MARK" '{ print } !done && $0 == "begin" { print mark; done = 1 } END { if (!done) exit 3 }' \
+  > "$LOG_DIR/fn-create_lead-x16.sql" \
+  || { echo "FAIL | X16 변조 주입 준비 실패: 본문에서 'begin' 줄을 찾지 못함 — 점검(V13)과 무관한 시험 준비 오류" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+[ "$(grep -c -- "$X16_MARK" "$LOG_DIR/fn-create_lead-x16.sql")" = 1 ] \
+  || { echo "FAIL | X16 변조 주입 준비 실패: 표식 주석이 정확히 1줄이 아님" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+apply_sql_file "$LOG_DIR/fn-create_lead-x16.sql"; rm -f "$LOG_DIR/fn-create_lead-x16.sql"
+X16_MD5=$(fn_md5)
+if [ "$X16_MD5" = "$PINNED_CREATE_LEAD_MD5" ] \
+   || ! "${PSQL[@]}" -d "$DB" -At -c "select position('$X16_MARK' in prosrc) > 0 from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure" | grep -qx t; then
+  echo "FAIL | X16 변조 주입 실패: DB의 create_lead 본문이 바뀌지 않음 — 점검(V13)과 무관한 시험 준비 오류" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+echo "NOTICE:  PASS | X16a 변조 주입 확인(본문 해시 변경, 표식 주석 1줄 포함)" >> "$LOG_DIR/db-test.log"
 audit_expect "X16 상담 신청 함수 본문 1줄 변경 → 감지(V11은 통과하는 변경)" "V13 function body differs from reviewed migration: api.create_lead(text, text"
-"${PSQL[@]}" -d "$DB" -f <(sed -n '/^create or replace function api.create_lead(/,/^\$\$;/p' db/migrations/0004_product_scope.sql) >/dev/null
+X16_OUT=$(bash scripts/db-audit.sh "$AUDIT_URL" 2>&1 || true)
+if printf '%s' "$X16_OUT" | grep -q '^V11 '; then
+  echo "FAIL | X16b 주석 1줄 변경을 V11도 잡음(시험 전제 불일치): $X16_OUT" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+echo "NOTICE:  PASS | X16b 같은 변경을 문자열 검사(V11)는 통과 — V13만 감지" >> "$LOG_DIR/db-test.log"
+restore_create_lead X16
+echo "NOTICE:  PASS | X16c 시험 후 create_lead가 검수본으로 복원됨(본문 해시 = 점검 고정값)" >> "$LOG_DIR/db-test.log"
 # X17 점검 함수를 VOLATILE(쓰기 가능)로 바꾼 상태 → 감지
 SQL "alter function api.release_probe_product_scope() volatile"
 audit_expect "X17 점검 함수가 읽기 전용(STABLE)이 아님 → 감지" "V14 release probe must be STABLE SECURITY DEFINER returning setof text"
