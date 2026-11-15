@@ -12,6 +12,17 @@ import Cctv from '../../src/app/products/cctv-security/page';
 import Consult from '../../src/app/consult/page';
 import { AdminMockView } from '../../src/app/admin/AdminMockView';
 import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
+import { ProgressView } from '../../src/app/admin/progress/ProgressView';
+
+// 진행판 미리보기는 실제 서버 스냅샷이 아닌 화면 확인용 고정 예시를 쓴다(가로 넘침·표시 확인)
+const PROGRESS_FIXTURE = {
+  checkedAt: '2026-11-16T02:03:00+09:00', staleAfterHours: 24,
+  stage: '1단계 — 관리자 로그인·보안 준비 (서비스 비공개, 고객 접수 꺼짐)',
+  recentDone: ['관리자 로그인 절차(비밀번호 → 인증 앱 → 서버 확인) 연결, 기본 꺼짐', '가상 데이터 상담 목록 조회(대표 전체·상담원 본인 배정만)'],
+  next: ['검색 노출 준비(공개 전 닫힌 기본값 유지)'],
+  checks: [{ name: '화면·API 경로 검사(건너뜀 없음)', passed: true }, { name: '실제 로그인 서버 연결 검사', passed: null }],
+  sales: { label: '실제 상담 접수 실적', value: null },
+};
 
 // PHASE 1: 고객 화면에 나오면 안 되는 예약 상품 흔적(관리자 화면은 내부 가상 데이터라 제외)
 const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/products/mobile', '집전화', 'CCTV', 'cctv',
@@ -44,6 +55,7 @@ async function main() {
     ['05-consult', await Consult()],
     ['06-admin-login', <LoginPreview key="admin-login" />],
     ['07-admin-leads', <AdminMockView key="admin" />],
+    ['08-admin-progress', <ProgressView key="progress" snapshot={PROGRESS_FIXTURE} now={new Date('2026-11-16T03:00:00+09:00')} />],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),

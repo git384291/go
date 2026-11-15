@@ -209,3 +209,19 @@ body:has(.admin), body:has(.login) { padding-bottom: 0; }
 .admin-bar-end, .admin-logout { display: flex; align-items: center; gap: 8px; }
 .admin-role { font-size: 12px; opacity: .85; }
 .admin-logout .btn { padding: 6px 12px; font-size: 13px; min-height: 0; color: #fff; border-color: rgba(255,255,255,.4); }
+
+/* 대표 전용 진행판 */
+.admin-link { color: #fff; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.progress { display: grid; gap: 14px; }
+.progress section { background: #fff; border-radius: 14px; padding: 14px 16px; }
+.progress h2 { font-size: 15px; margin: 0 0 8px; }
+.progress ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.progress p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.progress-stamp { font-size: 13px; color: var(--muted); }
+.progress-stale { color: #7f1d1d; font-weight: 700; }
+.progress-checks { list-style: none; padding: 0 !important; }
+.progress-checks li { display: flex; justify-content: space-between; gap: 12px; }
+.check { font-size: 12px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.check-통과 { background: #dcfce7; color: #14532d; }
+.check-실패 { background: #fee2e2; color: #7f1d1d; }
+.check-미확인 { background: #f1f5f9; color: #334155; }

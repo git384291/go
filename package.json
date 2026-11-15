@@ -13,7 +13,7 @@
     "typecheck:core": "tsc -p tsconfig.core.json",
     "lint": "eslint .",
     "test:unit": "tsx --test tests/unit/*.test.ts",
-    "test:route": "node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx --test tests/route/*.test.ts",
+    "test:route": "TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx --test tests/route/*.test.ts",
     "test:db": "bash scripts/db-test.sh",
     "test:restore": "bash scripts/restore-drill.sh",
     "test:preview": "TSX_TSCONFIG_PATH=scripts/preview/tsconfig.json node --require ./scripts/preview/css-stub.cjs --import ./scripts/preview/register.mjs --import tsx scripts/preview/render.tsx",

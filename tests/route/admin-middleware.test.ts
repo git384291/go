@@ -41,6 +41,7 @@ test('M1 인증 꺼짐: Supabase 호출 없이 통과, no-store', { skip }, asyn
   assert.equal(c.created(), 0);
   assert.ok(passedThrough(r));
   assert.equal(r.headers.get('cache-control'), 'private, no-store');
+  assert.equal(r.headers.get('x-robots-tag'), 'noindex, nofollow');
 });
 
 test('M2 정상 갱신: 갱신 쿠키를 응답에 싣고 통과, no-store', { skip }, async () => {
@@ -79,6 +80,7 @@ test('M4 인증 서버 장애(예외·재시도 오류·5xx·상태 없음): 보
       assert.equal(r.headers.get('cache-control'), 'private, no-store');
       const body = await r.text();
       assert.equal(body, ADMIN_UNAVAILABLE_BODY);
+      assert.equal(r.headers.get('x-robots-tag'), 'noindex, nofollow');
       assert.ok(![...r.headers.values()].some((v) => v.includes('private-network-detail')));
     }
   }

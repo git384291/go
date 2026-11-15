@@ -54,5 +54,6 @@ export async function adminMiddleware(
     }
   }
   response.headers.set('Cache-Control', NO_STORE);
+  response.headers.set('X-Robots-Tag', 'noindex, nofollow'); // 검색 제외(인증의 대체 아님)
   return response;
 }

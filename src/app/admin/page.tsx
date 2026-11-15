@@ -27,6 +27,7 @@ export default async function AdminPage() {
     <AdminMockView
       headerExtra={
         <form action={logoutAction} className="admin-logout">
+          {role === 'owner' && <a className="admin-link" href="/admin/progress">진행 상황</a>}
           <span className="admin-role">{ROLE_LABEL[role] ?? role}</span>
           <button className="btn btn-ghost" type="submit">로그아웃</button>
         </form>
