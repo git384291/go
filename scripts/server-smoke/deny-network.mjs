@@ -1,9 +1,8 @@
-// 서버 스모크 전용 사전 로드(NODE_OPTIONS=--require). 루프백 외 TCP·TLS·DNS 접속을 막는다.
+// 서버 스모크 전용 사전 로드(NODE_OPTIONS=--import, ESM). 루프백 외 TCP·TLS·DNS 접속을 막는다.
 // 막은 횟수만 FIDEON_SMOKE_NET_LOG 파일에 한 줄씩 남긴다(호스트·주소·내용은 기록하지 않음).
-'use strict';
-const net = require('node:net');
-const dns = require('node:dns');
-const fs = require('node:fs');
+import net from 'node:net';
+import dns from 'node:dns';
+import fs from 'node:fs';
 
 const LOG = process.env.FIDEON_SMOKE_NET_LOG;
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);

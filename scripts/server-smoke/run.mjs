@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(ROOT, 'test-results', 'server-smoke');
 const NET_LOG = path.join(OUT, 'blocked-network.log');
-const DENY = path.join(ROOT, 'scripts', 'server-smoke', 'deny-network.cjs');
+const DENY = path.join(ROOT, 'scripts', 'server-smoke', 'deny-network.mjs');
 const READY_MS = 30_000;
 const TOTAL_MS = 120_000;
 const results = [];
@@ -56,7 +56,7 @@ const freePort = () => new Promise((resolve, reject) => {
 // 2) 차단 장치 자체 확인: 사전 로드한 node가 외부 주소에 접속하지 못하고 기록이 남는지
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
-const selfTest = spawnSync(process.execPath, ['--require', DENY, '-e',
+const selfTest = spawnSync(process.execPath, ['--import', DENY, '-e',
   "require('node:net').connect(443,'192.0.2.1').on('error',()=>process.exit(3)).on('connect',()=>process.exit(0));setTimeout(()=>process.exit(4),3000)"], {
   env: { PATH: process.env.PATH, FIDEON_SMOKE_NET_LOG: NET_LOG }, timeout: 10_000,
 });
@@ -72,7 +72,7 @@ const env = {
   PORT: String(port),
   HOSTNAME: '127.0.0.1',
   NEXT_TELEMETRY_DISABLED: '1',
-  NODE_OPTIONS: `--require ${DENY}`,
+  NODE_OPTIONS: `--import ${DENY}`,
   FIDEON_SMOKE_NET_LOG: NET_LOG,
 };
 const server = spawn(process.execPath, [nextBin, 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: ROOT, env, stdio: ['ignore', 'ignore', 'ignore'], detached: false });
