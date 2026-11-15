@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
 import { adminAuthMode } from '@/server/auth/adminAuthMode';
 import { requireStaff } from '@/server/auth/requireStaff';
 import { renderProgress } from './render';
@@ -15,6 +14,10 @@ export default async function ProgressPage() {
     loadSnapshot: async () => (await import('@/server/admin/progressSnapshot')).PROGRESS_SNAPSHOT,
     now: () => new Date(),
   });
-  if ('redirect' in result) redirect(result.redirect);
+  if ('redirect' in result) {
+    // 필요할 때만 불러온다(거부·잠금 경로 시험이 next 클라이언트 모듈 없이 실제 page를 실행할 수 있게)
+    const { redirect } = await import('next/navigation');
+    redirect(result.redirect);
+  }
   return result.element;
 }
