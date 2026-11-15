@@ -45,3 +45,18 @@
 
 ### 묶음 3 — 로그아웃 실패 표시·middleware 장애 처리
 로그아웃 결과 5가지와 middleware 503 처리, 보장의 한계는 [ADMIN-AUTH-OPERATIONS.md](ADMIN-AUTH-OPERATIONS.md) 4절. 시도 제한 조사·서버 제한안(1절), TOTP 등록·복구 절차(2절), fideon-dev 체크리스트(3절)도 같은 문서에 있다.
+
+### 묶음 B — 관리자 리드 조회 API (가상 데이터 전용)
+| 경로 | 동작 |
+|---|---|
+| `GET /api/admin/leads` | 목록. owner 전체, counselor 본인 배정만, reviewer·policy_editor 403 |
+| `GET /api/admin/leads/[id]` | 상세. 다른 직원 배정·미배정(counselor)·없는 ID·형식 오류는 모두 같은 404 |
+
+- 인증 스위치가 꺼져 있으면 로컬 개발 서버를 포함해 항상 503 `ADMIN_AUTH_DISABLED`이다. 판정 함수를 호출하지 않는다.
+- 켜져 있으면 `requireStaff()`(DB whoami)를 거친다. 미인증 401, 권한 없음 403, 인증·DB 장애 503이다.
+- 오류 응답은 코드만 담는다. 모든 응답은 `Cache-Control: private, no-store`이고 `data_source: "mock"`을 표시한다.
+- 데이터는 `src/mock/leads.ts`의 가상 건만 쓴다. 마스킹 값만 내보낸다. 실제 DB 조회·쓰기·상태 변경·연락처 원문 복호화는 없다.
+- 판정 규칙은 `server/admin/mockLeads.ts`, 응답은 `server/admin/leadsApi.ts`에 있다.
+- 시험: `tests/route/admin-leads.test.ts`
+  - L1~L8: 판정 주입
+  - L9: 실제 route.ts, CI 전용
