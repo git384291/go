@@ -143,3 +143,91 @@ Claude 작업 환경에 남아 있는 패치 9개를 대조했다. 각 패치에
 - 이력에 없는 추가 줄은 **0줄**이다. HEAD에 없는 줄은 이후 커밋에서 다시 고친 줄이다.
 - **한계:** 줄 단위 포함 여부만 확인했다. 줄 순서·문맥이 같은지는 확인하지 않았다.
 - 사용자가 PM에게 준 `PHASE1.patch`·`final-review.diff`가 위 파일과 같은 파일인지는 Claude가 확인할 수 없다(원본을 받지 않음).
+
+## 6. 시도 제한 설계 보완 (PM 6897318608 — 구현·0007 적용 전 검토용)
+
+### 6-1. 무료 요금제에서 쓸 수 있는 것
+[Supabase Auth Hooks](https://supabase.com/docs/guides/auth/auth-hooks) 기준(2026-11-16 확인):
+- Free·Pro에서 쓸 수 있는 훅: Before User Created, Custom Access Token, Send SMS, Send Email
+- **Teams·Enterprise 전용:** MFA Verification Attempt, Password Verification Attempt
+- 따라서 무료 요금제에서는 Supabase 쪽의 사용자별 비밀번호·TOTP 실패 제한 훅을 **쓸 수 없다.** 유료 기능은 집행하지 않는다.
+- 남는 것은 Supabase 기본 IP 제한(1절)과 FIDEON 서버 제한이다.
+
+### 6-2. 직접 Supabase 호출 우회
+- 공개 키(publishable key)는 브라우저에 공개된다. 공격자는 FIDEON 서버를 거치지 않고 Supabase `/token`, `/factors/:id/verify`를 직접 호출할 수 있다. **서버 제한은 이 직접 호출을 막지 못한다.** 직접 호출에는 Supabase 기본 IP 제한만 걸린다.
+- 그래도 관리자 접근의 결정 단계는 FIDEON 서버에만 있다.
+  - DB 세션 개설(`api.staff_session_open`)은 서버 서명 키로 만든 토큰이 있어야 한다.
+  - 그 토큰은 FIDEON 서버의 TOTP 단계를 통과해야만 만들어진다.
+  - DB에 열리지 않은 Supabase 세션은 모든 관리자 요청에서 `whoami`가 거부한다.
+- 따라서 서버 제한은 **"DB 세션을 여는 TOTP 단계"를 지키는 것이 핵심**이다. 직접 호출로 비밀번호 정답 여부를 알아내는 위험은 남는다.
+- 남은 위험 대응
+  - 직원 이메일 비공개, 긴 비밀번호 정책(D6)
+  - Supabase 유출 비밀번호 차단 기능의 요금제 확인(미확인)
+  - 아래 6-4의 사용자 단위 TOTP 제한
+
+### 6-3. 원자적 예약 (check·record 분리 금지)
+- check와 record를 따로 부르면, 동시에 들어온 요청이 모두 "한도 미달"로 판정받고 통과한다. 따라서 **함수 하나로 판정과 예약을 같은 트랜잭션에서** 한다.
+- `api.login_attempt_reserve(p_step, p_subject_hmac, p_ip_hash)` → 예약 ID 또는 거부
+  1. `pg_advisory_xact_lock`으로 같은 대상(이메일 HMAC 또는 사용자 ID)을 직렬화한다.
+  2. 최근 실패 수에 **아직 결과가 없는 예약 수를 더해 센다**(fail-closed).
+  3. 한도 미만이면 `pending` 예약 행을 넣고 ID를 돌려준다. 한도 이상이면 거부한다.
+- `api.login_attempt_settle(p_id, p_success)`
+  - Supabase 결과 뒤에 호출한다. 성공하면 해당 대상의 실패 계수를 초기화한다.
+  - 1분이 지나도 결과가 없는 예약은 실패로 센다(서버가 중간에 죽어도 한도가 풀리지 않음).
+- 두 함수 모두 SECURITY DEFINER, `search_path=''`, 테이블 직접 권한 없음, `app_public`에서만 실행 가능하게 한다.
+- 실DB 통합 시험에 동시 10건 요청 → 정확히 한도 수만 예약되는지 확인을 추가한다(기존 C2·C3 방식).
+
+### 6-4. 악의적 잠금(서비스 거부) 대응
+| 단계 | 기준 | 한도 | 넘으면 |
+|---|---|---|---|
+| 비밀번호 | (이메일 HMAC, IP 해시) | 15분 5회 | 그 IP에서 그 계정만 15분 거부 |
+| 비밀번호 | 이메일 HMAC 전체 | 1시간 30회 | **잠그지 않고** 대표 알림(감사 기록)만 남김. 다른 IP의 정상 직원은 계속 로그인 가능 |
+| 비밀번호 | IP 해시 전체 | 15분 20회 | 그 IP 15분 거부 |
+| TOTP | 사용자 ID | 15분 5회 | 15분 거부 + Supabase 로그아웃 |
+
+- 이메일만 알아서는 다른 IP의 직원을 잠글 수 없다. 공격자가 바꾼 IP 수만큼 시도 수만 늘어나고, 그 대가는 대표 알림이다.
+- TOTP 잠금은 비밀번호를 알아야 걸 수 있다. 그 상황이면 이미 계정 침해이므로 잠그는 쪽이 맞다.
+- 잠금 해제: owner가 감사 기록을 확인한 뒤 해당 대상의 계수를 초기화하는 함수(owner 전용)를 둔다.
+- 응답 문구는 잠금 여부와 무관하게 기존과 같다.
+
+### 6-5. 보존 최소화
+- 원문 이메일·IP는 저장하지 않는다. 이메일은 `PII_HMAC_KEY` HMAC, IP는 `PII_IP_HASH_KEY` 해시로 기존 방식과 같다.
+- 시도 행은 24시간 뒤 계수에서 빠지고 **7일 뒤 삭제**한다. 대표 알림용 감사 기록은 기존 `core.audit_logs` 보존 규칙을 따른다.
+- 비밀번호·TOTP 코드·토큰은 어디에도 기록하지 않는다.
+
+## 7. TOTP 최초 등록 설계 근거 (코딩 전 확정용)
+
+### 7-1. 기존 DB 함수로 aal1 등록 자격을 확인할 수 있는가 — **없다**
+- `api.staff_session_open`은 서명 대상에 `'aal2'`가 들어간다(0001). 서버도 aal2가 아니면 서명하지 않는다(`staffAssertion.ts`).
+- `security.assert_staff`/`api.whoami`는 열린 DB 세션을 요구한다.
+- 등록 전 직원은 aal1이라 둘 다 쓸 수 없다. 기존 함수를 aal1로 완화하면 aal2 필수 원칙이 무너지므로 **완화하지 않는다.**
+- 결론: 등록 전용 DB 함수가 따로 필요하다(스키마 변경 → 승인 후 0007 이후 번호).
+
+### 7-2. 대표 발급 1회용 등록 승인 (화면 공유만으로는 권한이 생기지 않게)
+1. **발급:** owner가 aal2 DB 세션으로 `api.enrollment_grant_issue(owner 인증, 대상 user_id)`를 실행한다.
+   - DB는 대상이 `core.staff`의 활성 직원이고 검증된 TOTP가 아직 등록되지 않았는지 확인한다.
+   - 무작위 등록 코드를 만들고, 해시만 `security.enrollment_grants`에 저장한다(대상, 발급자, 15분 만료, 미사용).
+   - 코드는 owner 화면에 1회만 표시하고, 직원에게 대면으로 전달한다. 채팅·메일·PR로는 보내지 않는다.
+2. **사용:** 직원이 비밀번호로 로그인(aal1)한 뒤 등록 화면에서 코드를 입력한다. 서버가 `api.enrollment_grant_consume`를 부른다.
+   - 인자는 aal1 전용 서명 토큰 `['enroll', actor, session, 'aal1']`과 코드다.
+   - 원자적으로 확인한다: 대상 일치, 미만료, 미사용. 확인되면 사용 처리하고 감사 기록을 남긴다.
+   - 성공한 경우에만 서버가 Supabase `mfa.enroll` → QR 표시 → `mfa.challengeAndVerify`를 진행한다.
+3. **결합:** 검증이 끝나면 서버가 그 factor ID를 `core.staff`의 등록 요소로 기록한다(owner 승인과 연결). 이후 로그인 TOTP 단계에서 다음을 모두 확인하고, 아니면 거부하고 대표에게 알린다.
+   - 사용한 factor가 등록 요소와 같은지
+   - 검증된 TOTP가 정확히 1개인지
+4. **이유:** 공개 키로 Supabase `mfa.enroll`을 **직접** 호출하면 FIDEON 화면을 거치지 않고 등록할 수 있다. 3번의 결합 확인이 있어야 그렇게 직접 등록한 요소로는 DB 세션이 열리지 않는다. 화면 공유나 구두 확인만으로는 이 결합이 생기지 않는다.
+5. **첫 owner(부트스트랩):** 발급해 줄 owner가 없으므로, Supabase 프로젝트 소유자가 SQL 편집기에서 1회 발급한다. 그 실행 기록을 남긴다.
+
+### 7-3. 분실 복구 기본안 — 프로젝트 소유자의 공식 절차 우선
+- 직원 분실: 2-3절 순서를 따른다. 요소 삭제는 Supabase 관리 기능으로 한다(대시보드 또는 서버 전용 관리자 API의 MFA 요소 삭제). 정확한 메뉴와 API 이름은 fideon-dev에서 **확인 필요**하다. 이후 owner가 7-2로 재발급한다.
+- 대표 분실: Supabase 프로젝트 소유자 계정(그 계정의 MFA로 보호)이 요소를 삭제하고 7-2-5 부트스트랩으로 재발급한다.
+- **두 번째 owner 계정은 자동 생성하지 않는다.** 만들지 여부는 PM·사용자 결정이다.
+
+### 7-4. 필요한 승인 항목 (구현 전)
+- 스키마
+  - `security.enrollment_grants`
+  - `core.staff` 등록 요소 열
+  - 함수 `enrollment_grant_issue`·`enrollment_grant_consume`
+  - TOTP 단계 요소 확인을 세션 개설 서명에 포함할지 여부
+- aal1 전용 서명 목적(`'enroll'`) 추가
+- 등록 화면(인증 스위치 하위, 기본 꺼짐)
