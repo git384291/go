@@ -61,7 +61,17 @@ export function authPort(supabase: Supabase): AuthPort {
     },
     claims: () => verifiedClaimsFrom(supabase),
     signOut: async () => {
-      await supabase.auth.signOut({ scope: 'local' });
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) throw new Error('AUTH_SIGNOUT_FAILED'); // SDK 원문 오류·토큰은 싣지 않는다
     },
+    clearLocalSession: clearSupabaseCookies,
   };
+}
+
+/** Supabase 인증 쿠키(sb-<프로젝트>-auth-token, 분할 조각, PKCE 검증값)를 지운다. Server Action에서만 동작. */
+export async function clearSupabaseCookies(): Promise<void> {
+  const store = await cookies();
+  for (const { name } of store.getAll()) {
+    if (/^sb-[A-Za-z0-9-]+-auth-token(-code-verifier)?(\.\d+)?$/.test(name)) store.delete(name);
+  }
 }

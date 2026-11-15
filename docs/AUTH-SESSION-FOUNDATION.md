@@ -42,3 +42,6 @@
 | `supabaseServer.ts` | Server Component에서 쿠키 쓰기 예외가 나면 건너뛴다. 갱신은 middleware가 담당한다 |
 
 하지 않은 것: TOTP 최초 등록 화면(대표 입회 절차로 별도 설계), 공개 가입·직원 생성, 실제 리드 조회 API, 실제 Supabase 프로젝트 연결 검증(설정 준비 후).
+
+### 묶음 3 — 로그아웃 실패 표시·middleware 장애 처리
+로그아웃 결과 5가지와 middleware 503 처리, 보장의 한계는 [ADMIN-AUTH-OPERATIONS.md](ADMIN-AUTH-OPERATIONS.md) 4절. 시도 제한 조사·서버 제한안(1절), TOTP 등록·복구 절차(2절), fideon-dev 체크리스트(3절)도 같은 문서에 있다.

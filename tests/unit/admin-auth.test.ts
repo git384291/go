@@ -7,7 +7,7 @@ import { adminAuthMode, adminMockVisible } from '../../src/server/auth/adminAuth
 import { logoutFlow, passwordStep, totpStep, type AuthPort } from '../../src/server/auth/loginFlow';
 import { StaffAuthError, type VerifiedClaims } from '../../src/server/auth/staffAssertion';
 import { StaffSessionUnavailable } from '../../src/server/auth/staffSession';
-import { LOGIN_MESSAGES } from '../../src/content/adminLogin';
+import { LOGIN_MESSAGES, LOGOUT_MESSAGES, logoutNotice } from '../../src/content/adminLogin';
 
 const FULL = {
   ADMIN_AUTH_MODE: 'supabase',
@@ -39,7 +39,7 @@ const USER = '00000000-0000-4000-8000-000000000001';
 const SESSION = '10000000-0000-4000-8000-000000000001';
 
 /** 가짜 Supabase: 등록 계정 1개(비밀번호 + 검증된 TOTP) */
-function fakeAuth(opts: { totp?: boolean; verifyOk?: boolean; upgrade?: boolean } = {}) {
+function fakeAuth(opts: { totp?: boolean; verifyOk?: boolean; upgrade?: boolean; signOutFails?: boolean; clearFails?: boolean } = {}) {
   const calls: string[] = [];
   let aal: string | null = null;
   const port: AuthPort = {
@@ -57,7 +57,16 @@ function fakeAuth(opts: { totp?: boolean; verifyOk?: boolean; upgrade?: boolean 
       return true;
     },
     claims: async (): Promise<VerifiedClaims | null> => (aal ? { sub: USER, session_id: SESSION, aal } : null),
-    signOut: async () => { calls.push('signOut'); aal = null; },
+    signOut: async () => {
+      calls.push('signOut');
+      if (opts.signOutFails) throw new Error('AUTH_SIGNOUT_FAILED');
+      aal = null;
+    },
+    clearLocalSession: async () => {
+      calls.push('clear');
+      if (opts.clearFails) throw new Error('cookie');
+      aal = null;
+    },
   };
   return { port, calls, aal: () => aal };
 }
@@ -112,17 +121,50 @@ test('DB가 거부(403)하면 ACCESS_DENIED, DB 장애면 UNAVAILABLE — 둘 �
   }
 });
 
-test('로그아웃: DB 세션 폐기 후 Supabase 로그아웃, 폐기 실패해도 로그아웃은 진행', async () => {
-  for (const fail of [false, true]) {
-    const f = fakeAuth();
+test('로그아웃: DB 폐기·Auth 로그아웃 성공/실패 조합마다 결과를 숨기지 않음', async () => {
+  const cases = [
+    { db: true, auth: true, clear: true, want: 'complete', calls: ['signOut'] },
+    { db: false, auth: true, clear: true, want: 'db_unconfirmed', calls: ['signOut'] },
+    { db: true, auth: false, clear: true, want: 'auth_unconfirmed', calls: ['signOut', 'clear'] },
+    { db: false, auth: false, clear: true, want: 'both_unconfirmed', calls: ['signOut', 'clear'] },
+    { db: true, auth: false, clear: false, want: 'local_not_cleared', calls: ['signOut', 'clear'] },
+    { db: false, auth: false, clear: false, want: 'local_not_cleared', calls: ['signOut', 'clear'] },
+  ] as const;
+  for (const c of cases) {
+    const f = fakeAuth({ signOutFails: !c.auth, clearFails: !c.clear });
     await passwordStep({ email: 'staff@example.com', password: 'correct-horse' }, f.port);
     await totpStep({ code: '123456' }, f.port, async () => 'owner');
+    const before = f.calls.length;
     const order: string[] = [];
-    await logoutFlow(f.port, async (c) => { order.push(`revoke:${c.aal}`); if (fail) throw new StaffAuthError(403, 'FORBIDDEN'); });
-    assert.deepEqual(order, ['revoke:aal2']);
-    assert.equal(f.calls.at(-1), 'signOut');
-    assert.equal(f.aal(), null);
+    const out = await logoutFlow(f.port, async (cl) => {
+      order.push(`revoke:${cl.aal}`);
+      if (!c.db) throw Object.assign(new StaffAuthError(403, 'FORBIDDEN'), { detail: 'private' });
+    });
+    assert.equal(out, c.want, JSON.stringify(c));
+    assert.deepEqual(order, ['revoke:aal2'], 'DB 폐기를 먼저 시도');
+    assert.deepEqual(f.calls.slice(before), c.calls);
+    assert.equal(f.aal() === null, c.clear || c.auth, '로컬 로그인 정보 제거 여부');
   }
+  // 이미 로그인 정보가 없으면 폐기할 세션도 없다: DB 호출 없이 complete
+  const none = fakeAuth();
+  assert.equal(await logoutFlow(none.port, async () => { throw new Error('must not call'); }), 'complete');
+});
+
+test('로그인 실패 경로에서 Supabase 로그아웃이 실패하면 로컬 쿠키를 지운다', async () => {
+  const f = fakeAuth({ signOutFails: true });
+  await passwordStep({ email: 'staff@example.com', password: 'correct-horse' }, f.port);
+  assert.deepEqual(await totpStep({ code: '123456' }, f.port, async () => { throw new StaffAuthError(403, 'FORBIDDEN'); }), { step: 'password', error: 'ACCESS_DENIED' });
+  assert.deepEqual(f.calls.slice(-2), ['signOut', 'clear']);
+  assert.equal(f.aal(), null);
+});
+
+test('로그아웃 경고 문구: 정해진 값만 표시, 나머지 주소 값은 무시', () => {
+  assert.equal(logoutNotice('complete'), null);
+  assert.equal(logoutNotice('<script>'), null);
+  assert.equal(logoutNotice(['db_unconfirmed']), null);
+  assert.equal(logoutNotice('__proto__'), null);
+  for (const k of ['db_unconfirmed', 'auth_unconfirmed', 'both_unconfirmed', 'local_not_cleared']) assert.ok(logoutNotice(k));
+  assert.ok(!/완료했습니다|로그아웃되었습니다/.test(Object.values(LOGOUT_MESSAGES).join(' ')), '미완료를 완료처럼 표현하지 않음');
 });
 
 test('화면 문구는 계정 존재·내부 사유를 드러내지 않고, 로그인 화면 코드는 서버 모듈을 import하지 않음', () => {
@@ -130,6 +172,7 @@ test('화면 문구는 계정 존재·내부 사유를 드러내지 않고, 로�
   const form = readFileSync('src/app/admin/login/LoginForm.tsx', 'utf8');
   assert.ok(!/@\/server\//.test(form), 'LoginForm이 서버 모듈을 import함');
   const mw = readFileSync('src/middleware.ts', 'utf8');
-  assert.match(mw, /'Cache-Control', 'private, no-store'/);
   assert.match(mw, /matcher: \['\/admin', '\/admin\/:path\*'\]/);
+  assert.match(mw, /adminMiddleware\(/);
+  assert.match(readFileSync('src/server/auth/adminMiddleware.ts', 'utf8'), /const NO_STORE = 'private, no-store'/);
 });

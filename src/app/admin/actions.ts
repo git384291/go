@@ -25,8 +25,7 @@ export async function loginAction(_prev: LoginState, form: FormData): Promise<Lo
 }
 
 export async function logoutAction(): Promise<void> {
-  if (adminAuthMode() !== 'disabled') {
-    await logoutFlow(authPort(await supabaseServer()), (claims) => revokeStaffSessionWithDb(claims, signingKeyFromEnv('staff')));
-  }
-  redirect('/admin/login');
+  if (adminAuthMode() === 'disabled') redirect('/admin/login');
+  const outcome = await logoutFlow(authPort(await supabaseServer()), (claims) => revokeStaffSessionWithDb(claims, signingKeyFromEnv('staff')));
+  redirect(outcome === 'complete' ? '/admin/login' : `/admin/login?logout=${outcome}`);
 }

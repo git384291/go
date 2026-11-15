@@ -1,6 +1,6 @@
 import type { VerifiedClaims } from './staffAssertion';
 import { StaffAuthError } from './staffAssertion';
-import type { LoginError, LoginState } from '../../content/adminLogin';
+import type { LoginError, LoginState, LogoutOutcome } from '../../content/adminLogin';
 
 /**
  * 관리자 로그인 절차(비밀번호 → TOTP → DB 세션). Supabase·쿠키는 AuthPort로 주입해 시험한다.
@@ -18,15 +18,33 @@ export type AuthPort = {
   challengeAndVerify: (factorId: string, code: string) => Promise<boolean>;
   /** 서명 검증된 접근 토큰 클레임. 로그인 안 됨이면 null */
   claims: () => Promise<VerifiedClaims | null>;
+  /** Supabase 로그아웃. SDK가 오류를 돌려주면 예외(원문 오류는 담지 않음) */
   signOut: () => Promise<void>;
+  /** 이 브라우저의 Supabase 인증 쿠키를 직접 지운다(로그아웃 API 실패 시 대비) */
+  clearLocalSession: () => Promise<void>;
 };
 
-export type { LoginError, LoginState };
+export type { LoginError, LoginState, LogoutOutcome };
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
+/** Supabase 로그아웃 → 실패하면 로컬 인증 쿠키 직접 삭제. 원문 오류는 버린다. */
+async function endAuth(port: AuthPort): Promise<{ signedOut: boolean; localCleared: boolean }> {
+  try {
+    await port.signOut();
+    return { signedOut: true, localCleared: true };
+  } catch {
+    try {
+      await port.clearLocalSession();
+      return { signedOut: false, localCleared: true };
+    } catch {
+      return { signedOut: false, localCleared: false };
+    }
+  }
+}
+
 async function quietSignOut(port: AuthPort) {
-  try { await port.signOut(); } catch { /* 로그아웃 실패도 로그인 성공으로 바꾸지 않는다 */ }
+  await endAuth(port); // 로그인 실패 경로: 결과와 무관하게 로그인 성공으로 바꾸지 않는다
 }
 
 export async function passwordStep(input: { email: unknown; password: unknown }, port: AuthPort): Promise<LoginState> {
@@ -72,11 +90,22 @@ export async function totpStep(
   }
 }
 
-/** 로그아웃: DB 세션 폐기(실패해도 진행) → Supabase 로그아웃 */
-export async function logoutFlow(port: AuthPort, revoke: (claims: VerifiedClaims) => Promise<void>): Promise<void> {
+/**
+ * 로그아웃: DB 세션 폐기 → Supabase 로그아웃(실패 시 로컬 쿠키 삭제).
+ * 결과를 숨기지 않는다. 'complete'가 아니면 화면이 로그아웃 완료로 보이지 않게 한다.
+ * - DB 폐기 성공이면 그 세션으로는 관리자 접근 불가(모든 요청이 DB whoami 확인).
+ * - DB 폐기를 확인 못 하면 세션은 최대 12시간 뒤 DB에서 만료된다(그 전에 같은 토큰을 가진 사람은 접근 가능).
+ */
+export async function logoutFlow(port: AuthPort, revoke: (claims: VerifiedClaims) => Promise<void>): Promise<LogoutOutcome> {
   const claims = await port.claims().catch(() => null);
+  let dbOk = true; // 이 브라우저에 로그인 정보가 없으면 폐기할 세션도 없다
   if (claims) {
-    try { await revoke(claims); } catch { /* 이미 폐기·만료여도 로그아웃은 끝까지 진행 */ }
+    try { await revoke(claims); } catch { dbOk = false; }
   }
-  await quietSignOut(port);
+  const auth = await endAuth(port);
+  if (!auth.localCleared) return 'local_not_cleared';
+  if (!dbOk && !auth.signedOut) return 'both_unconfirmed';
+  if (!dbOk) return 'db_unconfirmed';
+  if (!auth.signedOut) return 'auth_unconfirmed';
+  return 'complete';
 }
