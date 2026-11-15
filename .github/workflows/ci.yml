@@ -37,6 +37,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
+      - name: API route test (reserved products → 403 PRODUCT_NOT_ACTIVE, no server/DB/external calls)
+        run: npm run test:route
       - name: DB security tests (local virtual DB, PostgreSQL from runner image)
         run: npm run test:db
       - name: Restore drill (virtual data)

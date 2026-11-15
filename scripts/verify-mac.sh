@@ -43,6 +43,7 @@ step 02-npm-ci npm ci --no-audit --no-fund || { echo "npm ci 실패 → 이후 �
 step 03-typecheck npm run -s typecheck
 step 04-lint npm run -s lint
 step 05-unit npm run -s test:unit
+step 05b-route npm run -s test:route   # 예약 상품 API 차단(403 PRODUCT_NOT_ACTIVE) 정확 검증
 step 06-build npm run -s build
 
 # 7) 실제 Next.js 서버(프로덕션 빌드)를 띄우고 8) 실제 브라우저로 모바일 화면 검사

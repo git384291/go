@@ -42,21 +42,40 @@ async function checkApis(): Promise<string[]> {
   // 진단 경로는 로컬 서버에서 열리지 않아야 한다
   const diag = await fetch(`${BASE}/api/diag/ip`);
   if (diag.status !== 404) fails.push(`/api/diag/ip status=${diag.status} (expected 404)`);
-  // 실제 수집이 꺼진 상태에서 상담 신청은 저장되지 않아야 한다(가짜 값만 사용)
-  const lead = await fetch(`${BASE}/api/leads`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: '테스트', phone: '01000000000', interest: 'internet_tv', consents: {} }),
-  });
-  if (lead.status < 400) fails.push(`/api/leads status=${lead.status} (expected 4xx/503 while intake disabled)`);
-  // PHASE 1: 예약 상품으로 직접 호출해도 저장되지 않아야 한다
-  for (const interest of ['internet_phone', 'cctv_security', 'internet_only', 'other', 'mobile']) {
+  // 상담 신청 API — 상태 코드·응답 본문을 정확히 검증한다(가짜 값만 사용).
+  // 이 E2E 서버는 실제 수집을 끈 상태(LEAD_INTAKE_MODE 미설정)로 실행된다. API는 '수집 차단' 검사를 가장 먼저 하므로
+  // 모든 신청은 상품과 관계없이 503 LEAD_INTAKE_DISABLED로 거부되어야 한다(이 값이 바뀌면 수집이 열린 것).
+  // 예약 상품의 403 PRODUCT_NOT_ACTIVE는 수집 차단을 통과해야만 나오는 응답이므로,
+  // 수집을 켜지 않고 같은 API 경로 함수를 직접 호출하는 tests/route/leads-route.test.ts가 정확히 검증한다.
+  const EXPECT_DISABLED = { status: 503, body: { ok: false, code: 'LEAD_INTAKE_DISABLED' } };
+  const leadCases: [string, unknown][] = [
+    ['internet_tv', { name: '테스트', phone: '01000000000', interest: 'internet_tv', consentCollection: true }],
+    ...(['internet_phone', 'cctv_security', 'internet_only', 'other', 'mobile'] as const).map(
+      (interest): [string, unknown] => [interest, { name: '테스트', phone: '01000000000', interest, consentCollection: true }],
+    ),
+    // 변형 값·누락도 같은 응답이어야 한다(상품 값으로 우회 불가)
+    ['CCTV_SECURITY', { name: '테스트', phone: '01000000000', interest: 'CCTV_SECURITY' }],
+    ['interest 배열', { name: '테스트', phone: '01000000000', interest: ['internet_tv', 'cctv_security'] }],
+    ['interest 없음', { name: '테스트', phone: '01000000000' }],
+  ];
+  for (const [label, payload] of leadCases) {
     const r = await fetch(`${BASE}/api/leads`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '테스트', phone: '01000000000', interest }),
+      body: JSON.stringify(payload),
     });
-    if (r.status < 400) fails.push(`/api/leads interest=${interest} status=${r.status} (expected 4xx/503)`);
+    const type = r.headers.get('content-type') ?? '';
+    const text = await r.text();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = `(JSON 아님) ${text.slice(0, 80)}`;
+    }
+    if (r.status !== EXPECT_DISABLED.status || !type.includes('application/json')
+        || JSON.stringify(body) !== JSON.stringify(EXPECT_DISABLED.body)) {
+      fails.push(`/api/leads [${label}] HTTP ${r.status} ${JSON.stringify(body)} (기대: HTTP 503 ${JSON.stringify(EXPECT_DISABLED.body)})`);
+    }
   }
   return fails;
 }
