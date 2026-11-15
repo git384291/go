@@ -1,15 +1,21 @@
 // 실제 Next 프로덕션 서버의 '기본 비활성' 경계 스모크(실HTTP·RSC).
-// - 127.0.0.1에만 바인딩, 안전한 환경 변수만 전달(DB·Supabase·서명 키·광고 값 상속 안 함), 외부 접속 차단 사전 로드
+// - 127.0.0.1에만 바인딩, 안전한 환경 변수만 전달(DB·Supabase·서명 키·광고 값 상속 안 함)
+// - Next는 실행 루트의 .env* 파일을 스스로 읽는다 → 실제 설정 파일이 없는 격리 루트에서 실행(isolate.mjs)하고,
+//   격리 루트에 .env*가 있으면 시작 전 중단. 닫힌 값(인증·접수·검색 꺼짐)을 명시해 넘긴다.
+// - deny-network: 테스트용 Node TCP·TLS·DNS 계측(OS 네트워크 sandbox 아님. UDP·외부 프로세스·원시 소켓은 막는다고 보장하지 않음).
+//   H8은 '이번 실행에서 관찰된 Node 접속 시도 0'이며 완전한 네트워크 격리 보장이 아니다.
 // - 준비 대기 30초·전체 120초 제한, 성공·실패·타임아웃 모두 서버 정리
 // - 응답 본문·환경 원문은 출력하지 않는다(검사 이름과 통과·실패만)
 // - .next 빌드나 next가 없으면 실패. CI(CI=true)에서는 절대 건너뛰지 않는다.
 //   로컬에서 FIDEON_ALLOW_SKIP_SERVER_SMOKE=1일 때만 '미실행'으로 표시하고 exit 0(통과로 세지 않음)
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dotenvFilesIn, prepareIsolatedRoot } from './isolate.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(ROOT, 'test-results', 'server-smoke');
@@ -64,6 +70,53 @@ const selfBlocked = existsSync(NET_LOG) && readFileSync(NET_LOG, 'utf8').trim().
 report('N0 외부 접속 차단 장치 동작(문서용 주소 192.0.2.1)', selfTest.status === 3 && selfBlocked);
 rmSync(NET_LOG, { force: true });
 
+// 2-1) 원본 루트 dotenv 파일: 이름 존재만 기록(내용 미열람)
+const srcDotenv = dotenvFilesIn(ROOT);
+report('E0 원본 루트 dotenv 파일(이름만 확인, 내용 미열람)', true, srcDotenv.length ? `${srcDotenv.length}개 있음 → 격리 루트로 우회` : '없음');
+
+// 2-2) fixture 증명: 가짜 dotenv가 있는 원본에서 만든 격리 루트는 그 값을 로드하지 않는다(@next/env 실제 로더)
+{
+  const fx = mkdtempSync(path.join(os.tmpdir(), 'fideon-smoke-fixture-'));
+  let isolated = null;
+  try {
+    mkdirSync(path.join(fx, '.next'));
+    symlinkSync(path.join(ROOT, 'node_modules'), path.join(fx, 'node_modules'), 'dir');
+    writeFileSync(path.join(fx, 'package.json'), '{"private":true}');
+    writeFileSync(path.join(fx, '.env.production.local'), 'FIDEON_SMOKE_FIXTURE_FLAG=fixture-loaded\nADMIN_AUTH_MODE=supabase\nDATABASE_URL=postgres://fixture@127.0.0.1:1/fixture\n');
+    const { loadEnvConfig } = req('@next/env');
+    const probe = (dir) => {
+      // 로더가 process.env를 바꾸므로 확인용 키만 비교하고 바로 되돌린다
+      const keys = ['FIDEON_SMOKE_FIXTURE_FLAG', 'ADMIN_AUTH_MODE', 'DATABASE_URL'];
+      const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+      for (const k of keys) delete process.env[k];
+      const r = loadEnvConfig(dir, false, { info() {}, error() {} }, true);
+      const loaded = keys.filter((k) => r.combinedEnv[k] !== undefined).length;
+      for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+      return loaded;
+    };
+    const control = probe(fx);
+    isolated = prepareIsolatedRoot(fx);
+    const inIsolated = probe(isolated.root);
+    report('E1 fixture 대조군: 원본 경로에서는 가짜 dotenv 3개 값이 로드됨', control === 3, `로드 ${control}개`);
+    report('E2 fixture 격리 루트: dotenv 값 0개 로드, 격리 루트에 .env* 없음', inIsolated === 0 && dotenvFilesIn(isolated.root).length === 0, `로드 ${inIsolated}개`);
+  } catch {
+    report('E1/E2 fixture 격리 증명', false, '예외 발생(내용 비공개)');
+  } finally {
+    isolated?.cleanup();
+    rmSync(fx, { recursive: true, force: true });
+  }
+}
+
+// 2-3) 실제 실행용 격리 루트(시작 전 .env* 존재 시 중단)
+let runRoot;
+try {
+  runRoot = prepareIsolatedRoot(ROOT);
+  report('E3 실행 격리 루트 준비(.env* 없음 확인)', true);
+} catch (e) {
+  report('E3 실행 격리 루트 준비', false, e instanceof Error && e.message.startsWith('ISOLATE_') ? e.message : '예외');
+  finish(1, '실패(격리 실패 — 서버 시작 안 함)');
+}
+
 const port = await freePort();
 const base = `http://127.0.0.1:${port}`;
 const env = {
@@ -72,20 +125,28 @@ const env = {
   PORT: String(port),
   HOSTNAME: '127.0.0.1',
   NEXT_TELEMETRY_DISABLED: '1',
+  // 닫힌 값 명시(설정 파일이 있어도 이 값이 우선. 격리 루트에는 설정 파일 자체가 없다)
+  ADMIN_AUTH_MODE: 'disabled',
+  LEAD_INTAKE_MODE: 'disabled',
+  NEXT_PUBLIC_LEAD_FORM_ENABLED: 'false',
+  SEARCH_INDEXING: 'deny',
   NODE_OPTIONS: `--import ${DENY}`,
   FIDEON_SMOKE_NET_LOG: NET_LOG,
 };
-const server = spawn(process.execPath, [nextBin, 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: ROOT, env, stdio: ['ignore', 'ignore', 'ignore'], detached: false });
+const server = spawn(process.execPath, [nextBin, 'start', runRoot.root, '-H', '127.0.0.1', '-p', String(port)], { cwd: runRoot.root, env, stdio: ['ignore', 'ignore', 'ignore'], detached: false });
 let exited = false;
-server.on('exit', () => { exited = true; });
+const exitPromise = new Promise((resolve) => server.on('exit', () => { exited = true; resolve(); }));
+const waitExit = (ms) => Promise.race([exitPromise.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
+/** SIGTERM → 종료 이벤트 5초 대기 → SIGKILL → 종료 이벤트 5초 대기. 실제 종료 이벤트를 받았을 때만 true */
 const stop = async () => {
-  if (exited) return;
-  server.kill('SIGTERM');
-  for (let i = 0; i < 50 && !exited; i++) await new Promise((r) => setTimeout(r, 100));
-  if (!exited) server.kill('SIGKILL');
+  if (exited) return true;
+  try { server.kill('SIGTERM'); } catch { /* 이미 종료 */ }
+  if (await waitExit(5_000)) return true;
+  try { server.kill('SIGKILL'); } catch { /* 이미 종료 */ }
+  return waitExit(5_000);
 };
-const total = setTimeout(async () => { report('전체 시간 제한', false, `${TOTAL_MS / 1000}초 초과`); await stop(); finish(1, '실패(시간 초과)'); }, TOTAL_MS);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await stop(); process.exit(1); });
+const total = setTimeout(async () => { report('전체 시간 제한', false, `${TOTAL_MS / 1000}초 초과`); report('서버 정리', await stop()); runRoot.cleanup(); finish(1, '실패(시간 초과)'); }, TOTAL_MS);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await stop(); runRoot.cleanup(); process.exit(1); });
 
 const get = (p, headers = {}) => fetch(base + p, { headers, redirect: 'manual', signal: AbortSignal.timeout(10_000) });
 
@@ -151,7 +212,7 @@ try {
   if (!(e instanceof Error && e.message === 'not ready')) report('검사 실행', false, '예외 발생(내용 비공개)');
 } finally {
   clearTimeout(total);
-  await stop();
+  report('서버 정리(종료 이벤트 확인)', await stop());
+  runRoot.cleanup();
 }
-report('서버 정리', exited);
 finish(results.every((x) => x.ok) ? 0 : 1, results.every((x) => x.ok) ? '통과' : '실패');

@@ -1,4 +1,6 @@
-// 서버 스모크 전용 사전 로드(NODE_OPTIONS=--import, ESM). 루프백 외 TCP·TLS·DNS 접속을 막는다.
+// 서버 스모크 전용 사전 로드(NODE_OPTIONS=--import, ESM). 테스트용 Node 계측이다:
+// 이 Node 프로세스(와 NODE_OPTIONS를 물려받은 Node 자식)의 net.Socket 연결(TCP·TLS·fetch)과 dns.lookup만 루프백 외 주소를 막는다.
+// OS 네트워크 sandbox가 아니다 — UDP(dgram), dns.resolve*, 외부 프로세스, 원시 소켓·네이티브 모듈은 막는다고 보장하지 않는다.
 // 막은 횟수만 FIDEON_SMOKE_NET_LOG 파일에 한 줄씩 남긴다(호스트·주소·내용은 기록하지 않음).
 import net from 'node:net';
 import dns from 'node:dns';

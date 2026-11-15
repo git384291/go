@@ -44,14 +44,27 @@
 
 `npm run build` 결과로 `next start`를 **127.0.0.1에만** 띄워 실제 HTTP·RSC 응답을 검사한다. 결과는 `test-results/server-smoke/checks.txt`에 남는다. 정적 미리보기 결과 `test-results/screens/`와 따로 둔다.
 
-**자식 서버 환경:**
-- 넘기는 값: `PATH`, `NODE_ENV=production`, `PORT`, `HOSTNAME=127.0.0.1`, `NEXT_TELEMETRY_DISABLED`, 차단 사전 로드
+**격리 실행 루트(PM 6900906890 보완)**
+- Next는 실행 루트의 `.env*`를 스스로 읽기 때문에 환경 허용 목록만으로는 실설정 로딩을 막을 수 없다.
+- 그래서 임시 루트를 만들어 실행한다. `.next`·`node_modules`는 심볼릭 링크로 두고 `next.config.ts`·`package.json`만 복사한다.
+- 시작 전에 그 루트에 `.env*`가 없는지 **이름만** 확인한다. 있으면 서버를 시작하지 않고 실패한다.
+- 원본 루트의 dotenv 파일은 이름 존재만 기록한다. 내용을 읽지 않고, 삭제·이동·덮어쓰기도 하지 않는다.
+- **fixture 증명:** 가짜 `.env.production.local`을 둔 임시 원본에 실제 Next 로더(`@next/env`)를 써서 확인한다.
+  - E1: 원본 경로에서는 가짜 값 3개가 로드된다(대조군).
+  - E2: 그 원본으로 만든 격리 루트에서는 0개가 로드된다.
+
+**자식 서버 환경**
+- 넘기는 값: `PATH`, `NODE_ENV=production`, `PORT`, `HOSTNAME=127.0.0.1`, `NEXT_TELEMETRY_DISABLED`
+- 닫힌 값 명시: `ADMIN_AUTH_MODE=disabled`, `LEAD_INTAKE_MODE=disabled`, `NEXT_PUBLIC_LEAD_FORM_ENABLED=false`, `SEARCH_INDEXING=deny`
 - 상속하지 않는 값: DB, Supabase, 서명 키, 광고 값
-- 그래서 인증·접수 스위치는 기본값(꺼짐)이다.
 
-**외부 접속 차단:** `scripts/server-smoke/deny-network.mjs`(`NODE_OPTIONS=--import`)가 루프백 외 TCP·TLS·DNS를 막고 막은 횟수만 기록한다. 장치 자체를 N0로 확인하고, 서버가 외부로 나가려 한 횟수가 0인지 H8로 확인한다.
+**외부 접속 계측(OS 네트워크 sandbox 아님)**
+- `scripts/server-smoke/deny-network.mjs`(`NODE_OPTIONS=--import`)는 테스트용 Node 계측이다. Node `net.Socket` 연결(TCP·TLS·fetch)과 `dns.lookup`만 루프백 외 주소로 가지 못하게 막고, 막은 횟수만 기록한다.
+- **막는다고 보장하지 않는 것:** UDP(`dgram`), `dns.resolve*`, 외부 프로세스, 원시 소켓, 네이티브 모듈
+- N0은 장치 자체가 동작하는지 확인한다.
+- H8은 **이번 실행에서 관찰된 Node 접속 시도가 0건**이라는 뜻이다. 완전한 네트워크 격리를 보장하지 않는다.
 
-**시간 제한과 정리:** 준비 대기 30초, 전체 120초. 성공·실패·타임아웃 모두 SIGTERM → SIGKILL로 서버를 정리한다. 응답 본문과 환경 원문은 출력하지 않는다.
+**시간 제한과 정리:** 준비 대기 30초, 전체 120초. 성공·실패·타임아웃 모두 SIGTERM을 보내고 종료 이벤트를 5초 기다린다. 끝나지 않으면 SIGKILL을 보내고 다시 5초 기다린다. **실제 종료 이벤트를 받았을 때만** "서버 정리" PASS로 기록하고, 격리 루트를 삭제한다. 응답 본문과 환경 원문은 출력하지 않는다.
 
 **검사 항목:**
 - H1·H2: `/admin/progress` HTML·RSC 잠금, 스냅샷 문장 0개, no-store, X-Robots-Tag
