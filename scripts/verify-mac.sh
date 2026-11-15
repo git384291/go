@@ -64,6 +64,7 @@ fi
 # 로컬 PostgreSQL이 있으면 DB 테스트도 실행
 if command -v initdb >/dev/null 2>&1 || ls -d /opt/homebrew/opt/postgresql@*/bin >/dev/null 2>&1; then
   step 09-db-test npm run -s test:db
+  step 09b-restore npm run -s test:restore   # 덤프·복구 후 권한 상태 = 원본, 배포 전 점검 통과(CI와 같은 절차)
 else
   echo "09-db-test             skipped (PostgreSQL 미설치: brew install postgresql@16)" | tee -a "$SUMMARY"
 fi

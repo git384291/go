@@ -61,3 +61,16 @@ test('점검 함수는 읽기 전용(STABLE)이고 쓰기 문장이 없으며, �
     'grant execute on function api.release_probe_product_scope() to release_auditor;',
   ]);
 });
+
+test('복구 회귀: 마이그레이션이 점검 계정에 준 권한은 모두 zz_grants.sql에도 있다(복구 후 재적용 대상)', () => {
+  // DB 복구는 pg_dump --no-privileges로 권한을 버리고 zz_grants.sql만 다시 적용한다(scripts/restore-drill.sh).
+  // 번호 마이그레이션에만 있는 권한은 복구 후 사라진다(CI 43695544664: permission denied for schema api).
+  const norm = (g: string) => g.replace(/\s+/g, ' ').trim().toLowerCase();
+  const zz = readFileSync('db/migrations/zz_grants.sql', 'utf8');
+  const zzGrants = new Set([...zz.matchAll(/^grant [^;]+;/gm)].map((m) => norm(m[0])));
+  const fromMigrations = MIGRATIONS.flatMap((f) =>
+    [...readFileSync(`db/migrations/${f}`, 'utf8').matchAll(/^grant [^;]+ to release_auditor;/gm)].map((m) => ({ f, g: norm(m[0]) })),
+  );
+  assert.ok(fromMigrations.length >= 2);
+  for (const { f, g } of fromMigrations) assert.ok(zzGrants.has(g), `${f}: '${g}'가 zz_grants.sql에 없음`);
+});

@@ -101,4 +101,10 @@ grant execute on function
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.
 -- AI 예산 함수(3단계)는 app_public이 아닌 서버 내부 전용 역할에만 부여한다(REV-004 SEC-04).
 
+-- 9) 배포 전 점검 계정(release_auditor): 읽기 전용 점검 함수 1개만 실행(0006). 테이블·다른 함수 권한은 주지 않는다.
+--    이 파일은 모든 마이그레이션 뒤와 DB 복구(pg_dump --no-privileges → pg_restore) 뒤에 다시 적용된다.
+--    0006에만 있던 이 2개 권한이 복구 후 사라져 점검이 'permission denied for schema api'로 실패했다(CI 43695544664).
+grant usage on schema api to release_auditor;
+grant execute on function api.release_probe_product_scope() to release_auditor;
+
 commit;
