@@ -9,3 +9,5 @@
 | OI-002 | 관리자 로그인 → TOTP → DB 세션 등록 흐름이 코드에 연결되지 않음 | 로그인 화면이 미리보기 상태, `openStaffSession` 호출부 없음 | Supabase 개발 프로젝트 준비 후 구현·검증 | 미해결 |
 | OI-003 | Supabase 개발 환경의 DB 역할·권한·연결 풀러 호환 미검증 | 현재 검증은 로컬 가상 PostgreSQL 기준 | 가상 데이터 전용 개발 프로젝트에서 역할 로그인·RLS·서버 서명·풀러 호환 검증 | 미해결 |
 | OI-004 | Vercel 검수 배포에서 IP 위조 방어 미검증 | 실제 검수 배포 검증 기록 없음 | 검수 배포에서 `scripts/verify-ip-spoofing.sh` 실행 후 진단 설정 제거 | 미해결 |
+
+OI-002 서버 기초 보강: `requireStaff`는 DB `whoami` 확인을 요구하고, `openStaffSession`은 같은 트랜잭션에서 등록 후 유효성을 확인하도록 수정했다. [변경과 검증 범위](AUTH-SESSION-FOUNDATION.md)를 참고한다. 로그인 UI·TOTP·로그아웃·실제 Supabase 검증은 아직 미완료다.

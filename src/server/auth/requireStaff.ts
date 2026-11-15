@@ -2,7 +2,8 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { signingKeyFromEnv } from '../security/token';
-import { staffAssertion, staffSessionOpenAssertion, StaffAuthError, type StaffAuth } from './staffAssertion';
+import { StaffAuthError, type StaffAuth } from './staffAssertion';
+import { authorizeStaffSession, establishStaffSession } from './staffSession';
 import { withRole } from '../db/client';
 
 async function verifiedClaims() {
@@ -27,14 +28,22 @@ async function verifiedClaims() {
 
 /** 관리자 Server Action·Route Handler 첫 줄에서 호출. 역할 판정은 DB 함수가 한다. */
 export async function requireStaff(): Promise<StaffAuth> {
-  return staffAssertion(await verifiedClaims(), signingKeyFromEnv('staff'));
+  return authorizeStaffSession(await verifiedClaims(), signingKeyFromEnv('staff'), (auth) =>
+    withRole('staff', (tx) =>
+      tx`select * from api.whoami(${auth.actor}::uuid, ${auth.session}::uuid, ${auth.token})`,
+    ),
+  );
 }
 
 /** 로그인(비밀번호 + TOTP) 완료 직후 1회 호출해 DB 자체 세션을 연다 */
 export async function openStaffSession(): Promise<string> {
-  const a = staffSessionOpenAssertion(await verifiedClaims(), signingKeyFromEnv('staff'));
-  const rows = await withRole('staff', (tx) =>
-    tx`select api.staff_session_open(${a.actor}::uuid, ${a.session}::uuid, ${a.token}) as role`,
+  const identity = await establishStaffSession(await verifiedClaims(), signingKeyFromEnv('staff'), (run) =>
+    withRole('staff', (tx) => run({
+      open: async (auth) => {
+        await tx`select api.staff_session_open(${auth.actor}::uuid, ${auth.session}::uuid, ${auth.token})`;
+      },
+      whoami: (auth) => tx`select * from api.whoami(${auth.actor}::uuid, ${auth.session}::uuid, ${auth.token})`,
+    })),
   );
-  return rows[0].role as string;
+  return identity.role;
 }
