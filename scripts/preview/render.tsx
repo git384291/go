@@ -1,6 +1,7 @@
 // Next.js 설치 없이 페이지 컴포넌트를 정적 HTML로 렌더링하고 모바일 화면을 캡처한다(미리보기·검수용).
 // 실제 빌드·라우팅 검증은 Next.js 설치 후 `npm run build`로 한다.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 import { chromium } from 'playwright';
@@ -108,6 +109,13 @@ async function main() {
     || /(404|고정)=false/.test(r));
   if (bad.length) {
     console.error('PREVIEW FAIL\n' + bad.join('\n'));
+    process.exit(1);
+  }
+  // 정적 미리보기(위, test-results/screens)와 별도로, 빌드된 실제 Next 서버의 기본 비활성 경계를 실HTTP·RSC로 검사한다
+  // (scripts/server-smoke/run.mjs, 결과 test-results/server-smoke). 빌드·next가 없으면 실패한다(CI에서는 건너뛰기 불가).
+  const smoke = spawnSync(process.execPath, ['scripts/server-smoke/run.mjs'], { stdio: 'inherit', env: process.env });
+  if (smoke.status !== 0) {
+    console.error('SERVER SMOKE FAIL (exit ' + smoke.status + ')');
     process.exit(1);
   }
 }
