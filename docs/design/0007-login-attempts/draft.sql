@@ -19,10 +19,17 @@ create table security.login_attempts (
   ip_hash       text not null check (ip_hash ~ '^[0-9a-f]{64}$'),
   request_nonce text not null unique check (request_nonce ~ '^[0-9a-f]{32}$'),
   created_at    timestamptz not null default now(),
+  -- 순서 판정은 시각이 아니라 단조 증가 순번으로 한다(now()는 트랜잭션 안에서 일정, 서로 다른 트랜잭션도 같을 수 있음).
+  -- 같은 대상의 reserve·settle은 대상 잠금으로 직렬화되므로 순번 순서 = 실제 확정 순서.
+  created_seq   bigint generated always as identity unique,
   settled_at    timestamptz,
+  settled_seq   bigint unique,
   result        text check (result in ('success', 'failure', 'expired')),
-  check ((result is null) = (settled_at is null))
+  check ((result is null) = (settled_at is null) and (result is null) = (settled_seq is null))
 );
+create sequence security.login_settle_seq;
+revoke all on sequence security.login_settle_seq from public;
+grant usage on sequence security.login_settle_seq to fideon_api;                   -- [제안 P-2]
 create index login_attempts_subject on security.login_attempts (step, subject_hmac, created_at);
 create index login_attempts_ip on security.login_attempts (ip_hash, created_at);
 
@@ -39,21 +46,25 @@ create or replace function security.login_limit_count(p_step text, p_subject tex
 returns int
 language sql stable set search_path = '' as $$
   -- 실패·만료·대기(결과 없음)를 모두 센다(fail-closed).
-  -- 대상 범위는 그 대상·단계의 '마지막 성공 예약 생성 시각' 이후 것만 센다 →
-  -- 늦게 확정된 성공은 자기보다 먼저 만들어진 실패만 지우고, 이후 실패는 지우지 않는다.
+  -- 성공 S가 행 R을 계수에서 빼는 조건(대상 범위만, IP 전체 범위는 빼지 않음):
+  --   같은 단계·대상(비밀번호 (대상, IP) 범위는 같은 IP까지) 이고
+  --   R이 S보다 먼저 예약됐고(created_seq) R이 S의 성공 확정보다 먼저 확정됐다(settled_seq).
+  --   → 다른 IP의 성공은 이 IP의 실패를 지우지 않는다. 성공 확정 뒤에 확정된 실패·아직 대기 중인 예약은 남는다.
   select count(*)::int
   from security.login_attempts a
   where a.created_at > now() - interval '15 minutes'
     and coalesce(a.result, 'pending') <> 'success'
     and case p_scope
       when 'subject_ip' then a.step = p_step and a.subject_hmac = p_subject and a.ip_hash = p_ip
-        and a.created_at > coalesce((select max(s.created_at) from security.login_attempts s
-                                     where s.step = p_step and s.subject_hmac = p_subject and s.result = 'success'), '-infinity')
       when 'subject' then a.step = p_step and a.subject_hmac = p_subject
-        and a.created_at > coalesce((select max(s.created_at) from security.login_attempts s
-                                     where s.step = p_step and s.subject_hmac = p_subject and s.result = 'success'), '-infinity')
-      when 'ip' then a.ip_hash = p_ip                      -- IP 버킷은 성공으로 초기화하지 않는다
+      when 'ip' then a.ip_hash = p_ip
       else false end
+    and (p_scope = 'ip' or not exists (
+      select 1 from security.login_attempts s
+      where s.result = 'success' and s.step = a.step and s.subject_hmac = a.subject_hmac
+        and (p_scope <> 'subject_ip' or s.ip_hash = a.ip_hash)
+        and s.created_seq > a.created_seq
+        and a.settled_seq is not null and a.settled_seq < s.settled_seq))
 $$;
 
 -- 보조 함수들은 security invoker: api 함수 소유자(fideon_api)의 권한으로만 실행된다(정의자 권한 확대 없음).
@@ -67,14 +78,16 @@ begin
 end
 $$;
 
--- 결과 없이 60초가 지난 예약 → 'expired'(실패로 셈). 잠금 범위 안에서만 호출.
+-- 결과 없이 60초가 지난 예약 → 'expired'. **잠근 범위(같은 단계·대상·IP)의 행만** 바꾼다.
+-- 그 행을 바꾸는 다른 트랜잭션도 같은 대상 잠금을 먼저 잡아야 하므로 행 잠금 순환(교착)이 생기지 않는다.
+-- 다른 범위의 오래된 대기는 여기서 바꾸지 않는다(계수에서는 결과 없음 = 실패로 이미 센다).
 create or replace function security.login_expire_stale(p_step text, p_subject text, p_ip text)
 returns void
 language sql volatile set search_path = '' as $$
   update security.login_attempts
-     set result = 'expired', settled_at = now()
+     set result = 'expired', settled_at = now(), settled_seq = nextval('security.login_settle_seq')
    where result is null and created_at < now() - interval '60 seconds'
-     and ((step = p_step and subject_hmac = p_subject) or ip_hash = p_ip)
+     and step = p_step and subject_hmac = p_subject and ip_hash = p_ip
 $$;
 
 -- 서명 토큰의 만료가 지금부터 60초 이내인지(verify_token은 최대 300초까지 허용하므로 더 좁힌다)
@@ -119,7 +132,7 @@ $$;
 
 -- 정산: 서버 서명(목적 login, 'settle'·예약ID·단계·대상·IP·결과)이 맞아야 한다. 결과 자체가 서명 대상.
 --  - 첫 확정만 기록(멱등): 같은 결과 재전송 → 'already', 다른 결과 → RESULT_CONFLICT
---  - 결과 없이 60초가 지난 예약은 'expired'로 확정되고 success로 바꿀 수 없다
+--  - 결과 없이 60초가 지난 예약은 이 호출에서 'expired'로 확정하고 'expired'를 돌려준다(success·failure 기록 안 함, 커밋됨)
 create or replace function api.login_attempt_settle(p_id uuid, p_result text, p_token text)
 returns text
 language plpgsql volatile security definer set search_path = '' set lock_timeout = '2s' as $$
@@ -138,13 +151,18 @@ begin
   perform security.login_expire_stale(v_row.step, v_row.subject_hmac, v_row.ip_hash);
   select * into v_row from security.login_attempts where id = p_id for update;
 
+  if v_row.result = 'expired' then
+    return 'expired';                     -- 늦은 결과는 기록하지 않는다(서버는 실패로 처리)
+  end if;
   if v_row.result is not null then
     if v_row.result = p_result then
       return 'already';
     end if;
     raise exception 'RESULT_CONFLICT' using errcode = '42501';
   end if;
-  update security.login_attempts set result = p_result, settled_at = now() where id = p_id;
+  update security.login_attempts
+     set result = p_result, settled_at = now(), settled_seq = nextval('security.login_settle_seq')
+   where id = p_id;
   return 'settled';
 end
 $$;
