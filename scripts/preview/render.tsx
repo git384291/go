@@ -46,6 +46,8 @@ function expect404(label: string, render: () => unknown): string {
 }
 
 const OUT = process.argv[2] ?? 'test-results/screens';
+// 검사 폭: 좁은 휴대폰(320)과 일반 휴대폰(390). 둘 다 통과해야 한다.
+const WIDTHS = [320, 390] as const;
 
 async function main() {
   const css = await readFile('src/app/globals.css', 'utf8');
@@ -65,30 +67,37 @@ async function main() {
   // 브라우저로 내려가는 폼 코드에 예약 상품 이름이 없는지는 tests/unit/catalog.test.ts G10이 확인한다.
   await mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const report: string[] = [];
-  for (const [name, el] of pages) {
-    const html = '<!doctype html>' + renderToStaticMarkup(<RootLayout>{el}</RootLayout>)
-      .replace('<html lang="ko">', '<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + css + '</style></head>');
-    await writeFile(`${OUT}/${name}.html`, html);
-    const page = await ctx.newPage();
-    await page.setContent(html, { waitUntil: 'load' });
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-    const prices = await page.evaluate(() => (document.body.innerText.match(/[0-9][0-9,]*\s*원/g) ?? []).length);
-    await page.screenshot({ path: `${OUT}/${name}-first-view.png` });
-    // 전체 페이지 캡처에서는 하단 고정 버튼이 중간에 겹치지 않도록 문서 끝에 둔다
-    await page.addStyleTag({ content: '.sticky-cta{position:static}' });
-    await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
-    // 검사는 <body>만 본다(인라인 CSS의 클래스 이름은 화면에 나오지 않으므로 제외)
-    const body = html.slice(html.indexOf('<body'));
-    const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => body.includes(f)) : [];
-    const ext = EXTERNAL_CHANNEL.filter((f) => body.includes(f));
-    const intake = PUBLIC_PAGES.has(name) ? INTAKE_PHRASES.filter((f) => body.includes(f)) : [];
-    const notice = PUBLIC_PAGES.has(name) ? `\t준비 중 안내=${body.includes(NOTICE)}` : '';
-    const fixed = name.startsWith('05')
-      ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
-    report.push(`${name}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}\t접수 오해 문구=${intake.length ? intake.join(',') : '없음'}${notice}${fixed}`);
-    await page.close();
+  // 폭별로 따로 연다(320 결과를 390이 덮어쓰지 않도록 파일·라벨에 폭을 붙인다). 하나라도 실패하면 exit 1.
+  for (const width of WIDTHS) {
+    const ctx = await browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    for (const [name, el] of pages) {
+      const label = `${name}@${width}`;
+      const html = '<!doctype html>' + renderToStaticMarkup(<RootLayout>{el}</RootLayout>)
+        .replace('<html lang="ko">', '<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + css + '</style></head>');
+      await writeFile(`${OUT}/${name}.html`, html);
+      const page = await ctx.newPage();
+      await page.setContent(html, { waitUntil: 'load' });
+      // 모바일 에뮬레이션(isMobile)에서는 내용이 넓으면 브라우저가 레이아웃 폭(innerWidth)까지 넓혀 버린다.
+      // 그래서 innerWidth가 아니라 '설정한 화면 폭'과 비교한다(이전 검사는 이 때문에 넘침을 못 잡을 수 있었다).
+      const overflow = await page.evaluate((w) => document.documentElement.scrollWidth > w || document.body.scrollWidth > w, width);
+      const prices = await page.evaluate(() => (document.body.innerText.match(/[0-9][0-9,]*\s*원/g) ?? []).length);
+      await page.screenshot({ path: `${OUT}/${name}-w${width}-first-view.png` });
+      // 전체 페이지 캡처에서는 하단 고정 버튼이 중간에 겹치지 않도록 문서 끝에 둔다
+      await page.addStyleTag({ content: '.sticky-cta{position:static}' });
+      await page.screenshot({ path: `${OUT}/${name}-w${width}.png`, fullPage: true });
+      // 검사는 <body>만 본다(인라인 CSS의 클래스 이름은 화면에 나오지 않으므로 제외)
+      const body = html.slice(html.indexOf('<body'));
+      const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => body.includes(f)) : [];
+      const ext = EXTERNAL_CHANNEL.filter((f) => body.includes(f));
+      const intake = PUBLIC_PAGES.has(name) ? INTAKE_PHRASES.filter((f) => body.includes(f)) : [];
+      const notice = PUBLIC_PAGES.has(name) ? `\t준비 중 안내=${body.includes(NOTICE)}` : '';
+      const fixed = name.startsWith('05')
+        ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
+      report.push(`${label}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}\t접수 오해 문구=${intake.length ? intake.join(',') : '없음'}${notice}${fixed}`);
+      await page.close();
+    }
+    await ctx.close();
   }
   await browser.close();
   report.push(...routeChecks);

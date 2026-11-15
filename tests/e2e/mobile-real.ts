@@ -99,7 +99,8 @@ async function main() {
       page.on('console', (m) => { if (m.type() === 'error') consoleErrors++; });
       page.on('pageerror', () => consoleErrors++);
       const res = await page.goto(BASE + path, { waitUntil: 'networkidle' });
-      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+      // 모바일 기기 에뮬레이션은 내용이 넓으면 innerWidth까지 넓힌다 → 기기의 실제 화면 폭과 비교한다
+      const overflow = await page.evaluate((w) => document.documentElement.scrollWidth > w || document.body.scrollWidth > w, desc.viewport.width);
       const prices = await page.evaluate(() => (document.body.innerText.match(/[0-9][0-9,]*\s*원/g) ?? []).length);
       await page.screenshot({ path: `${OUT}/${devName}-${name}.png`, fullPage: true });
       const html = await page.content();
