@@ -34,6 +34,7 @@
 
 ## 권한과 제한
 
+- 이 워크플로가 직접 호출하는 checkout·Claude Action은 성공한 실행의 실제 SHA와 대조해 커밋으로 고정한다. 외부 태그 변경만으로 이 두 Action의 코드가 바뀌지 않게 한다. Action 내부의 패키지·도구 의존성 전체를 고정했다는 의미는 아니다.
 - GitHub 토큰: 코드 읽기·CI 읽기·PR/이슈 응답. 코드 쓰기·병합·배포 권한은 부여하지 않는다.
 - Claude Action의 비공개 저장소 재조회에 필요한 Git 읽기 인증을 실행 중에 유지한다. 토큰은 `contents: read`이며 checkout의 post 단계에서 정리한다.
 - Claude 기본 도구는 Read·Glob·Grep만 제공하며 셸·편집 도구는 금지한다. 진행 댓글은 Action의 GitHub 연동으로 작성한다.
