@@ -231,3 +231,73 @@ Claude 작업 환경에 남아 있는 패치 9개를 대조했다. 각 패치에
   - TOTP 단계 요소 확인을 세션 개설 서명에 포함할지 여부
 - aal1 전용 서명 목적(`'enroll'`) 추가
 - 등록 화면(인증 스위치 하위, 기본 꺼짐)
+
+## 8. 설계 보완 (PM 6898084687 1~3항 — 여전히 구현·0007 미승인)
+
+### 8-1. 시도 제한: 누가 결과를 확정하는가
+
+**위협:** `reserve`/`settle`을 공개 역할(`app_public`)에 열면, DB에 닿을 수 있는 코드(또는 탈취된 서버 프로세스)가 아무 예약에나 `settle(success)`를 호출할 수 있다. 그러면 다음이 가능해진다.
+- 실패 계수 초기화
+- 타인의 예약 종료
+- 한도 우회
+
+**결합 설계**
+1. **예약은 서버 서명 토큰과 묶는다.**
+   - `reserve`가 무작위 예약 ID를 만들고, `fingerprint = sha256(목적 | 단계 | 대상 HMAC | IP 해시 | 만료)`를 행에 저장한다.
+   - 서버는 `signToken('login', ['reserve', 예약ID, 단계, 대상HMAC, IP해시], key)`(새 서명 목적 `login`, 기존 `staff`·`lead` 키와 분리)를 붙여 `settle`에 넘긴다.
+   - DB는 `security.verify_token('login', …)`으로 서명을 확인한다. 같은 예약 ID·단계·대상·IP여야 하고, 만료 전(60초)이어야 한다.
+   - `staff`·`lead` 키로 만든 토큰은 목적이 달라 통과하지 못한다.
+2. **결과 확정은 1회만이다(멱등).**
+   - `update … set result = $r, settled_at = now() where id = $id and result is null returning …`으로 처리한다.
+   - 두 번째 호출은 0행이므로 결과가 바뀌지 않는다. 같은 결과를 다시 보내도 오류가 아니고(재시도 안전), 다른 결과를 보내면 거부하고 감사 기록을 남긴다.
+3. **지연 성공의 초기화 범위**
+   - 성공은 **해당 예약보다 먼저 만들어지고, 그 성공 시각 이전에 확정된** 같은 대상·같은 단계의 실패만 초기화한다.
+   - 성공 뒤에 확정된 실패나 다른 IP 버킷, 다른 단계(비밀번호 성공이 TOTP 실패를 지움)는 초기화하지 않는다.
+   - 결과가 없는 채로 1분이 지난 예약은 실패로 확정한다. 늦게 온 성공은 무시하고 감사 기록만 남긴다.
+4. **잠금 순서(교착 방지):** 항상 `대상 키 → IP 키` 순서로 `pg_advisory_xact_lock(hashtextextended(<키>, 0))`를 잡는다. `settle`도 같은 순서를 쓴다.
+5. **IP 신뢰 기준:** 기존 `clientIpFrom` 규칙을 그대로 쓴다.
+   - Vercel 환경에서는 Vercel이 덮어쓰는 `x-real-ip`만 쓴다. 외부에서 넣은 `x-forwarded-for`는 쓰지 않는다.
+   - 형식이 틀리면 `0.0.0.0` 단일 버킷이다(안전한 쪽).
+   - Vercel 밖 운영은 신뢰 프록시 목록 없이는 IP 제한을 켜지 않는다. 그 경우 대상 기준 제한만 적용한다.
+   - 실제 배포에서는 기존 `scripts/verify-ip-spoofing.sh`로 확인한다.
+6. **권한:** `reserve`·`settle`은 SECURITY DEFINER, `search_path=''`이며 `app_public`에만 실행 권한을 준다. 테이블 직접 권한은 없다. 서명 없이는 아무것도 바꾸지 못한다.
+
+### 8-2. TOTP 등록: 상태 전이 (DB 트랜잭션 하나로 묶을 수 없음)
+
+외부 Supabase 호출(enroll·QR·challenge/verify)이 사이에 끼므로 단계별 상태로 관리한다. 상태는 `security.enrollment_grants`에 둔다.
+
+| 상태 | 들어오는 조건 | 다음 |
+|---|---|---|
+| `issued` | owner가 aal2 DB 세션으로 발급(코드 해시, 대상, 15분 만료) | `reserved` / `expired` / `revoked` |
+| `reserved` | 대상 직원이 aal1 + `enroll` 서명 + 코드로 `consume`. 원자적 `issued → reserved`. 서버가 `reservation_nonce`를 받음 | `enrolling` / `expired` |
+| `enrolling` | 서버가 Supabase `mfa.enroll` 성공 후 `factor_id`를 기록(`reserved → enrolling`, nonce 일치) | `bound` / `failed` / `expired` |
+| `bound` | 서버가 `challengeAndVerify` 성공 후, 그 사용자의 검증된 TOTP가 **정확히 1개**이고 그 ID가 기록한 `factor_id`와 같을 때 `core.staff.totp_factor_id` 설정 + 감사 기록. 같은 트랜잭션 | 종료 |
+| `failed`·`expired`·`revoked` | 오류, 15분 초과, owner 취소 | 종료(재발급 필요) |
+
+- **중복 요청:** 상태 전이는 `where state = <이전 상태> and nonce = $n`인 조건부 update다. 같은 요청이 다시 오면 0행 → 현재 상태를 그대로 돌려준다(멱등). 다른 nonce로 오면 거부한다.
+- **중간 실패:** enroll 뒤 verify 전에 끊기면 Supabase에 미검증 factor가 남는다. 다음 시도나 만료 처리 때 서버가 그 사용자의 **미검증** factor를 `mfa.unenroll`로 지우고 `failed`로 둔다. 검증된 factor는 자동으로 지우지 않는다(8-3 복구 절차로만).
+- **factor 소유자 검증:** `bound` 직전에 서버가 그 사용자 세션의 `listFactors`로 factor가 그 사용자 것인지 확인한다. 클레임의 `sub` = grant 대상도 확인한다.
+- **병렬 직접 enroll:** 공격자가 공개 키로 같은 계정에 따로 enroll하면 `bound` 조건("검증된 TOTP가 정확히 1개 + ID 일치")이 깨진다. 그러면 `failed` 처리하고 대표에게 알리며, 계정을 비활성화하라고 안내한다(8-3).
+- **감사:** 발급, 예약, enroll, bound, failed, revoked 모두 `core.audit_logs`에 남긴다. 코드·QR·비밀값은 기록하지 않는다.
+
+### 8-3. factor 결합과 `staff_session_open`의 실제 연결
+화면 검사만으로는 우회될 수 있다(서버 코드가 아닌 경로나 버그). 그래서 **DB가 세션 개설 결정에서 직접 확인**한다.
+1. 로그인 TOTP 단계 성공 뒤 서버가 `listFactors`로 검증된 TOTP 목록을 얻는다. 정확히 1개가 아니면 거부한다.
+2. 세션 개설 서명 대상에 factor ID를 넣는다. 지금은 `['session-open', actor, session, 'aal2']`이고, 바뀌면 `['session-open', actor, session, 'aal2', factor_id]`가 된다. 기존 aal2 서명 목적은 그대로 두고 필드만 늘린다. 완화하지 않는다.
+3. `api.staff_session_open`은 서명 확인 뒤 `core.staff.totp_factor_id = p_factor_id`인지 확인한다. 아니거나 NULL(미등록)이면 `FORBIDDEN`이다.
+   - 이에 따라 기존 함수 시그니처와 V13 고정 해시가 바뀐다 → 마이그레이션·점검 갱신 승인이 필요하다.
+4. **남는 한계:** factor ID는 서버가 SDK에서 받아 서명한다. 서버 키가 유출되면 이 결합도 우회된다(기존 서명 체계와 같은 신뢰 경계).
+
+**복구 시 폐기 범위(한 트랜잭션, owner aal2)**
+- `core.staff.active = false`
+- `totp_factor_id = NULL`
+- 그 직원의 모든 `security.staff_sessions`에 `revoked_at = now()`
+- 미사용 `enrollment_grants`를 `revoked`로
+- 감사 기록
+
+그 뒤 Supabase 쪽 factor 삭제와 전체 세션 종료는 프로젝트 소유자가 공식 관리 기능으로 한다. 재등록은 8-2를 처음부터 다시 거친다. aal1 전용 `enroll` 서명은 기존 aal2 서명과 목적·필드가 달라 서로 재사용할 수 없다.
+
+### 8-4. 구현 시 필요한 승인 묶음
+1. 0007: 시도 제한 테이블·함수, 서명 목적 `login`과 그 서버 키
+2. 0008: 등록 grant 테이블·함수, `core.staff.totp_factor_id`, `staff_session_open` factor 확인(V13 해시 갱신), 서명 목적 `enroll`
+3. 앱: 로그인 단계 예약·정산 연결, 등록 화면(인증 스위치 하위·기본 꺼짐), 실DB 동시성·멱등 시험
