@@ -3,9 +3,20 @@
 ## 현재 상태
 
 - 사용자 제공 Mac 터미널 기록에서 Claude Code `Login successful.`을 확인했다.
-- Mac 로그인과 GitHub Actions 인증은 별개다. GitHub에는 Actions secret `CLAUDE_CODE_OAUTH_TOKEN`을 등록한다.
-- 현재 연결의 GitHub Secrets 목록 조회는 403으로 거부돼 등록 여부를 단정할 수 없다.
-- 이전 `@claude` 시험 댓글에 대한 응답은 확인되지 않았다. 아래 라벨 방식으로 새 검토를 시작한다.
+- 사용자가 Actions secret `CLAUDE_CODE_OAUTH_TOKEN` 등록과 `FIDEON_CLAUDE_REVIEW_ENABLED` 변수 생성 성공 기록을 제공했다. 토큰 값은 채팅이나 이 Cloud 환경으로 전달받지 않았다.
+- **GitHub를 통한 Claude 검토 연결 검증 완료**: 커밋 `02073a1332277463f6b16e0e56eaa51b73916a89`의 [Claude 검토 실행 #43718427835](https://github.com/git384291/go/actions/runs/43718427835) 성공과 [실제 검토 댓글](https://github.com/git384291/go/pull/1#issuecomment-6894926805)을 확인했다. 같은 커밋의 [기존 CI #43718410549](https://github.com/git384291/go/actions/runs/43718410549)도 통과했다.
+- Secrets/변수 관리 API는 현재 연결에서 403이므로 등록·변경은 사용자가 Mac에서 수행했다. 검토 요청과 실행 결과 확인은 이 환경에서 처리한다.
+- 이전 `@claude` 댓글 방식 대신 아래 라벨 방식을 사용한다. Mac 원격 조작과 Claude의 코드 자동 수정은 이번 연결 범위에 포함되지 않는다.
+
+## 검토 결과와 다음 작업
+
+검토 대상은 위 커밋이며 이후 커밋을 검토한 것으로 간주하지 않는다. 현재 연결 성공은 FIDEON의 실제 관리자 인증 구현 완료를 의미하지 않는다.
+
+- 직접 재확인한 누락: `requireStaff`와 `openStaffSession`이 정의되어 있으나 앱 호출부가 없으며, 비밀번호 로그인·TOTP·로그아웃 경로가 연결되지 않았다(OI-002).
+- 다음 구현 순서: 비활성 기본 스위치 아래에서 관리자 로그인 → TOTP → DB 세션 열기 → `whoami` 확인, 세션 폐기 → Auth 로그아웃, 인증 실패·만료·다른 사용자 세션에 대한 시험.
+- Claude의 구현 제안은 검토 자료다. DB 함수·Supabase SDK 동작과 대조한 후 작은 변경으로 구현·검증한다. preview의 가상 데이터 화면이나 향후 쿠키 쓰기 문제를 실제 고객정보 유출 사고로 단정하지 않는다.
+- 실제 Supabase 개발 프로젝트·풀러·인증 검증은 연결 환경이 필요하며 아직 미완료다. 실제 고객정보 수집과 운영 배포는 계속 꺼 둔다.
+- 초기 검토 실행은 Git 재조회 인증 누락으로 실패했다. 읽기 토큰을 실행 중 유지하도록 수정한 뒤 위 재실행이 성공했다. 검토 댓글의 과거 실패 언급은 현재 실행 실패를 의미하지 않는다.
 
 ## 검토 실행 방식
 
