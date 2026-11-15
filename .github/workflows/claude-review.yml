@@ -32,7 +32,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
+          # Claude Action이 비공개 저장소를 다시 fetch할 때 필요하다.
+          # contents: read 토큰만 사용하며, checkout의 post 단계에서 정리한다.
+          persist-credentials: true
       - name: Require Claude authentication
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

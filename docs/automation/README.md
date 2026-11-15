@@ -24,7 +24,7 @@
 ## 권한과 제한
 
 - GitHub 토큰: 코드 읽기·CI 읽기·PR/이슈 응답. 코드 쓰기·병합·배포 권한은 부여하지 않는다.
-- 체크아웃한 Git 자격 증명은 유지하지 않는다.
+- Claude Action의 비공개 저장소 재조회에 필요한 Git 읽기 인증을 실행 중에 유지한다. 토큰은 `contents: read`이며 checkout의 post 단계에서 정리한다.
 - Claude 기본 도구는 Read·Glob·Grep만 제공하며 셸·편집 도구는 금지한다. 진행 댓글은 Action의 GitHub 연동으로 작성한다.
 - 최대 10턴·15분으로 제한한다. 실행 시 Claude 구독 사용량과 GitHub Actions 사용량이 발생할 수 있다.
 - `main` 병합, 운영 배포, PHASE 2 활성화, 실제 고객정보 수집은 계속 보류한다.
