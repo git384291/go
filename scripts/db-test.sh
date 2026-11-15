@@ -162,7 +162,9 @@ fi
 
 echo "== concurrency: 5 different valid signatures for the same approval slot at once"
 rm -f "$LOG_DIR"/conc-*
-for i in $(seq 1 5); do APPROVE_SQL other owner $OWNER_ID $OWNER_SES $((100 - i)) > "$LOG_DIR/conc-$i.sql"; done
+# 서명마다 만료 시각이 반드시 달라야 한다: 유효시간 간격을 1초로 두면 생성 사이에 초가 바뀔 때 같은 서명이 나와 재사용으로 거부된다(CI 43734238101 1회차). 60초 간격, DB 상한 300초 이내(280~40초).
+for i in $(seq 1 5); do APPROVE_SQL other owner $OWNER_ID $OWNER_SES $((340 - 60 * i)) > "$LOG_DIR/conc-$i.sql"; done
+if [ "$(cat "$LOG_DIR"/conc-[1-5].sql | sort -u | wc -l | tr -d " ")" != 5 ]; then echo "FAIL | K2 준비: 서로 다른 서명 5개가 아님" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
 pids=()
 for i in $(seq 1 5); do
   ( "${PSQL_ADMIN[@]}" -f "$LOG_DIR/conc-$i.sql" > "$LOG_DIR/conc-$i.out" 2>&1; echo "rc=$?" >> "$LOG_DIR/conc-$i.out" ) &
