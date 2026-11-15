@@ -1,15 +1,13 @@
-# 비활성 초안. .github/workflows 아래에 있지 않으므로 실행되지 않는다.
-# 활성화 조건과 인증 절차는 같은 폴더 README.md 참고.
 name: Claude PHASE 1 review
 
 on:
-  issue_comment:
-    types: [created]
+  pull_request:
+    types: [labeled]
 
 permissions: {}
 
 concurrency:
-  group: claude-review-${{ github.event.issue.number }}
+  group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -17,10 +15,12 @@ jobs:
     if: >-
       vars.FIDEON_CLAUDE_REVIEW_ENABLED == 'true' &&
       github.repository == 'git384291/go' &&
-      github.event.issue.pull_request &&
-      github.event.issue.number == 1 &&
-      github.event.comment.user.login == github.repository_owner &&
-      contains(github.event.comment.body, '@claude')
+      github.event.label.name == 'claude-review' &&
+      github.event.sender.login == github.repository_owner &&
+      github.event.pull_request.number == 1 &&
+      github.event.pull_request.draft == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'phase1-product-scope'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -29,31 +29,35 @@ jobs:
       issues: write
       actions: read
     steps:
-      - name: Confirm the approved Draft PR scope
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh pr view 1 --repo git384291/go \
-            --json state,isDraft,headRefName,isCrossRepository \
-            --jq 'select(.state == "OPEN" and .isDraft == true and .headRefName == "phase1-product-scope" and .isCrossRepository == false) | .headRefName' \
-            | grep -Fx 'phase1-product-scope'
       - uses: actions/checkout@v6
         with:
-          ref: phase1-product-scope
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - name: Require Claude authentication
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo '::error::CLAUDE_CODE_OAUTH_TOKEN must be configured in repository Actions secrets.'
+            exit 1
+          fi
       - name: Review only
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          include_fix_links: false
           prompt: |
             FIDEON Draft PR #1에 대한 읽기 전용 검토입니다.
+            검토 커밋: ${{ github.event.pull_request.head.sha }}
             docs/PHASE1-STATUS.md와 docs/OPEN-ISSUES.md를 먼저 읽으세요.
             OI-002 관리자 로그인 → TOTP → openStaffSession 연결의 누락과
             Supabase 개발 환경에서 필요한 검증을 코드 경로와 함께 한국어로 설명하세요.
             코드 변경, 커밋, push, main 병합, 운영 배포, PHASE 2 활성화,
             실제 고객정보 수집은 하지 마세요. 비밀값을 읽거나 출력하지 마세요.
-            검토 결과는 이 PR의 댓글로만 남기세요.
+            검토 결과와 검토한 커밋을 이 PR의 진행 댓글에 남기세요.
           claude_args: |
             --max-turns 10
+            --tools "Read,Glob,Grep"
             --disallowedTools "Bash,Edit,Write,NotebookEdit"

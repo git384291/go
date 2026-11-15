@@ -51,8 +51,8 @@ Mac 검증은 사용자 제공 기록이며, 아래 GitHub CI 결과는 실행 �
 
 - 사용자는 GitHub·터미널을 통한 기존 개발·수정·검증 진행을 요청했다.
 - 현재 작업 환경에서 저장소 clone 및 GitHub 조회가 가능하다. 변경은 위 기능 브랜치에 한정한다.
-- 사용자는 Claude 웹사이트를 사용했다. GitHub의 Claude 앱 check suite는 확인했지만, PR의 `@claude` 시험 요청에 실제 응답은 아직 확인되지 않았다. [연결 준비와 비활성 초안](automation/README.md)을 참고한다.
-- Claude 도구/CLI와 사용자 Mac mini의 원격 터미널 연결은 확인되지 않았다. 이 환경의 터미널 실행을 Mac 실행으로 보고하지 않는다.
+- 사용자는 Claude 웹사이트를 사용했으며 이후 Mac에서 Claude Code `Login successful.` 기록을 제공했다. Mac 로그인과 GitHub Actions 인증을 구분한다. [Claude 검토 연결](automation/README.md)을 참고한다.
+- Cloud 환경에도 Claude Code를 설치했지만 인증은 미완료이며, 이곳의 로그인 대기 작업은 종료했다. 사용자 Mac mini의 원격 터미널 연결은 없다. 이 환경의 터미널 실행을 Mac 실행으로 보고하지 않는다.
 - Supabase 개발 프로젝트 연결은 현재 작업에 제공되지 않았다. 실제 인증 연동 검증은 미완료로 기록한다.
 - 비밀번호·토큰·DB 접속 정보는 채팅이나 저장소에 기록하지 않고, 연결된 실행 환경의 비밀값 설정을 사용한다.
 - `main` 병합, 운영 배포, PHASE 2 활성화, 실제 고객정보 수집은 별도 명시 승인 전까지 보류한다.
