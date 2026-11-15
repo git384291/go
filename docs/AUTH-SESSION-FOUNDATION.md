@@ -23,3 +23,22 @@
 - 실제 Supabase 개발 프로젝트에서 만료·폐기·비활성 직원·다른 사용자 세션·트랜잭션 풀러를 검증해야 한다.
 - `requireStaff`의 쿠키 쓰기는 기존처럼 Server Action·Route Handler에서만 사용한다. Server Component 보호를 붙일 때는 쿠키 갱신 경로도 함께 설계한다.
 - 실제 고객정보 수집, main 병합, 운영 배포, PHASE 2 활성화는 계속 보류한다.
+
+## 앱 연결 (PM 지시 6896235394 4절)
+
+### 묶음 1 — 실DB 통합 시험 (`5c42b8d`)
+- `staffSessionDb.ts`가 whoami·open·revoke SQL 배선을 맡고, `withRoleOn`으로 연결을 주입받는다.
+- `tests/integration/staff-session-db.test.ts`(I1~I10)는 `scripts/db-test.sh`의 가상 DB에 `app_server`로 접속해 앱과 같은 코드를 실행한다. 폐기·만료 재등록 시 등록 함수가 남긴 감사 기록까지 롤백되는 것을 대조군과 함께 확인한다.
+
+### 묶음 2 — 로그인·TOTP·로그아웃·세션 갱신
+| 구성 | 내용 |
+|---|---|
+| `adminAuthMode.ts` | `ADMIN_AUTH_MODE=supabase` + Supabase URL·공개 키·직원 서명 키·DB URL이 모두 있을 때만 켠다. 운영(`VERCEL_ENV=production`)은 항상 꺼짐. 꺼져 있으면 `/admin`은 잠기고, 가상 데이터 화면은 로컬 `next dev`에서만 보인다(preview 배포 노출 차단) |
+| `loginFlow.ts` | 비밀번호 → TOTP → DB 세션. 계정 없음·비밀번호 오류·TOTP 미등록은 같은 오류. aal2 전에는 DB 세션을 열지 않고, 성공 후 정확히 1회 연다. DB 거부·장애 시 Supabase 로그인도 끝낸다 |
+| `admin/actions.ts` | Server Action `loginAction`·`logoutAction`. 스위치가 꺼져 있으면 외부 호출 없이 거부 |
+| `admin/page.tsx` | 매 요청 `requireStaff()`(DB `api.whoami`). 실패하면 사유 없이 로그인 화면으로 |
+| 로그아웃 | DB 세션 폐기(`api.staff_session_revoke`) → Supabase `signOut`(폐기 실패해도 진행) |
+| `src/middleware.ts` | `/admin` 경로만. 인증이 켜져 있으면 접근 토큰 갱신 쿠키를 기록한다. 관리자 응답은 `Cache-Control: private, no-store`. 허용 판단은 하지 않는다 |
+| `supabaseServer.ts` | Server Component에서 쿠키 쓰기 예외가 나면 건너뛴다. 갱신은 middleware가 담당한다 |
+
+하지 않은 것: TOTP 최초 등록 화면(대표 입회 절차로 별도 설계), 공개 가입·직원 생성, 실제 리드 조회 API, 실제 Supabase 프로젝트 연결 검증(설정 준비 후).

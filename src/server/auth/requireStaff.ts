@@ -1,32 +1,18 @@
 import 'server-only';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
 import { signingKeyFromEnv } from '../security/token';
-import { StaffAuthError, type StaffAuth } from './staffAssertion';
+import { StaffAuthError } from './staffAssertion';
+import type { StaffIdentity } from './staffSession';
 import { authorizeStaffWithDb, openStaffSessionWithDb } from './staffSessionDb';
+import { supabaseServer, verifiedClaimsFrom } from './supabaseServer';
 
 async function verifiedClaims() {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (list) => {
-          for (const { name, value, options } of list) cookieStore.set(name, value, options);
-        },
-      },
-    },
-  );
-  // 접근 토큰의 서명을 검증한 클레임만 사용한다. 쿠키 내용을 그대로 믿지 않는다.
-  const { data, error } = await supabase.auth.getClaims();
-  if (error || !data?.claims) throw new StaffAuthError(401, 'UNAUTHENTICATED');
-  return data.claims;
+  const claims = await verifiedClaimsFrom(await supabaseServer());
+  if (!claims) throw new StaffAuthError(401, 'UNAUTHENTICATED');
+  return claims;
 }
 
-/** 관리자 Server Action·Route Handler 첫 줄에서 호출. 역할 판정은 DB 함수가 한다. */
-export async function requireStaff(): Promise<StaffAuth> {
+/** 관리자 화면·Server Action·Route Handler 첫 줄에서 호출. 역할 판정은 DB 함수가 한다. */
+export async function requireStaff(): Promise<StaffIdentity> {
   return authorizeStaffWithDb(await verifiedClaims(), signingKeyFromEnv('staff'));
 }
 

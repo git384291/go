@@ -203,3 +203,9 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
 }
 body:has(.admin), body:has(.login) { padding-bottom: 0; }
 .section-note { margin: -4px 0 16px; color: var(--muted); font-size: 15px; }
+
+/* 관리자 인증(PHASE 1 OI-002) */
+.form-error { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fee2e2; color: #7f1d1d; font-size: 14px; }
+.admin-bar-end, .admin-logout { display: flex; align-items: center; gap: 8px; }
+.admin-role { font-size: 12px; opacity: .85; }
+.admin-logout .btn { padding: 6px 12px; font-size: 13px; min-height: 0; color: #fff; border-color: rgba(255,255,255,.4); }

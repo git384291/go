@@ -10,8 +10,8 @@ import InternetTv from '../../src/app/products/internet-tv/page';
 import InternetPhone from '../../src/app/products/internet-phone/page';
 import Cctv from '../../src/app/products/cctv-security/page';
 import Consult from '../../src/app/consult/page';
-import Admin from '../../src/app/admin/page';
-import AdminLogin from '../../src/app/admin/login/page';
+import { AdminMockView } from '../../src/app/admin/AdminMockView';
+import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
 
 // PHASE 1: 고객 화면에 나오면 안 되는 예약 상품 흔적(관리자 화면은 내부 가상 데이터라 제외)
 const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/products/mobile', '집전화', 'CCTV', 'cctv',
@@ -42,8 +42,8 @@ async function main() {
     ['01-home', <Home key="home" />],
     ['02-internet-tv', <InternetTv key="internet-tv" />],
     ['05-consult', await Consult()],
-    ['06-admin-login', <AdminLogin key="admin-login" />],
-    ['07-admin-leads', <Admin key="admin" />],
+    ['06-admin-login', <LoginPreview key="admin-login" />],
+    ['07-admin-leads', <AdminMockView key="admin" />],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),

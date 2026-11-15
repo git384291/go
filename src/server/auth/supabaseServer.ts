@@ -1,0 +1,67 @@
+import 'server-only';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import type { AuthPort } from './loginFlow';
+import type { VerifiedClaims } from './staffAssertion';
+
+/**
+ * 요청 쿠키 기반 Supabase 서버 클라이언트.
+ * Server Component에서는 Next 15가 쿠키 쓰기를 막는다(예외). 그 경우 쓰기를 건너뛰고,
+ * 토큰 갱신 쿠키는 src/middleware.ts가 같은 요청 앞단에서 기록한다(@supabase/ssr 권장 구조).
+ * Server Action·Route Handler에서는 쓰기가 정상 동작한다.
+ */
+export async function supabaseServer() {
+  const cookieStore = await cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+        setAll: (list) => {
+          try {
+            for (const { name, value, options } of list) cookieStore.set(name, value, options);
+          } catch {
+            // Server Component 렌더링 중: middleware가 갱신을 담당한다.
+          }
+        },
+      },
+    },
+  );
+}
+
+type Supabase = Awaited<ReturnType<typeof supabaseServer>>;
+
+/** 서명 검증된 클레임만 사용한다(쿠키 내용을 그대로 믿지 않음) */
+export async function verifiedClaimsFrom(supabase: Supabase): Promise<VerifiedClaims | null> {
+  const { data, error } = await supabase.auth.getClaims();
+  if (error || !data?.claims) return null;
+  return data.claims as VerifiedClaims;
+}
+
+/** loginFlow.ts가 쓰는 최소 기능만 Supabase에 연결한다 */
+export function authPort(supabase: Supabase): AuthPort {
+  return {
+    signInWithPassword: async (email, password) => {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      return !error && !!data.session;
+    },
+    nextLevel: async () => {
+      const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      return error ? null : data.nextLevel;
+    },
+    verifiedTotpFactorId: async () => {
+      const { data, error } = await supabase.auth.mfa.listFactors();
+      if (error) return null;
+      return data.totp.find((f) => f.status === 'verified')?.id ?? null;
+    },
+    challengeAndVerify: async (factorId, code) => {
+      const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
+      return !error;
+    },
+    claims: () => verifiedClaimsFrom(supabase),
+    signOut: async () => {
+      await supabase.auth.signOut({ scope: 'local' });
+    },
+  };
+}
