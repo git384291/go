@@ -17,7 +17,7 @@ export default async function ProgressPage() {
   if ('redirect' in result) {
     // 필요할 때만 불러온다(거부·잠금 경로 시험이 next 클라이언트 모듈 없이 실제 page를 실행할 수 있게)
     const { redirect } = await import('next/navigation');
-    redirect(result.redirect);
+    return redirect(result.redirect);
   }
   return result.element;
 }
