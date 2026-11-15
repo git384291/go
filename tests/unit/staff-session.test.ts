@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizeStaffSession, establishStaffSession, type StaffSessionStore } from '../../src/server/auth/staffSession';
+import { authorizeStaffSession, establishStaffSession, StaffSessionUnavailable, type StaffSessionStore } from '../../src/server/auth/staffSession';
 import { StaffAuthError, type StaffAuth } from '../../src/server/auth/staffAssertion';
 
 const actor = '00000000-0000-4000-8000-000000000001';
@@ -38,9 +38,24 @@ test('관리자 요청: 폐기·만료 등 DB의 권한 거부를 일반 오류�
   await assert.rejects(authorizeStaffSession(claims, key, async () => { throw refusal; }), forbidden);
 });
 
-test('관리자 요청: DB 장애에서 인증 성공으로 대체하지 않음', async () => {
-  const outage = new Error('DB unavailable');
-  await assert.rejects(authorizeStaffSession(claims, key, async () => { throw outage; }), (error) => error === outage);
+test('관리자 요청: DB 장애를 거부하고 내부 쿼리·서명 파라미터를 제거', async () => {
+  const outage = Object.assign(new Error('private DB detail'), { query: 'private SQL', parameters: ['private assertion'] });
+  await assert.rejects(authorizeStaffSession(claims, key, async () => { throw outage; }), (error) => {
+    assert.ok(error instanceof StaffSessionUnavailable);
+    assert.equal(error.message, 'STAFF_SESSION_UNAVAILABLE');
+    for (const property of ['cause', 'query', 'parameters']) assert.equal(property in error, false);
+    return true;
+  });
+});
+
+test('관리자 요청: 대문자 UUID 클레임은 DB의 정규화된 본인 ID와 일치', async () => {
+  const user = 'abcdefab-0000-4000-8000-abcdefabcdef';
+  const id = 'abcdefab-1111-4000-8000-abcdefabcdef';
+  const identity = await authorizeStaffSession({ sub: user.toUpperCase(), session_id: id.toUpperCase(), aal: 'aal2' }, key, async (auth) => {
+    assert.equal(auth.actor, user); assert.equal(auth.session, id);
+    return [{ user_id: user, role: 'owner' }];
+  });
+  assert.equal(identity.actor, user);
 });
 
 test('세션 등록: aal1·잘못된 ID는 트랜잭션 시작 전 거부', async () => {
