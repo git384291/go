@@ -18,14 +18,16 @@ $$;
 -- 승인 기록 SQL. p_sign_* 를 주면 서명 대상과 실제 값을 다르게 만든다(재사용·변조 시험)
 create function test.approval_sql(p_staff uuid, p_session uuid, p_product text, p_kind text,
                                   p_sign_product text default null, p_sign_kind text default null,
-                                  p_proof text default '', p_ttl int default 120) returns text
+                                  p_proof text default '', p_ttl int default 120, p_exp bigint default null) returns text
 language plpgsql as $$
 declare
   -- p_ttl: 유효 시간을 달리해 '새로 발급한 서명'을 만든다(0005 이후 같은 서명은 1회용)
-  v_proof text := case when p_proof = '' then
-    test.token('staff', array['product-approve', p_staff::text, p_session::text,
-                              coalesce(p_sign_product, p_product), coalesce(p_sign_kind, p_kind)], p_ttl)
-    else p_proof end;
+  -- p_exp: 고정 만료값(초). 주면 호출 시각과 무관하게 결정적인 서명을 만든다(재기록 시험용, PM 6918034030)
+  v_fields text[] := array['product-approve', p_staff::text, p_session::text,
+                           coalesce(p_sign_product, p_product), coalesce(p_sign_kind, p_kind)];
+  v_proof text := case when p_proof <> '' then p_proof
+                       when p_exp is not null then test.token_at('staff', v_fields, p_exp)
+                       else test.token('staff', v_fields, p_ttl) end;
 begin
   return format('insert into core.product_activation_approvals (product_key, approval_kind, staff_id, session_id, reason, proof, created_at)'
                 ' values (%L, %L, %L, %L, %L, %L, now() - interval ''30 days'')',
@@ -38,6 +40,9 @@ $$;
 \set PM    '''00000000-0000-4000-8000-000000000005''::uuid, ''10000000-0000-4000-8000-000000000005''::uuid'
 
 -- ===== 기준 상태 =====
+-- 승인 서명의 기준 시각을 한 번만 고정한다(PM 6918034030). 최초 승인과 재기록 승인은 이 기준에서 서로 다른 만료값으로
+-- 서명하므로, 실행 중 초가 바뀌어도 같은 서명이 되지 않는다(이전: 호출마다 floor(now())+TTL 120/119 → 1초 뒤 같은 값).
+select floor(extract(epoch from now()))::bigint as ps_base \gset
 select test.expect_eq($$select string_agg(product_key, ',' order by product_key) from core.product_catalog where status = 'active'$$,
   'internet_tv', 'PS1 DB 활성 상품은 인터넷+TV 하나');
 select test.expect_eq($$select string_agg(product_key, ',' order by product_key) from core.product_catalog where status = 'reserved'$$,
@@ -94,7 +99,7 @@ select test.expect_error(test.approval_sql(:OWNER, 'internet_tv', 'owner'),
   '22023', 'PS22 이미 활성인 상품에는 승인 기록 불가');
 
 -- 사용자 승인만 있을 때
-select test.expect_ok(test.approval_sql(:OWNER, 'cctv_security', 'owner'), 'PS23 유효한 사용자 승인 기록');
+select test.expect_ok(test.approval_sql(:OWNER, 'cctv_security', 'owner', p_exp => :ps_base + 240), 'PS23 유효한 사용자 승인 기록');
 select test.expect_eq($$select (created_at > now() - interval '1 minute' and proof is null)::text
   from core.product_activation_approvals where product_key = 'cctv_security' and approval_kind = 'owner'$$,
   'true', 'PS24 승인 시각은 DB가 정함(과거 날짜 입력 무시), 서명은 저장 안 함');
@@ -110,7 +115,7 @@ select test.expect_error($$delete from core.product_activation_approvals$$, '425
 select test.expect_error($$truncate core.product_activation_approvals$$, '42501', 'PS29 승인 기록 일괄 삭제(TRUNCATE) 거부');
 
 -- 승인 후 PM 승인자가 비활성화되면 그 승인은 쓸 수 없다
-select test.expect_ok(test.approval_sql(:PM, 'cctv_security', 'pm'), 'PS30 유효한 PM 승인 기록');
+select test.expect_ok(test.approval_sql(:PM, 'cctv_security', 'pm', p_exp => :ps_base + 240), 'PS30 유효한 PM 승인 기록');
 update core.staff set active = false where user_id = '00000000-0000-4000-8000-000000000005';
 select test.expect_error($$update core.product_catalog set status = 'active', activated_at = now() where product_key = 'cctv_security'$$,
   '42501', 'PS31 승인 후 승인자 계정이 비활성화되면 활성화 거부');
@@ -124,8 +129,20 @@ select test.expect_error($$update core.product_catalog set status = 'active', ac
   '42501', 'PS32 7일 지난 승인으로는 활성화 거부');
 
 -- 두 승인이 모두 유효하면 활성화(가상 DB에서 구조 검증만) → 접수 허용 → 다시 예약 → 접수 차단
-select test.expect_ok(test.approval_sql(:OWNER, 'cctv_security', 'owner', p_ttl => 119), 'PS33 사용자 승인 재기록');
-select test.expect_ok(test.approval_sql(:PM, 'cctv_security', 'pm', p_ttl => 119), 'PS34 PM 승인 재기록');
+-- 같은 서명 재사용 거부 유지: 최초 승인(PS23)의 서명 그대로 다시 기록 시도. 이 시점의 기존 승인은 모두 7일 지난 상태라
+-- '미소진 대기 중복' 사유가 아니라 서명 재사용으로만 거부된다
+select test.expect_error(test.approval_sql(:OWNER, 'cctv_security', 'owner', p_exp => :ps_base + 240),
+  '42501', 'PS32a 최초 사용자 승인 서명 재사용 거부');
+-- 재기록 서명은 같은 기준 시각에서 다른 만료값(+230)이다. 초 경계를 강제해도 최초 서명과 같아질 수 없음을 먼저 확인한다
+select test.expect_eq(format($$select (test.token_at('staff', array['product-approve', '00000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001', 'cctv_security', 'owner'], %s) <> test.token_at('staff', array['product-approve',
+  '00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'cctv_security', 'owner'], %s))::text$$,
+  :ps_base + 230, :ps_base + 240), 'true', 'PS33a 재기록 서명 ≠ 최초 서명(기준 시각 고정, 초 경계와 무관)');
+-- 회귀 근거: 이전 방식(호출마다 now()+TTL)은 기준 초가 1 늘면 120과 119+1이 같은 만료값 → 같은 서명이 된다
+select test.expect_eq(format($$select (test.token_at('staff', array['x'], %s) = test.token_at('staff', array['x'], %s))::text$$,
+  :ps_base + 120, :ps_base + 1 + 119), 'true', 'PS33b 이전 TTL 120/119 방식은 초 경계에서 같은 서명(시험 결함 재현)');
+select test.expect_ok(test.approval_sql(:OWNER, 'cctv_security', 'owner', p_exp => :ps_base + 230), 'PS33 사용자 승인 재기록');
+select test.expect_ok(test.approval_sql(:PM, 'cctv_security', 'pm', p_exp => :ps_base + 230), 'PS34 PM 승인 재기록');
 select test.expect_ok($$update core.product_catalog set status = 'active' where product_key = 'cctv_security'$$,
   'PS35 사용자 + PM 승인이 모두 있을 때만 활성화 성공');
 select test.expect_eq($$select count(*)::text from core.product_activation_approvals where product_key = 'cctv_security' and consumed_at is null$$,
