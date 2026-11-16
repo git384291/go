@@ -48,7 +48,9 @@ export type ListResult = Readonly<{ ok: true; items: readonly MaskedLead[] }> | 
 export const PAGE_LIMIT_MAX = 200; // DB 함수의 상한과 같다
 export const PAGE_OFFSET_MAX = 100_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const NAME_MASKED_RE = /^[가-힣a-zA-Z\s*]{1,20}$/u;
+// maskName(src/server/security/piiCrypto.ts) 생산 규칙과 같은 모양만 허용한다(모양 검증일 뿐, 개인정보 완전 제거 보증이 아니다):
+//   1글자 → '*', 2글자 → '가*', 3글자 이상 → 첫 글자 + '*'(1~18개) + 끝 글자. 끝 글자는 한글·영문(입력은 trim됨), 전체 20자 이하
+const NAME_MASKED_RE = /^(?:\*|[가-힣A-Za-z]\*|[가-힣A-Za-z]\*{1,18}[가-힣A-Za-z])$/u;
 const PHONE_MASKED_RE = /^010-\*{4}-\d{4}$/;
 
 const fail = (code: ReadErrorCode): ListResult => Object.freeze({ ok: false as const, code });
@@ -82,12 +84,37 @@ function parsePage(page: unknown): { limit: number; offset: number } | null {
   return { limit, offset };
 }
 
+const INSTANT_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|([+-])(\d{2})(?::?(\d{2}))?)$/;
+
+const daysInMonth = (y: number, m: number) =>
+  m === 2 ? ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28) : [4, 6, 9, 11].includes(m) ? 30 : 31;
+
+/**
+ * 생성 시각: 유효한 Date 객체 또는 시간대가 있는 엄격 ISO/PostgreSQL 문자열만. Date 정규화(2/31 → 3/3)에 맡기지 않는다.
+ * 달력·윤년·시분초(24시·60분·60초 거부)·offset(±14:00 이내, 분 59 이하)을 직접 검사한다. 원본 Date는 바꾸지 않는다.
+ */
 function isoInstant(v: unknown): string {
-  let d: Date | null = null;
-  if (v instanceof Date) d = v;
-  else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}(:?\d{2})?)$/.test(v)) d = new Date(v.replace(' ', 'T'));
-  if (!d || Number.isNaN(d.getTime())) throw new RowInvalid();
-  return d.toISOString();
+  if (v instanceof Date) {
+    const t = v.getTime();
+    if (!Number.isFinite(t)) throw new RowInvalid();
+    return new Date(t).toISOString();
+  }
+  if (typeof v !== 'string') throw new RowInvalid();
+  const m = INSTANT_RE.exec(v);
+  if (!m) throw new RowInvalid();
+  const [y, mo, d, h, mi, se] = [m[1], m[2], m[3], m[4], m[5], m[6]].map(Number);
+  if (y < 1000 || mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h > 23 || mi > 59 || se > 59) throw new RowInvalid();
+  let offsetMin = 0;
+  if (m[8] !== 'Z') {
+    const oh = Number(m[10]);
+    const om = m[11] === undefined ? 0 : Number(m[11]);
+    if (om > 59 || oh > 14 || (oh === 14 && om !== 0)) throw new RowInvalid();
+    offsetMin = (m[9] === '-' ? -1 : 1) * (oh * 60 + om);
+  }
+  const ms = m[7] === undefined ? 0 : Math.floor(Number(`0.${m[7]}`) * 1000);
+  const t = Date.UTC(y, mo - 1, d, h, mi, se, ms) - offsetMin * 60_000;
+  if (!Number.isFinite(t)) throw new RowInvalid();
+  return new Date(t).toISOString();
 }
 
 function maskedLead(row: unknown, scope: { role: ListRole; actor: string }): MaskedLead {
@@ -96,8 +123,8 @@ function maskedLead(row: unknown, scope: { role: ListRole; actor: string }): Mas
   if (!isUuid(r.lead_id)) throw new RowInvalid();
   const createdAt = isoInstant(r.created_at);
   const name = r.name_masked;
-  // 마스킹 표식(*)이 없는 이름은 원문일 수 있으므로 통과시키지 않는다
-  if (typeof name !== 'string' || !NAME_MASKED_RE.test(name) || !name.includes('*')) throw new RowInvalid();
+  // 별표 포함만으로 인정하지 않는다(원문+별표 등). 다시 마스킹해 정상화하지 않고 전체 실패로 닫는다
+  if (typeof name !== 'string' || !NAME_MASKED_RE.test(name)) throw new RowInvalid();
   const phone = r.phone_masked;
   if (typeof phone !== 'string' || !PHONE_MASKED_RE.test(phone)) throw new RowInvalid();
   if (typeof r.interest !== 'string' || !isActiveInterest(r.interest)) throw new RowInvalid();

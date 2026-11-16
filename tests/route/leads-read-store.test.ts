@@ -6,6 +6,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { listMaskedLeads, type LeadsReadDeps, type SqlTag } from '../../src/server/admin/leadsReadStore';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
+import { maskName } from '../../src/server/security/piiCrypto';
 
 const OWNER = '00000000-0000-4000-8000-000000000001';
 const COUNSELOR = '00000000-0000-4000-8000-000000000002';
@@ -191,4 +192,57 @@ test('L7 실제 API·페이지·클라이언트 코드는 새 어댑터를 impor
   assert.deepEqual(importers, [], '배선은 별도 승인 범위');
   const src = readFileSync(path.join(root, 'server/admin/leadsReadStore.ts'), 'utf8');
   assert.ok(!/process\.env|withRole|from '\.\.\/db\/|postgres\(|reveal_contact\(|\.unsafe\(/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), '환경값·기본 DB·열람 함수·unsafe SQL 없음');
+});
+
+// ---- PM 6909541430: 마스킹 모양·달력 엄격 검증 ----
+
+
+test('L8 이름: maskName이 실제 만드는 출력은 통과, 별표만 포함한 원문 모양은 전체 실패', async () => {
+  for (const raw of ['가', '김철', '홍길동', '남궁민수', 'Al', 'John Smith', 'A Z', '가'.repeat(20), 'Fixture']) {
+    const masked = maskName(raw);
+    const f = fakeDeps({ rows: [row({ name_masked: masked })] });
+    const r = await listMaskedLeads(f.deps, who('owner'));
+    assert.equal(r.ok, true, `${raw} → ${masked}`);
+    if (r.ok) assert.equal(r.items[0].nameMasked, masked);
+  }
+  const bads = ['FixtureFullName*', '*FixtureFullName', '홍길동*', '*길동', '홍*길*동', '홍길*동', 'A*B*C', '**', '*A', 'A**', '홍*\u0000', '홍*\n', ' 홍*동', '홍*동 ', '홍 *동', '가' + '*'.repeat(19) + '나', '1*2', '', '홍＊동'];
+  for (const bad of bads) {
+    const rows = Object.freeze([Object.freeze(row()), Object.freeze(row({ name_masked: bad }))]);
+    const f = fakeDeps({ rows });
+    const r = await listMaskedLeads(f.deps, who('owner'));
+    assert.deepEqual(r, { ok: false, code: 'INVALID_DATA' }, JSON.stringify(bad));
+    assert.ok(!JSON.stringify(r).includes('Fixture'), '오류에 원문 없음');
+    assert.equal(rows[1].name_masked, bad, '원본 불변');
+  }
+});
+
+test('L9 생성 시각: 달력·윤년·시분초·offset 엄격, Date 정규화로 받아들이지 않음', async () => {
+  const good: [unknown, string][] = [
+    ['2024-02-29T00:00:00Z', '2024-02-29T00:00:00.000Z'],
+    ['2000-02-29T12:00:00Z', '2000-02-29T12:00:00.000Z'],
+    ['2026-11-16 09:00:00+09', '2026-11-16T00:00:00.000Z'],
+    ['2026-11-16T09:00:00.123456+09:00', '2026-11-16T00:00:00.123Z'],
+    ['2026-11-15T23:30:00-0530', '2026-11-16T05:00:00.000Z'],
+    ['2026-11-16T00:00:00+14:00', '2026-11-15T10:00:00.000Z'],
+    ['2026-12-31T23:59:59Z', '2026-12-31T23:59:59.000Z'],
+  ];
+  for (const [v, iso] of good) {
+    const r = await listMaskedLeads(fakeDeps({ rows: [row({ created_at: v })] }).deps, who('owner'));
+    assert.equal(r.ok && r.items[0].createdAt, iso, String(v));
+  }
+  const d = new Date('2026-11-16T01:02:03.000Z');
+  const dt = d.getTime();
+  const rd = await listMaskedLeads(fakeDeps({ rows: [row({ created_at: d })] }).deps, who('owner'));
+  assert.equal(rd.ok && rd.items[0].createdAt, '2026-11-16T01:02:03.000Z');
+  assert.equal(d.getTime(), dt, 'Date 원본 불변');
+  const bads: unknown[] = [
+    '2026-02-31T00:00:00Z', '2026-02-29T00:00:00Z', '2100-02-29T00:00:00Z', '2026-04-31T00:00:00Z', '2026-13-01T00:00:00Z', '2026-00-10T00:00:00Z',
+    '2026-11-16T24:00:00Z', '2026-11-16T23:60:00Z', '2026-11-16T23:59:60Z', '2026-11-16T00:00:00', '2026-11-16', '2026-11-16T00:00:00+15:00',
+    '2026-11-16T00:00:00+14:01', '2026-11-16T00:00:00+09:60', '2026-11-16T00:00:00+9', '2026-11-16T00:00:00.1234567Z', ' 2026-11-16T00:00:00Z',
+    '0099-01-01T00:00:00Z', 1763254923000, {}, new Date(NaN),
+  ];
+  for (const bad of bads) {
+    const r = await listMaskedLeads(fakeDeps({ rows: [row(), row({ created_at: bad })] }).deps, who('owner'));
+    assert.deepEqual(r, { ok: false, code: 'INVALID_DATA' }, String(bad));
+  }
 });

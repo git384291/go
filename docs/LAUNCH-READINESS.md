@@ -143,7 +143,9 @@
   - owner: 전체(미배정 포함)
   - counselor: 본인 배정만. 결과도 다시 확인하고, 범위 밖 행이 섞이면 전체 실패(`SCOPE_VIOLATION`)로 처리한다.
   - reviewer·policy_editor·알 수 없는 역할: 실행기 호출 전에 거부한다.
-- **DTO:** `id, createdAt(ISO), nameMasked(* 포함 필수), phoneMasked(010-****-dddd), interest(활성 상품만), status(enum), assignedTo(null|UUID)`
+- **DTO:** `id, createdAt(ISO), nameMasked, phoneMasked(010-****-dddd), interest(활성 상품만), status(enum), assignedTo(null|UUID)`
+  - `nameMasked`: maskName 생산 모양만 허용한다(`*` / `가*` / `가*…*명`, 양 끝 외에는 모두 `*`, 20자 이하). 이는 모양 검증이며 개인정보 완전 제거를 보증하지 않는다(PM 6909541430).
+  - `createdAt`: 유효한 Date 또는 시간대가 있는 엄격 문자열만 받는다. 달력·윤년·시분초·offset ±14:00을 직접 검사하고, Date 정규화(2/31 → 3/3)에 맡기지 않는다.
   - SQL에서도 `contact_time`·`utm_source`를 고르지 않는다.
   - 암호문·원문·HMAC·주소·메모·키·세션·서명·DB 오류 원문은 DTO에 넣지 않는다.
 - **오류:** 오류는 고정 코드만 돌려준다(`DISABLED/FORBIDDEN/INVALID_PAGE/UNAVAILABLE/INVALID_DATA/SCOPE_VIOLATION`). DB 권한 거부(42501)는 `FORBIDDEN`, 그 밖의 장애는 `UNAVAILABLE`이며, 빈 목록 성공으로 감추지 않는다.
