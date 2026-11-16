@@ -213,7 +213,7 @@
   | `db` + 준비됨 | `requireStaff` → 마스킹 어댑터 → 기본 `withRole('staff')` |
 
   - 준비 미충족: Vercel 배포(production·preview·`VERCEL=1`), URL 없음·원격·일반 DB 이름·쿼리 문자열 등
-- **db 준비 조건(이번 단계):** `postgres(ql)://` + `localhost`/`127.0.0.1` + 폐기 시험 DB 이름 `fideon_lrs_<pid>_<8hex>`만 허용한다. 판정에 쓴 URL은 응답·로그에 넣지 않는다.
+- **db 준비 조건(이번 단계):** `NODE_ENV`가 정확히 `development`·`test`여야 한다(Vercel 밖 `next start`·자체 호스팅 production·미설정·알 수 없는 값은 503, PM 6915073739). 여기에 `postgres(ql)://` + `localhost`/`127.0.0.1` + 폐기 시험 DB 이름 `fideon_lrs_<pid>_<8hex>`만 허용한다. 판정에 쓴 URL은 응답·로그에 넣지 않는다.
 - **상세:** mock은 그대로다. db·잘못된 출처는 503이다(`LEADS_DETAIL_UNAVAILABLE`/`LEADS_SOURCE_INVALID`). 실제 상세·원문 열람·상태 변경은 없다.
 - **시험**
   - 경로 S1~S6(가짜 의존성)

@@ -23,10 +23,16 @@ test('S1 출처: 미설정·mock → mock, db → db, 그 밖(대소문자·공�
 });
 
 test('S2 db 읽기 준비: 지정된 로컬 폐기 시험 DB URL만, 배포 환경·원격·일반 DB·잘못된 URL 거부', () => {
-  const env = (o: Record<string, string | undefined>) => ({ ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, ...o });
+  const env = (o: Record<string, string | undefined>) => ({ ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'test', ...o });
+  assert.equal(dbReadReady(env({ NODE_ENV: 'development' })), true);
   assert.equal(dbReadReady(env({})), true);
   assert.equal(dbReadReady(env({ DATABASE_URL: 'postgresql://u@localhost/fideon_lrs_1_abcdef01' })), true);
   const bad: [string, Record<string, string | undefined>][] = [
+    ['NODE_ENV production', { NODE_ENV: 'production' }],
+    ['NODE_ENV 미설정', { NODE_ENV: undefined }],
+    ['NODE_ENV 빈 값', { NODE_ENV: '' }],
+    ['NODE_ENV 알 수 없음', { NODE_ENV: 'unexpected' }],
+    ['NODE_ENV 대소문자', { NODE_ENV: 'Test' }],
     ['source mock', { ADMIN_LEADS_SOURCE: 'mock' }],
     ['source 없음', { ADMIN_LEADS_SOURCE: undefined }],
     ['production', { VERCEL_ENV: 'production' }],
@@ -87,8 +93,11 @@ test('S3 목록: 기본 mock 유지, invalid·db 미준비는 503(Auth·DB 0회,
   const cases: [string, Record<string, string | undefined>, string][] = [
     ['invalid', { ADMIN_LEADS_SOURCE: 'DB' }, 'LEADS_SOURCE_INVALID'],
     ['db + URL 없음', { ADMIN_LEADS_SOURCE: 'db' }, 'LEADS_READ_DISABLED'],
-    ['db + production', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, VERCEL_ENV: 'production' }, 'LEADS_READ_DISABLED'],
-    ['db + preview', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, VERCEL_ENV: 'preview' }, 'LEADS_READ_DISABLED'],
+    ['db + NODE_ENV production(Vercel 밖)', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'production' }, 'LEADS_READ_DISABLED'],
+    ['db + NODE_ENV 미설정', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL }, 'LEADS_READ_DISABLED'],
+    ['db + NODE_ENV 알 수 없음', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'unexpected' }, 'LEADS_READ_DISABLED'],
+    ['db + production', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'test', VERCEL_ENV: 'production' }, 'LEADS_READ_DISABLED'],
+    ['db + preview', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'test', VERCEL_ENV: 'preview' }, 'LEADS_READ_DISABLED'],
     ['db + 원격', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: 'postgres://u@db.example.com/fideon_lrs_1_abcdef01' }, 'LEADS_READ_DISABLED'],
     ['db + 일반 DB', { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: 'postgres://u@localhost/fideon_test' }, 'LEADS_READ_DISABLED'],
   ];
@@ -111,7 +120,7 @@ test('S3 목록: 기본 mock 유지, invalid·db 미준비는 503(Auth·DB 0회,
 });
 
 test('S4 목록 db 준비됨: 서버 컨텍스트 → 어댑터 → 주입 실행기, 200·권한·페이지·장애 JSON', async () => {
-  const env = { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL };
+  const env = { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'test' };
   const ok = deps(env);
   const r = await body(await adminLeadsList(ok.d, req('?limit=5&actor=forged&role=owner')));
   assert.equal(r.status, 200);
@@ -119,6 +128,8 @@ test('S4 목록 db 준비됨: 서버 컨텍스트 → 어댑터 → 주입 실�
   assert.deepEqual(Object.keys((r.json.items as object[])[0]).sort(), ['assignedTo', 'createdAt', 'id', 'interest', 'nameMasked', 'phoneMasked', 'status']);
   assert.ok(!JSON.stringify(r.json).includes('FREE-TEXT'));
   assert.deepEqual([ok.calls.mockList, ok.calls.staff, ok.calls.tx], [0, 1, 1]);
+  const dev = deps({ ...env, NODE_ENV: 'development' });
+  assert.equal((await adminLeadsList(dev.d, req())).status, 200, 'development 허용');
   const c = deps(env, { staff: { actor: COUNSELOR, session: '00000000-0000-4000-8000-0000000000bb', token: 't', role: 'counselor' } as StaffIdentity });
   assert.equal((await adminLeadsList(c.d, req())).status, 200);
   const other = deps(env, { staff: { actor: OWNER, session: '00000000-0000-4000-8000-0000000000bb', token: 't', role: 'counselor' } as StaffIdentity });
@@ -142,7 +153,7 @@ test('S4 목록 db 준비됨: 서버 컨텍스트 → 어댑터 → 주입 실�
 test('S5 상세: mock은 기존 가상 상세, db·invalid는 503으로 막아 섞지 않음(Auth·DB 0회)', async () => {
   const m = deps({});
   assert.equal((await body(await adminLeadDetail(m.d))).json.data_source, 'mock');
-  for (const [env, code] of [[{ ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL }, 'LEADS_DETAIL_UNAVAILABLE'], [{ ADMIN_LEADS_SOURCE: 'x' }, 'LEADS_SOURCE_INVALID']] as const) {
+  for (const [env, code] of [[{ ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: OK_URL, NODE_ENV: 'test' }, 'LEADS_DETAIL_UNAVAILABLE'], [{ ADMIN_LEADS_SOURCE: 'x' }, 'LEADS_SOURCE_INVALID']] as const) {
     const { d, calls } = deps(env);
     const r = await body(await adminLeadDetail(d));
     assert.equal(r.status, 503);

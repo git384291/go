@@ -196,7 +196,8 @@ test('P8 트랜잭션 안에서만 app_staff·시간 제한, 종료 뒤 app_serv
 // 주의: 아래 실행기는 시험용 Unix socket 주입 실행기다. 기본 withRole(db(), DATABASE_URL 접속)의 실제 연결 검증이 아니다.
 
 test('P9 route 조합(db 출처·지정 폐기 DB 판정) → 실제 PG: owner 200 마스킹 목록, counselor 본인 건, 만료 세션 403, 상세 503', async () => {
-  const env = { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: `postgres://app_server@127.0.0.1:${PORT}/${DB}` };
+  // 가짜 env 객체에만 NODE_ENV='test'를 둔다(실제 환경 파일·프로세스의 NODE_ENV는 바꾸지 않음)
+  const env = { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: `postgres://app_server@127.0.0.1:${PORT}/${DB}`, NODE_ENV: 'test' };
   const mk = (identity: StaffIdentity): AdminLeadsDeps => ({
     env: () => env,
     mode: () => 'supabase',
