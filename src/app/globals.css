@@ -237,3 +237,9 @@ body:has(.admin), body:has(.login) { padding-bottom: 0; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
   outline: 3px solid var(--signal); outline-offset: 2px;
 }
+/* 로컬 시험용 읽기 전용 목록(PM 6915664371) */
+.test-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #e0f2fe; color: #0c4a6e; }
+.read-note { font-size: 13px; color: var(--muted); margin: 0; }
+.read-empty { background: #fff; border-radius: 12px; padding: 16px; text-align: center; margin: 0; }
+.read-pager { display: flex; justify-content: space-between; font-size: 14px; }
+.read-pager a { padding: 8px 12px; background: #fff; border-radius: 10px; }

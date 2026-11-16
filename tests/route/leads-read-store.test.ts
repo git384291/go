@@ -189,8 +189,8 @@ test('L7 실제 API·페이지·클라이언트 코드는 새 어댑터를 impor
   };
   walk(root);
   // 미배선 HTTP 조합 모듈(leadsReadApi.ts)만 타입을 가져간다. 그 모듈의 미연결은 leads-read-api.test.ts A6이 확인한다
-  // 허용된 import: HTTP 조합(leadsReadApi.ts)·출처 분기(leadsRoute.ts)·목록 route(app/api/admin/leads/route.ts, PM 6913462268)
-  const allowed = [/server[\\/]admin[\\/]leadsRead(Store|Api)\.ts$/, /server[\\/]admin[\\/]leadsRoute\.ts$/, /app[\\/]api[\\/]admin[\\/]leads[\\/]route\.ts$/];
+  // 허용된 import(PM 6915664371: 기본 의존성·읽기 전용 화면·렌더 결정 추가): HTTP 조합(leadsReadApi.ts)·출처 분기(leadsRoute.ts)·목록 route(app/api/admin/leads/route.ts, PM 6913462268)
+  const allowed = [/server[\\/]admin[\\/]leadsRead(Store|Api)\.ts$/, /server[\\/]admin[\\/]leadsRoute\.ts$/, /app[\\/]api[\\/]admin[\\/]leads[\\/]route\.ts$/, /server[\\/]admin[\\/]leadsDefaults\.ts$/, /app[\\/]admin[\\/](LeadsReadView|leadsRender)\.tsx$/];
   const importers = files.filter((f) => !allowed.some((re) => re.test(f)) && /leadsReadStore/.test(readFileSync(f, 'utf8')));
   assert.deepEqual(importers, [], '배선은 별도 승인 범위');
   const src = readFileSync(path.join(root, 'server/admin/leadsReadStore.ts'), 'utf8');

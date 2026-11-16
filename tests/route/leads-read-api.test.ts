@@ -145,8 +145,8 @@ test('A6 기존 route·page 미연결, 모듈은 환경값·기본 DB를 읽지 
     }
   };
   walk(root);
-  // 허용된 import: 출처 분기 조합(leadsRoute.ts)과 목록 route(PM 6913462268). 페이지·상세 route·클라이언트 코드는 없어야 한다
-  const allowed = [/server[\\/]admin[\\/]leadsRead(Api|Store)\.ts$/, /server[\\/]admin[\\/]leadsRoute\.ts$/, /app[\\/]api[\\/]admin[\\/]leads[\\/]route\.ts$/];
+  // 허용된 import(PM 6915664371: 기본 의존성·읽기 전용 화면·렌더 결정 추가): 출처 분기 조합(leadsRoute.ts)과 목록 route(PM 6913462268). 페이지·상세 route·클라이언트 코드는 없어야 한다
+  const allowed = [/server[\\/]admin[\\/]leadsRead(Api|Store)\.ts$/, /server[\\/]admin[\\/]leadsRoute\.ts$/, /app[\\/]api[\\/]admin[\\/]leads[\\/]route\.ts$/, /server[\\/]admin[\\/]leadsDefaults\.ts$/, /app[\\/]admin[\\/](LeadsReadView|leadsRender)\.tsx$/];
   const importers = files.filter((f) => !allowed.some((re) => re.test(f)) && /leadsReadApi|leadsReadStore/.test(readFileSync(f, 'utf8')));
   assert.deepEqual(importers, []);
   const src = readFileSync(path.join(root, 'server/admin/leadsReadApi.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');

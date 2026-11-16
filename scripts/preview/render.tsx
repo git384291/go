@@ -14,6 +14,7 @@ import Consult from '../../src/app/consult/page';
 import { AdminMockView } from '../../src/app/admin/AdminMockView';
 import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
 import { ProgressView } from '../../src/app/admin/progress/ProgressView';
+import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
 
 // 진행판 미리보기는 실제 서버 스냅샷이 아닌 화면 확인용 고정 예시를 쓴다(가로 넘침·표시 확인)
 const PROGRESS_FIXTURE = {
@@ -24,6 +25,12 @@ const PROGRESS_FIXTURE = {
   checks: [{ name: '화면·API 경로 검사(건너뜀 없음)', passed: true }, { name: '실제 로그인 서버 연결 검사', passed: null }],
   sales: { label: '실제 상담 접수 실적', value: null },
 };
+
+const READ_ACTOR = '00000000-0000-4000-8000-000000000001';
+const READ_FIXTURE = [
+  { id: '10000000-0000-4000-8000-000000000001', createdAt: '2026-11-16T00:00:01.000Z', nameMasked: '남궁**수', phoneMasked: '010-****-1001', interest: 'internet_tv', status: 'no_answer', assignedTo: READ_ACTOR },
+  { id: '10000000-0000-4000-8000-000000000002', createdAt: '2026-11-15T23:59:00.000Z', nameMasked: 'J********h', phoneMasked: '010-****-1002', interest: 'internet_tv', status: 'converted', assignedTo: null },
+] as const;
 
 // PHASE 1: 고객 화면에 나오면 안 되는 예약 상품 흔적(관리자 화면은 내부 가상 데이터라 제외)
 const FORBIDDEN = ['/products/internet-phone', '/products/cctv-security', '/products/mobile', '집전화', 'CCTV', 'cctv',
@@ -59,6 +66,9 @@ async function main() {
     ['06-admin-login', <LoginPreview key="admin-login" />],
     ['07-admin-leads', <AdminMockView key="admin" />],
     ['08-admin-progress', <ProgressView key="progress" snapshot={PROGRESS_FIXTURE} now={new Date('2026-11-16T03:00:00+09:00')} />],
+    // 로컬 시험용 읽기 전용 목록(가상 7키 DTO, 실제 데이터 아님)과 잠금 화면
+    ['09-admin-read', <LeadsReadView key="read" items={READ_FIXTURE} actor={READ_ACTOR} offset={20} limit={2} headerExtra={<span className="admin-role">대표</span>} />],
+    ['10-admin-read-locked', <LeadsReadLocked key="read-locked" kind="failed" />],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),
