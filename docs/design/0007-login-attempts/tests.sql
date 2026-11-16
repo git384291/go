@@ -129,18 +129,18 @@ select test.expect_error($$ select test.d7_reserve('password', repeat('a1',32), 
 select test.expect_eq($$ select test.d7_count('password', repeat('a1',32), repeat('b2',32), 'subject_ip')::text $$, '0', 'L42b 성공한 IP-B 범위만 0');
 
 -- (2) 서로 다른 트랜잭션 4개: F예약 → S예약 → S성공 확정 → F실패 확정. F는 성공 확정 뒤 확정됐으므로 남는다
-select test.d7_reserve('password', repeat('c1',32), repeat('c2',32), test.d7_nonce(700));
-select test.d7_reserve('password', repeat('c1',32), repeat('c2',32), test.d7_nonce(701));
-select test.d7_settle((select id from security.login_attempts where request_nonce = test.d7_nonce(701)), 'success');
-select test.d7_settle((select id from security.login_attempts where request_nonce = test.d7_nonce(700)), 'failure');
+select (test.d7_reserve('password', repeat('c1',32), repeat('c2',32), test.d7_nonce(700))) is not null as done;
+select (test.d7_reserve('password', repeat('c1',32), repeat('c2',32), test.d7_nonce(701))) is not null as done;
+select (test.d7_settle((select id from security.login_attempts where request_nonce = test.d7_nonce(701)), 'success')) is not null as done;
+select (test.d7_settle((select id from security.login_attempts where request_nonce = test.d7_nonce(700)), 'failure')) is not null as done;
 select test.expect_eq($$ select test.d7_count('password', repeat('c1',32), repeat('c2',32), 'subject_ip')::text $$, '1', 'L43 성공 확정 뒤에 확정된 실패는 지워지지 않음(별도 트랜잭션 4개)');
 -- 대조: 성공보다 먼저 예약·확정된 실패는 지워진다
-select test.d7_settle(test.d7_reserve('password', repeat('d1',32), repeat('d2',32), test.d7_nonce(710)), 'failure');
-select test.d7_reserve('password', repeat('d1',32), repeat('d2',32), test.d7_nonce(711));
-select test.d7_settle((select id from security.login_attempts where request_nonce = test.d7_nonce(711)), 'success');
+select (test.d7_settle(test.d7_reserve('password', repeat('d1',32), repeat('d2',32), test.d7_nonce(710)), 'failure')) is not null as done;
+select (test.d7_reserve('password', repeat('d1',32), repeat('d2',32), test.d7_nonce(711))) is not null as done;
+select (test.d7_settle((select id from security.login_attempts where request_nonce = test.d7_nonce(711)), 'success')) is not null as done;
 select test.expect_eq($$ select test.d7_count('password', repeat('d1',32), repeat('d2',32), 'subject_ip')::text $$, '0', 'L43b 대조: 성공 이전에 예약·확정된 실패는 제외');
 -- 성공 뒤에 예약된 실패는 당연히 남는다
-select test.d7_settle(test.d7_reserve('password', repeat('d1',32), repeat('d2',32), test.d7_nonce(712)), 'failure');
+select (test.d7_settle(test.d7_reserve('password', repeat('d1',32), repeat('d2',32), test.d7_nonce(712)), 'failure')) is not null as done;
 select test.expect_eq($$ select test.d7_count('password', repeat('d1',32), repeat('d2',32), 'subject_ip')::text $$, '1', 'L43c 성공 뒤에 예약된 실패는 남음');
 
 -- (2) 동시각: created_at·settled_at이 모두 같아도 순번으로 판정한다
@@ -163,7 +163,7 @@ insert into security.login_attempts (step, subject_hmac, ip_hash, request_nonce,
 values ('password', repeat('a3',32), repeat('b3',32), test.d7_nonce(900), now() - interval '2 minutes'),   -- 같은 대상·다른 IP
        ('password', repeat('a4',32), repeat('a5',32), test.d7_nonce(901), now() - interval '2 minutes'),   -- 다른 대상·같은 IP
        ('password', repeat('a3',32), repeat('a5',32), test.d7_nonce(902), now() - interval '2 minutes');   -- 같은 범위
-select test.d7_reserve('password', repeat('a3',32), repeat('a5',32), test.d7_nonce(903));
+select (test.d7_reserve('password', repeat('a3',32), repeat('a5',32), test.d7_nonce(903))) is not null as done;
 select test.expect_eq($$ select string_agg(coalesce(result, 'pending'), ',' order by request_nonce) from security.login_attempts
   where request_nonce in (test.d7_nonce(900), test.d7_nonce(901), test.d7_nonce(902)) $$, 'pending,pending,expired', 'L45 잠근 범위 행만 expired, 다른 대상·다른 IP 행은 그대로');
 select test.expect_eq($$ select test.d7_count('password', repeat('a4',32), repeat('a5',32), 'subject_ip')::text $$, '1', 'L45b 정리 안 된 오래된 대기도 실패로 셈');

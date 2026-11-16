@@ -424,4 +424,12 @@ pass=$(grep -c 'PASS |' "$LOG_DIR/db-test.log" || true)
 fail=$(grep -c 'FAIL |' "$LOG_DIR/db-test.log" || true)
 grep -o 'PASS | [^|]*' "$LOG_DIR/db-test.log" | sed 's/^PASS | /  ✓ /'
 echo "== DB tests: pass=$pass fail=$fail"
-[ "$fail" = 0 ]
+[ "$fail" = 0 ] || exit 1
+
+# 설계 초안 0007(로그인 시도 제한)은 정식 마이그레이션에 자동 로드되지 않는다. GitHub Actions CI에서만, 기본 DB 검사가
+# 통과한 뒤 같은 TCP 미수신 가상 클러스터에 별도 폐기용 DB를 만들어 명시 실행한다(fideon_test는 건드리지 않음).
+# 이 단계가 실패하면 전체 DB 검사도 실패한다. 결과는 기본 DB 검사와 다른 라벨로 남는다.
+if [ "${CI:-}" = true ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+  echo "== design draft 0007 (login attempt limits): local disposable DB + safety tests (CI only)"
+  npm run -s test:design:login-limits || { echo "FAIL | 설계 초안 0007 시험 실패(기본 DB 검사와 별도)"; exit 1; }
+fi

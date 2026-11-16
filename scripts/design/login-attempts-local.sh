@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 설계 초안 0007(로그인 시도 제한) 로컬 재현 시험. 정식 마이그레이션·CI 대상 아님.
+# 설계 초안 0007(로그인 시도 제한) 재현 시험. 정식 migration 자동 로드 안 됨.
+# 로컬 수동 실행 + GitHub Actions CI(scripts/db-test.sh 기본 검사 통과 뒤 npm run test:design:login-limits)에서 별도 폐기 DB로 명시 실행.
 # 안전장치
 #  - 앱 환경(DATABASE_URL 등)을 쓰지 않는다. db-test.sh와 같은 로컬 시험 클러스터(유닉스 소켓, TCP 미수신)에
 #    고유 이름의 폐기용 DB를 새로 만들고, 끝나면(실패 포함) 그 DB만 삭제한다. 같은 이름이 있으면 덮어쓰지 않고 중단.
@@ -159,8 +160,12 @@ else
   fail "C4 deadlock=$dead reserved=$reserved limited=$limited settle_expired=$settled_exp success=$succ expired=$exp pending=$pend inconsistent=$bad"
 fi
 
-echo "== 비밀값·원문 비출력: 시험 출력에 가상 키 원문(hex)·토큰이 없는지"
-if grep -rqE '(3333333333333333|1111111111111111|[0-9]{1,6}\.[0-9]{9,12}\.[0-9a-f]{64})' "$LOG"; then fail "S1 결과 기록에 키·토큰 형식 문자열"; else pass "S1 결과 기록에 키·토큰 원문 없음"; fi
+echo "== 비밀값·원문 비출력: 남는 시험 산출물(결과 기록·시험 출력)에 가상 키 hex·토큰·행 ID가 없는지"
+leak=0
+for f in "$LOG" "$LOG_DIR/tests.out"; do
+  if grep -qE '(3333333333333333|1111111111111111|[0-9]{1,6}\.[0-9]{9,12}\.[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})' "$f"; then leak=1; fi
+done
+[ "$leak" = 0 ] && pass "S1 결과 기록·시험 출력에 키·토큰·행 ID 원문 없음" || fail "S1 산출물에 키·토큰·행 ID 형식 문자열"
 
 audit() { # $1 라벨 → 현재 catalog_audit 결과(위반 코드별 개수만 기록, 허용 목록을 넓히지 않음)
   local rc=0 aout codes

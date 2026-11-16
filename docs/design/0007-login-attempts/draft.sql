@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 설계 초안 0007 — 로그인 시도 제한(예약·정산). **정식 마이그레이션 아님.**
--- - db/migrations에 넣지 않는다. 앱·CI·운영 DB에서 자동 실행되지 않는다.
--- - scripts/design/login-attempts-local.sh가 만든 로컬 폐기용 DB에서만 실행한다.
+-- - db/migrations에 넣지 않는다(정식 migration 자동 로드 안 됨). 앱·운영·원격 DB에 적용되지 않는다.
+-- - scripts/design/login-attempts-local.sh가 만든 폐기용 DB에서만 명시 실행한다(로컬, 그리고 GitHub Actions CI의 db-test 뒤 별도 폐기 DB).
 -- - 설계: docs/ADMIN-AUTH-OPERATIONS.md 6·8절, 계약: CONTRACT.md
 -- ============================================================================
 \set ON_ERROR_STOP 1

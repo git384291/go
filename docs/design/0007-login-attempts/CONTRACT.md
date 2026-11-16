@@ -5,7 +5,7 @@
   - `db/migrations`, `zz_grants.sql`, `catalog_audit.sql` 변경
   - 앱의 `TokenPurpose`·키 로더·로그인 흐름 변경
   - 실제 키 생성·등록
-- 초안 SQL(`draft.sql`)은 `scripts/design/login-attempts-local.sh`가 만든 **로컬 폐기용 DB**에서만 실행했다.
+- 초안 SQL(`draft.sql`)은 `scripts/design/login-attempts-local.sh`가 만든 **폐기용 DB**에서만 명시 실행한다(로컬, CI db-test 뒤).
 - 근거 설계: `docs/ADMIN-AUTH-OPERATIONS.md` 6절·8절(8-1, 8-5)
 
 ## 1. 객체
@@ -64,7 +64,10 @@
 - **success를 보내는 경계(앱 연동 시):** 서버가 Supabase 응답을 직접 확인한 경우에만 보낸다. 비밀번호 단계는 `signInWithPassword` 성공 + 다음 단계 aal2 가능, TOTP 단계는 `challengeAndVerify` 성공 + aal2 클레임일 때다. 브라우저 값으로 정하지 않는다.
 
 ## 4. 로컬 재현 결과
-Claude 작업 환경(PostgreSQL 16, 로컬 유닉스 소켓 클러스터)에서 실행했다. **CI에서는 실행하지 않는다**(워크플로 변경 없음). PM 환경 재현 아님.
+**정식 migration 자동 로드 안 됨.** 아래 시험은 별도 폐기용 DB에서 명시 실행한다.
+- **로컬:** Claude 작업 환경(PostgreSQL 16, 유닉스 소켓 클러스터)에서 수동 실행한다.
+- **CI:** GitHub Actions `scripts/db-test.sh`의 기본 DB 검사가 통과한 뒤 `npm run test:design:login-limits`가 실행된다(`CI=true` + `GITHUB_ACTIONS=true`일 때만, workflow 변경 없음). 실패하면 전체 DB 검사가 실패한다.
+- 앱·운영·원격 DB에는 적용되지 않는다. PM 환경 재현 아님.
 
 ### 4-1. `bash scripts/design/login-attempts-local.sh` — pass=57 fail=0
 | 구분 | 결과 |

@@ -12,8 +12,8 @@ exists() { [ -n "$("${P[@]}" -d postgres -At -c "select 1 from pg_database where
 results=(); ok=1
 check() { if eval "$2"; then results+=("PASS | $1"); else results+=("FAIL | $1"); ok=0; fi; }
 
-# 클러스터가 없으면 기본 스크립트가 만든다(첫 실행 준비). 이후 감시용 DB를 이 시험이 직접 만든다.
-bash "$MAIN" >/dev/null 2>&1 || true
+# 시험 클러스터에 연결할 수 없을 때만 기본 스크립트를 1회 실행해 클러스터를 준비한다(CI에서는 이미 떠 있어 실행 안 함).
+if ! "${P[@]}" -d postgres -At -c "select 1" >/dev/null 2>&1; then bash "$MAIN" >/dev/null 2>&1 || true; fi
 SENT="fideon_design0007_sentinel_$(rnd)"
 sent_created=0
 cleanup() { if [ "$sent_created" = 1 ]; then "${P[@]}" -d postgres -c "drop database if exists \"$SENT\" with (force)" >/dev/null 2>&1 || true; fi; }
