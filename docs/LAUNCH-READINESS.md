@@ -164,6 +164,38 @@
   - runner 안전장치 시험 `scripts/integration/leads-read-store-pg-safety.sh`(S1~S12): 가짜 psql·node·pg_ctl만 쓰며 실제 DB를 조작하지 않는다. 같은 npm 명령에서 실제 시험보다 먼저 실행하고 별도로 집계한다.
 - **실행하지 않은 것:** 실고객·원격 DB 접속, 연락처 열람(`reveal_contact`)·복호화·상태 변경, `withRole` 기본 실행기·API·화면 배선, 원격 Auth·풀러·CA 검증
 
+### 0-5. 마스킹 목록 HTTP 응답 조합 (PM 6910895023) — 준비만, 미배선
+- **파일:** `src/server/admin/leadsReadApi.ts`(server-only), 시험 `tests/route/leads-read-api.test.ts`(A1~A6, 가상 의존성·실제 Response)
+- **호출 순서:** 인증 모드 `supabase` → 목록 읽기 준비 → `requireStaff` → 역할(owner·counselor) → 페이지(`limit` 1~200, `offset` 0~100000, 숫자 1~6자리, 중복 금지) → 목록 실행기
+- **응답 코드**
+
+  | 상황 | 응답 | 비고 |
+  |---|---|---|
+  | 모드·준비 꺼짐 | 503 | `requireStaff`·목록 0회 |
+  | 미인증 | 401 | |
+  | 권한 없음 | 403 | reviewer·policy_editor는 목록 0회 |
+  | 잘못된 페이지 | 400 | |
+  | 장애·내부 판정 | 503 `UNAVAILABLE` | `INVALID_DATA`·`SCOPE_VIOLATION` 포함 |
+  | 정상 | 200 `{ok, data_source:'db', items:[7키]}` | |
+
+  - 모든 응답에 `private, no-store`·`nosniff`를 붙인다.
+- **출처 구분:** 가상 API는 `data_source:'mock'`을 그대로 쓰고, 이 모듈은 `'db'`다. query의 `actor`·`role`·`token`·`session`은 읽지 않는다.
+- **실제 route 배선 변경안(제안, 미적용·승인 필요)**
+  1. `src/app/api/admin/leads/route.ts`의 GET에 분기를 추가한다. 새 서버 스위치 `ADMIN_LEADS_SOURCE`의 기본값은 `mock`이다.
+     - `db`이면서 `adminAuthMode()==='supabase'`일 때만 `listLeadsReadResponse`를 쓴다.
+     - 그 외에는 기존 `listLeads`(mock)를 그대로 쓴다.
+     - 운영(`VERCEL_ENV=production`)에서는 별도 승인 전까지 `db`를 무시한다(기본 닫힘).
+  2. 의존성 주입
+     - `readReady`: `ADMIN_LEADS_SOURCE==='db'`와 필수 DB·키 설정이 있는지
+     - `requireStaff`: 기존 `src/server/auth/requireStaff.ts`
+     - `listLeads`: `(who, page) => listMaskedLeads({ enabled: readReady, runInTransaction: (fn) => withRole('staff', fn) }, who, page)`
+  3. 화면(`src/app/admin/page.tsx`)은 이번 변경안에 넣지 않는다. API 전환 검수 뒤 별도 묶음으로 한다.
+  4. 시험
+     - 경로 시험: 스위치 기본값 mock 유지, db 분기에서 꺼짐 503, 운영 무시
+     - 실제 PG 통합: route GET → withRole 배선
+     - server smoke: 인증 꺼짐 상태에서 GET 503 유지
+     - DB reviewer 범위 정정 migration은 별도 승인 항목이다.
+
 ## 1. 현재 상태 (코드 기준, 2026-11-16 `f96ad8e`)
 | 항목 | 상태 |
 |---|---|
