@@ -1,4 +1,4 @@
-# 개발 Auth·owner MFA·세션·풀러 CA 실연결 — 구체 변경안 (PM 6916935437 3항)
+# 개발 Auth·owner MFA·세션·풀러 CA 실연결 — 구체 변경안 (PM 6916935437 3항, 6917234887 정정)
 
 **상태: 제안만 담은 문서다.** 이 문서로 승인되거나 실행되는 것은 없다.
 - 계정·키 생성, 원격 설정·권한·실제 env 수정, 외부 요청 없음
@@ -24,16 +24,22 @@
 ## 1. 단계별 변경안
 각 단계: 변경 전 → 후 / 필요한 권한 / 검증 / 되돌리기. **[사용자]**는 계정 소유자 본인만 할 수 있는 단계이고, **[Claude]**는 현재 도구(저장소 코드·CI·로컬)로 할 수 있는 단계다.
 
-### 단계 A — fideon-dev Auth 설정 확인 (D3~D8)
-- **[사용자]** Supabase 대시보드(프로젝트 소유자 또는 관리자 권한)
-  - 공개 가입: 켜짐 → **끔**
-  - MFA TOTP: → **켬**
-  - Sessions time-box: → **12시간 이하**, 비활성 제한 설정
-  - 비밀번호 정책: 최소 길이·유출 비밀번호 차단
-  - Redirect URL 허용 목록: → 로컬·preview 주소만
-  - JWT 서명 키 방식: 비대칭인지 확인. `getClaims`의 로컬 검증 경로와 맞는지 본다.
-- **[Claude]** 확인 결과를 체크리스트 D3~D8에 `완료(근거)` 또는 `불가(사유)`로 기록한다. 스크린샷이나 값 원문은 적지 않는다.
-- **되돌리기:** 대시보드에서 이전 값으로 되돌린다. 코드 변경은 없다.
+### 단계 A — fideon-dev Auth 설정: 확인 → 필요하면 변경 (D3~D8) — PM 6917234887 정정
+**현재 값은 미확인이다.** 아래는 "확인할 항목 → 원하는 값"이며, 이전 값을 단정하지 않는다.
+
+| 항목 | 확인 → 원하는 값 | 요금제 | 대체 통제·남는 한계 |
+|---|---|---|---|
+| 공개 가입(이메일 가입 허용) | 확인 → 끔 | 무료 가능 | — |
+| MFA(TOTP) 사용 | 확인 → 켬 | 무료 가능(PM 제공 근거: auth-mfa/totp) | — |
+| 세션 time-box·비활성 제한·사용자당 단일 세션 | 확인만 | **Pro 이상** (Supabase sessions 문서: "only available on Pro Plans and up", 확인함) | **무료 fideon-dev에는 적용할 수 없다고 본다.** 업그레이드·지출은 미승인. 대체 통제는 앱 DB 세션의 12시간·폐기·로그아웃 폐기(`security.staff_sessions`)이며, 앱 접근만 제한한다. Supabase 자체 refresh 세션은 그대로 유지되므로, 이를 Supabase 세션 제한을 적용한 증거로 쓰지 않는다 |
+| 유출 비밀번호 차단 | 확인만 | **Pro 이상**(PM 제공 근거: password-security) | 무료에서는 최소 길이·문자 조합 요구(무료 가능 범위)로 대체한다. 유출 비밀번호 검사가 없다는 한계는 남는다 |
+| 비밀번호 최소 길이·문자 요구 | 확인 → 강화 | 무료 가능 | — |
+| Redirect URL 허용 목록 | 확인 → 로컬·preview 주소만 | 무료 가능 | — |
+| JWT 서명 키 방식 | 확인 | — | 비대칭이면 `getClaims` 로컬 검증. 대칭이면 서버 확인 경로를 다시 점검한다 |
+
+- **[사용자]** 대시보드에서 확인한다(프로젝트 관리자 권한). 바꿀 필요가 있는 항목만 PM 판단 뒤 변경한다.
+- **[Claude]** 확인 결과를 D3~D8에 `완료(근거)`·`불가(사유: 요금제)`로 기록한다. 값과 화면 원문은 적지 않는다.
+- **되돌리기:** 대시보드 이전 값(확인 때 기록한 상태 이름만)으로 되돌린다.
 
 ### 단계 B — 서버 서명 키 등록 (D11)
 - **[사용자]**
@@ -44,19 +50,47 @@
 - **검증:** 단계 D 로그인 성공 = 서명 일치.
 - **되돌리기:** DB 행 비활성 또는 삭제, env 값 제거. 새 `key_id`로 교체한다.
 
-### 단계 C — owner 계정·직원 등록·TOTP 최초 등록 (D12)
-- **[사용자]**
-  - fideon-dev Auth에 대표 계정을 만든다(이메일·비밀번호).
-  - `core.staff`에 `(user_id, 'owner', active=true)` 1행을 넣는다(소유자 SQL 권한).
-- **TOTP 최초 등록 경로(설계 7·8절)**
-  - 현재 aal1 등록 자격을 확인하는 DB 함수가 없다(7-1).
-  - 기본안: 대표가 대시보드나 공식 절차로 TOTP를 등록한다. 앱 내 등록 화면은 만들지 않는다.
-  - 앱 내 등록이 필요해지면 "대표 발급 1회용 등록 승인"(7-2)을 새 migration으로 별도 승인받는다.
-- **분실 복구:** 프로젝트 소유자의 공식 절차를 우선한다(7-3).
-- **[Claude]** 등록 뒤 확인 절차를 문서화한다. 계정 생성은 하지 않는다.
-- **되돌리기:** 직원 행 `active=false`, Auth 사용자 비활성.
+### 단계 C — owner 계정·직원 등록·**앱 사용자** TOTP 최초 등록 (D12) — PM 6917234887 정정
+- **구분:** Supabase 대시보드 계정의 MFA(프로젝트 관리자 로그인)와 **앱 Auth 사용자의 MFA**(FIDEON 관리자 로그인)는 다르다. 이 단계는 후자다.
+- **공식 흐름(PM 제공 근거: auth-mfa/totp):** aal1 로그인 세션 → `mfa.enroll({factorType:'totp'})`(QR·secret 발급, 미검증 factor) → `mfa.challenge` → `mfa.verify`(코드 확인 → verified, 세션 aal2). 조회는 `listFactors`, 해제는 `unenroll`이다.
+- **현재 구현 상태(코드 기준)**
+  - 로그인 화면은 **이미 verified TOTP가 있는 사용자만** 처리한다(`supabaseServer.ts`의 `verifiedTotpFactorId`가 `listFactors()`에서 **첫 verified factor**를 고르고, `challengeAndVerify`).
+  - **앱에는 enroll 화면·경로가 없다.** 최초 등록을 할 수 없다.
+  - DB 세션(`staff_session_open`)은 aal2 클레임만 확인한다. **어떤 factor로 aal2가 됐는지 DB 세션과 결합하지 않는다**(설계 8-3, 미구현).
+  - aal1 상태에서 등록 자격(이 사용자가 owner로 등록될 직원인지)을 확인하는 DB 함수가 없다(설계 7-1).
+- **변경안(승인 필요, 미적용) — 최초 owner 1명 기준**
+  1. 등록 자격: 새 DB 함수 `api.staff_enroll_eligible(actor, one_time_token)`. 대표 발급 1회용 등록 승인(설계 7-2)을 검증한다. 만료 15분, 1회 사용, 감사 기록. owner가 아직 없는 최초 1회는 프로젝트 소유자가 SQL로 승인 행을 직접 만든다.
+  2. 등록 경로: `/admin/login`에 aal1 + 자격 확인을 통과했을 때만 열리는 서버 단계를 둔다(enroll → QR 표시 → verify). secret은 서버 응답 1회 표시만 하고 저장하지 않는다.
+  3. factor 결합: verify 성공 factor id를 DB 세션 열기 서명 필드에 포함하는 변경(설계 8-3). "첫 verified factor" 선택을 "이 세션이 검증한 factor"로 바꾼다.
+  4. 실패·복구: verify 실패는 미검증 factor를 `unenroll`하고 재시도. 분실은 프로젝트 소유자가 공식 절차로 해당 사용자 factor를 해제한 뒤 1회용 승인을 새로 발급한다. 감사 기록을 남긴다.
+  5. 시험: 로컬 가짜 Auth 포트 경로 시험 + 로컬 PG(자격·1회용·만료·감사). 실제 계정 등록은 단계 D 이후 사용자가 직접 한다.
+- **[사용자]** 대표 Auth 계정 생성, `core.staff` owner 행, 최초 1회용 승인 행 생성(소유자 SQL 권한), 실제 TOTP 등록
+- **[Claude]** 위 1~5 구현(별도 승인 뒤). 이 문서 정정은 등록 화면·DB 함수·migration·계정·factor 생성의 승인이 아니다.
+- **되돌리기:** 직원 `active=false`, factor `unenroll`(소유자), 승인 행 폐기
 
-### 단계 D — 실제 로그인·세션 (D12~D17)
+### 단계 D — 풀러·CA 실연결: 별도 읽기 전용 프로브 (D9·D10) — **실제 로그인보다 먼저** (PM 6917234887 정정)
+- **이유:** 실제 로그인(세션 열기·서명 확인)은 DB 연결이 성립해야 의미가 있다. 그래서 DB·풀러·CA를 먼저 검증한다.
+- **기존 시험은 재사용하지 않는다:** I1·P1~P8은 Unix socket·관리자(postgres) fixture·쓰기(P6 INSERT/DELETE, 세션 생성 등)를 포함한다. URL로 바꿔 실행하지 않는다.
+- **프로브 계약(제안, 구현·실접속은 별도 판단)**
+  - 파일: `scripts/probe/dev-db-readonly.mjs`(새 파일). CI에 넣지 않고 사람이 명시적으로 실행한다.
+  - 명령 인터페이스: `node scripts/probe/dev-db-readonly.mjs --url-env FIDEON_PROBE_DB_URL --ca-env FIDEON_PROBE_DB_CA [--bad-ca-env FIDEON_PROBE_BAD_CA]`
+    - 값은 지정한 환경변수 이름에서만 읽는다. `DATABASE_URL`·dotenv는 읽지 않는다.
+    - 호스트가 loopback이면 거부한다(실연결 전용).
+  - 연결: 기존 `db()`와 같은 옵션(`prepare:false`, `ssl:{ca, rejectUnauthorized:true}`, `max:1`)을 프로브 안에 둔다. 공용 client는 바꾸지 않는다.
+  - 허용 SQL(이 목록 밖은 실행하지 않음, 모두 읽기)
+    1. `select current_user, current_setting('server_version_num')`
+    2. `begin; set local role app_staff; set local statement_timeout='5s'; select current_user; rollback;`
+    3. 트랜잭션 밖 `select current_user` → `app_server` 복귀 확인
+    4. `select has_function_privilege('app_staff','api.list_leads(uuid,uuid,text,int,int)','execute')`
+    5. `select has_table_privilege('app_server','core.leads','select')` → false 기대(지름길 없음)
+  - CA 음성 시험: `--bad-ca-env`의 잘못된 CA로 연결하면 TLS 실패를 기대한다. 성공하면 FAIL이다.
+  - 출력 허용 목록: 검사 이름, PASS·FAIL, `current_user` 이름, 서버 버전 번호, 권한 boolean만 출력한다. URL·호스트·사용자 비밀번호·인증서·오류 원문은 출력하지 않는다(오류는 분류 코드만).
+  - 금지: 쓰기·DDL·`security`·`pii` 조회·함수 실행(목록 포함)·초기화·seed
+- **[사용자]** fideon-dev 풀러 주소·`app_server` 자격·프로젝트 CA를 위 환경변수 이름으로 자기 터미널에 두고 실행한다(필요 권한: DB 설정 조회, `app_server` 비밀번호 설정).
+- **[Claude]** 프로브 구현(승인 뒤), 로컬 TLS 없는 경로 거부 시험, 출력 허용 목록 시험
+- **되돌리기:** 프로브는 읽기 전용이라 되돌릴 상태가 없다. 환경변수는 사용자 터미널에서 지운다.
+
+### 단계 E — 실제 로그인·세션 (D12~D17) — 단계 D(프로브) 통과 뒤
 - **환경**
   - 개발 실행 환경의 `ADMIN_AUTH_MODE=supabase`
   - 필수 4개: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `FIDEON_STAFF_SIGNING_KEY`, `DATABASE_URL`
@@ -66,19 +100,11 @@
   - 확인 순서와 기대 결과표(D12~D17)를 제공한다.
   - 결과 로그(값 없이 상태 코드·문구)로 체크리스트를 갱신한다.
   - 실패하면 원인 후보: 서명 불일치, 세션 열기 실패, `getClaims` 키 방식, 쿠키 도메인
-- **되돌리기:** `ADMIN_AUTH_MODE=disabled`(즉시 잠금).
-
-### 단계 E — 풀러·CA 실연결 (D9·D10)
-- **현재 차이:** 로컬 시험은 TCP 미수신 Unix socket + 주입 실행기다. 기본 `withRole`(URL·TLS) 경로는 실행된 적이 없다.
-- **[사용자]**
-  - fideon-dev 트랜잭션 모드 풀러 주소와 `app_server` 로그인 자격을 개발 실행 환경의 `DATABASE_URL`에 둔다.
-  - 프로젝트 CA 인증서를 `SUPABASE_DB_CA_CERT`에 둔다.
-  - 필요한 권한: 프로젝트 DB 설정 조회, `app_server` 비밀번호 설정.
-- **[Claude] 코드 변경안(승인 필요, 미적용)**
-  1. 통합 시험 I1·P1~P8을 **URL 연결 모드**로도 돌리는 별도 수동 명령을 만든다(`FIDEON_DEV_PG_URL`·`FIDEON_DEV_PG_CA`를 명시적으로 넘길 때만 실행, CI 미포함). 읽기 전용 확인만 하고 쓰기 시험은 하지 않는다.
-  2. 틀린 CA로 연결 거부(D10)를 같은 명령의 음성 시험으로 둔다.
-  3. 공용 `db()`·TLS 설정은 바꾸지 않는다. `rejectUnauthorized: true`를 유지한다.
-- **되돌리기:** env 값 제거. 코드 변경은 수동 명령 파일뿐이다.
+- **되돌리기(범위 구분, PM 6917234887 정정)**
+  - `ADMIN_AUTH_MODE=disabled`는 **실제 인증 경로와 db 출처 목록**을 닫는다.
+    - db 출처: 인증이 꺼지면 목록 미포함(잠금 화면). smoke S1·경로 V2가 검증 조건이다.
+    - 로컬 개발 서버(`next dev`)의 mock 출처 가상 화면은 계속 보일 수 있다. 이 설정이 "모든 화면을 잠근다"는 뜻은 아니다.
+  - db 경로에 장애가 나도 `ADMIN_LEADS_SOURCE=mock`으로 바꾸는 것을 안전한 장애 처리로 쓰지 않는다. db 출처는 잠금·실패 화면으로 닫힌다.
 
 ### 단계 F — 관리자 목록 실데이터 읽기 (⑨)
 - **전제:** A~E 완료, reviewer DB 범위 정정 migration 승인·적용(0-4절 변경안).
@@ -89,7 +115,7 @@
 - **검증**
   - fideon-dev에 가상 리드 몇 건을 둔다(실제 고객 아님).
   - owner·counselor 목록 범위, reviewer 거부, 감사 무변화
-- **되돌리기:** `ADMIN_LEADS_SOURCE=mock`(즉시 가상 화면 또는 잠금).
+- **되돌리기:** `ADMIN_LEADS_SOURCE` 해제는 출처 설정을 원래대로 돌리는 운영 결정일 뿐, db 장애 처리 수단이 아니다. 장애 시 db 출처는 잠금·실패 화면으로 닫힌다. 즉시 차단이 필요하면 `ADMIN_AUTH_MODE=disabled`(db 목록 미포함).
 
 ### 단계 G — 로그인 시도 제한 (0007)
 초안 0007을 정식 migration으로 만드는 일은 별도 승인 대상이다. 단계 D 이전이나 이후 어느 쪽이든 가능하지만, 공개 전에는 필수다.
@@ -100,7 +126,7 @@
 | Supabase 대시보드 Auth·MFA·Sessions·Redirect·JWT 설정 확인·변경 | 확인 절차·기대 결과표·체크리스트 기록 |
 | `staff` 키 생성, DB·env 등록 | 값 없는 확인 SQL, 서명 일치 진단 |
 | 대표 Auth 계정·`core.staff` 행·TOTP 등록 | 등록 뒤 확인 절차, 거부 경로 시험 설계 |
-| 개발 env에 `DATABASE_URL`(풀러)·CA 입력 | URL 모드 수동 시험 명령 작성(승인 뒤), CA 음성 시험 |
+| 프로브용 환경변수(풀러 URL·CA)를 자기 터미널에 두고 실행 | 읽기 전용 프로브 구현(승인 뒤), CA 음성 시험·출력 허용 목록 시험 |
 | 실제 브라우저 로그인·TOTP 입력 | 로그 기반 판정, 실패 원인 분리 |
 | 승인된 migration 실행 권한 | reviewer 정정·0007 migration 작성(승인 뒤), 로컬·CI 시험 |
 
@@ -108,3 +134,10 @@
 - 실제 계정·키 생성, 원격 설정·권한·실제 env 변경, 외부 요청
 - `db()`·TLS 완화·TCP 개방, schema·권한 변경, 0007·0008 적용
 - 실제 고객 조회·원문·상세·수정, 운영 활성화·배포, 광고 관련 사용자 요청 반복
+
+## 4. 남은 결정점 (PM)
+1. Pro 전용 세션 통제(time-box·비활성·단일 세션)·유출 비밀번호 차단 없이 무료 fideon-dev로 진행할지(대체 통제와 한계 수용 여부)
+2. 앱 사용자 TOTP 최초 등록을 앱 안(1회용 승인 + enroll 단계, 새 DB 함수·migration)으로 할지, 다른 공식 경로를 쓸지
+3. factor 결합(설계 8-3)을 실제 로그인 전에 필수로 할지
+4. 읽기 전용 프로브 구현 승인과 실행 주체(사용자 터미널)
+5. reviewer 정정·0007 migration의 적용 순서(단계 E 전후)
