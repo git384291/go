@@ -63,7 +63,8 @@
   - aal1 서명 begin → `mfa.enroll` → record → `challenge`·`verify` → bind로 진행한다. `core.staff.totp_factor_id`를 설정한다.
   - `staff_session_open` 서명에 `factor_id`를 넣는다.
   - 상태 전이표와 실패별 처리(verified factor는 자동 삭제하지 않음)는 새 문서 4절에 있다.
-- **되돌리기:** 등록 스위치 끄기, 미종료 grant revoke, `staff_recovery_reset`(새 문서 7절)
+- **되돌리기:** 등록 스위치 끄기, 미종료 grant revoke, `staff_recovery_reset`(새 문서 7절). 첫·마지막 owner 복구는 프로젝트 소유자 SQL 전용 경로(같은 문서 9-4)
+- 저장·서명 대조표, 안정 operation, 응답 유실 복원, commit 계약은 같은 문서 9절(PM 6919806262)에 있다.
 
 ### 단계 D — 풀러·CA 실연결: 별도 읽기 전용 프로브 (D9·D10) — **실제 로그인보다 먼저** (PM 6917234887 정정)
 - **이유:** 실제 로그인(세션 열기·서명 확인)은 DB 연결이 성립해야 의미가 있다. 그래서 DB·풀러·CA를 먼저 검증한다.
