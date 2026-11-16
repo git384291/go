@@ -57,6 +57,23 @@ begin
 end
 $$;
 
+-- SQLSTATE와 오류 사유(메시지)까지 확인한다. 같은 42501이라도 다른 거부 사유와 혼동하지 않기 위한 시험용(PM 6918873159)
+create function test.expect_error_msg(p_sql text, p_sqlstate text, p_message text, p_label text) returns void
+language plpgsql as $$
+begin
+  begin
+    execute p_sql;
+  exception when others then
+    if sqlstate = p_sqlstate and sqlerrm = p_message then
+      raise notice 'PASS | % | % (%)', p_label, sqlstate, sqlerrm;
+      return;
+    end if;
+    raise exception 'FAIL | % | expected % %, got % (%)', p_label, p_sqlstate, p_message, sqlstate, sqlerrm;
+  end;
+  raise exception 'FAIL | % | expected error % %, but succeeded', p_label, p_sqlstate, p_message;
+end
+$$;
+
 create function test.expect_ok(p_sql text, p_label text) returns void
 language plpgsql as $$
 begin
