@@ -11,6 +11,8 @@
 // 출력: 고정 검사 ID·상태·허용 값(역할 이름·버전 숫자·boolean)만. 오류 원문·URL·호스트·인증서·키는 출력하지 않는다.
 import { pathToFileURL } from 'node:url';
 
+/** @typedef {{ host: string | null, port: number | null, database: string | null, user: string | null }} ProbeExpect */
+/** @type {Readonly<ProbeExpect>} */
 export const PROBE_EXPECT = Object.freeze({ host: null, port: null, database: null, user: null });
 export const ENV_NAME_RE = /^FIDEON_PROBE_[A-Z0-9_]{1,40}$/;
 
@@ -49,6 +51,7 @@ const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const INTERNAL_SUFFIX = /(\.local|\.internal|\.localhost|\.lan|\.home|\.corp)$/i;
 
 /** 네트워크 호출 전 대상 검증. 기대값과 정확히 같은 호스트·포트·DB·역할만 */
+/** @param {unknown} rawUrl @param {Readonly<ProbeExpect>} [expect] */
 export function validateTarget(rawUrl, expect = PROBE_EXPECT) {
   if (!expect || !expect.host || !expect.database || !expect.user || !expect.port) return { ok: false, code: 'EXPECT_UNSET' };
   if (typeof rawUrl !== 'string' || rawUrl.length === 0 || rawUrl.length > 1024) return { ok: false, code: 'URL_MISSING' };
@@ -101,6 +104,10 @@ const ROLE_RE = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
  * 프로브 본체. deps.connect(config) → { query(text): Promise<rows>, close(): Promise<void> }
  * 결과: { ok, checks: [{ id, status: 'PASS'|'FAIL'|'NOT_RUN', value? }] } — value는 허용 형식만
+ */
+/**
+ * @param {{ connect: (cfg: Record<string, unknown>) => any, target: any, ca: string, badCa?: string | null,
+ *           expect?: Readonly<ProbeExpect>, timeoutMs?: number, sleep?: (ms: number) => Promise<unknown> }} opts
  */
 export async function runProbe({ connect, target, ca, badCa, expect = PROBE_EXPECT, timeoutMs = 30_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   const checks = [];
@@ -179,6 +186,10 @@ const HELP = `개발 DB 읽기 전용 연결 프로브(수동, 승인 전 미실
 - 값은 지정한 환경변수에서만 읽습니다. 인자 없이 실행하면 아무 것도 하지 않습니다.
 - 기대 대상(PROBE_EXPECT)이 정해지기 전에는 접속하지 않고 EXPECT_UNSET으로 끝납니다.`;
 
+/**
+ * @param {string[]} argv @param {Record<string, string | undefined>} env
+ * @param {{ out?: (s: string) => void, connect?: (cfg: Record<string, unknown>) => any, expect?: Readonly<ProbeExpect> }} [deps]
+ */
 export async function main(argv, env, deps = {}) {
   const a = parseArgs(argv);
   const out = deps.out ?? ((s) => process.stdout.write(s + '\n'));
