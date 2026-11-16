@@ -94,16 +94,16 @@ test('P3 limit·offset이 실제 바인딩으로 적용', async () => {
   assert.equal(c.runs, 0);
 });
 
-test('P4 reviewer·policy_editor: 서버 사전 거부(실행기 0회). DB 함수의 reviewer 허용 차이는 관찰만 기록', async () => {
+test('P4 reviewer·policy_editor: 서버 사전 거부(실행기 0회). DB 함수의 reviewer 허용 차이는 관찰만 기록', async (t) => {
   for (const [actor, session, role] of [[REVIEWER, S(4), 'reviewer'], [EDITOR, S(5), 'policy_editor']] as const) {
     const c = { runs: 0 };
     assert.deepEqual(await listMaskedLeads(deps(c), who(actor, session, role)), { ok: false, code: 'FORBIDDEN' }, role);
     assert.equal(c.runs, 0, role);
   }
   // 관찰: 현재 DB 함수는 reviewer에게 전체 목록을 준다(0002). 고치지 않고 기록만 한다(정정은 별도 승인 migration)
-  const t = who(REVIEWER, S(4), 'reviewer');
-  const rows = await withRoleOn(app, 'staff', (tx) => tx`select lead_id from api.list_leads(${t.actor}::uuid, ${t.session}::uuid, ${t.token}, ${50}::int, ${0}::int)`);
-  console.log(`# NOTE | DB 관찰: api.list_leads가 reviewer에게 ${rows.length}건 반환(서버 어댑터는 실행 전 거부)`);
+  const rv = who(REVIEWER, S(4), 'reviewer');
+  const rows = await withRoleOn(app, 'staff', (tx) => tx`select lead_id from api.list_leads(${rv.actor}::uuid, ${rv.session}::uuid, ${rv.token}, ${50}::int, ${0}::int)`);
+  t.diagnostic(`NOTE | DB 관찰: api.list_leads가 reviewer에게 ${rows.length}건 반환(서버 어댑터는 실행 전 거부, DB 정정은 별도 승인)`);
   assert.equal(rows.length, 3, '현재 DB 동작 관찰값(변경 없음)');
   // policy_editor는 DB 함수도 거부
   const e = who(EDITOR, S(5), 'policy_editor');
