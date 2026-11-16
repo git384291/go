@@ -202,7 +202,7 @@ test('B8 절대 마감: 쿼리마다 짧아도 합계가 마감을 넘으면 실
   const t0 = Date.now();
   const r = await runProbe({ connect: slow, target: target(), ca: CA, badCa: BAD_CA, expect: EXPECT, timeoutMs: 20, cleanupMs: 50, timers: timers as never });
   assert.equal(r.ok, false, '합계가 마감을 넘으면 통과 아님');
-  assert.ok(r.checks.some((c) => c.value === 'TIMEOUT'), JSON.stringify(r.checks));
+  assert.ok(r.checks.some((c) => (c as { value?: unknown }).value === 'TIMEOUT'), JSON.stringify(r.checks));
   assert.ok(log.length < 9, `마감 뒤 SQL 시작 안 함(${log.length})`);
   assert.equal(connects, 1, '마감 뒤 잘못된 CA 연결 시작 안 함');
   assert.ok(Date.now() - t0 < 200);
