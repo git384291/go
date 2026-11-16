@@ -164,7 +164,7 @@
   - runner 안전장치 시험 `scripts/integration/leads-read-store-pg-safety.sh`(S1~S12): 가짜 psql·node·pg_ctl만 쓰며 실제 DB를 조작하지 않는다. 같은 npm 명령에서 실제 시험보다 먼저 실행하고 별도로 집계한다.
 - **실행하지 않은 것:** 실고객·원격 DB 접속, 연락처 열람(`reveal_contact`)·복호화·상태 변경, `withRole` 기본 실행기·API·화면 배선, 원격 Auth·풀러·CA 검증
 
-### 0-5. 마스킹 목록 HTTP 응답 조합 (PM 6910895023) — 준비만, 미배선
+### 0-5. 마스킹 목록 HTTP 응답 조합 (PM 6910895023) — 목록 route에 출처 분기로 배선(PM 6913462268), 기본 mock
 - **파일:** `src/server/admin/leadsReadApi.ts`(server-only), 시험 `tests/route/leads-read-api.test.ts`(A1~A6, 가상 의존성·실제 Response)
 - **호출 순서:** 인증 모드 `supabase` → 목록 읽기 준비 → `requireStaff` → 역할(owner·counselor) → 페이지(`limit` 1~200, `offset` 0~100000, 숫자 1~6자리, 중복 금지) → 목록 실행기
 - **응답 코드**
@@ -195,6 +195,31 @@
      - 실제 PG 통합: route GET → withRole 배선
      - server smoke: 인증 꺼짐 상태에서 GET 503 유지
      - DB reviewer 범위 정정 migration은 별도 승인 항목이다.
+
+### 0-6. 목록 route 출처 분기 (PM 6913462268)
+- **파일**
+  - `src/server/admin/leadsSource.ts`: 출처·준비 판정(순수 함수)
+  - `src/server/admin/leadsRoute.ts`: 조합 함수. 의존성은 인자로만 받는다.
+  - `src/app/api/admin/leads/route.ts`: 목록 GET
+  - `src/app/api/admin/leads/[id]/route.ts`: 상세 차단
+  - `.env.example`: `ADMIN_LEADS_SOURCE=mock`
+- **목록**
+
+  | 출처 | 동작 |
+  |---|---|
+  | 미설정·`mock` | 기존 가상 목록 그대로 |
+  | 그 밖의 값 | 503 `LEADS_SOURCE_INVALID` |
+  | `db` + 준비 미충족 | 503 `LEADS_READ_DISABLED`(mock으로 대체하지 않음, Auth·DB 0회) |
+  | `db` + 준비됨 | `requireStaff` → 마스킹 어댑터 → 기본 `withRole('staff')` |
+
+  - 준비 미충족: Vercel 배포(production·preview·`VERCEL=1`), URL 없음·원격·일반 DB 이름·쿼리 문자열 등
+- **db 준비 조건(이번 단계):** `postgres(ql)://` + `localhost`/`127.0.0.1` + 폐기 시험 DB 이름 `fideon_lrs_<pid>_<8hex>`만 허용한다. 판정에 쓴 URL은 응답·로그에 넣지 않는다.
+- **상세:** mock은 그대로다. db·잘못된 출처는 503이다(`LEADS_DETAIL_UNAVAILABLE`/`LEADS_SOURCE_INVALID`). 실제 상세·원문 열람·상태 변경은 없다.
+- **시험**
+  - 경로 S1~S6(가짜 의존성)
+  - 폐기 DB P9: route 조합 → 어댑터 → `withRoleOn` → 실제 PG. **주입한 Unix socket 실행기다.** 기본 `withRole`(`db()`, DATABASE_URL·TCP·TLS)의 실제 연결 검증이 아니다.
+  - 시험 클러스터는 TCP 미수신이라 기본 `withRole`로는 연결되지 않는다. 이 차이를 메우려고 TCP를 열거나 TLS 검사를 완화하지 않았고, `db()`도 바꾸지 않았다.
+- **유지:** server smoke 기본값(인증 꺼짐 → 503)을 유지하고 화면(UI)은 바꾸지 않았다.
 
 ## 1. 현재 상태 (코드 기준, 2026-11-16 `f96ad8e`)
 | 항목 | 상태 |

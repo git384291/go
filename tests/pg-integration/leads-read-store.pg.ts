@@ -10,6 +10,7 @@ import { withRoleOn } from '../../src/server/db/client';
 import { listMaskedLeads, type LeadsReadDeps, type SqlTag, type ListResult } from '../../src/server/admin/leadsReadStore';
 import { signToken } from '../../src/server/security/token';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
+import { adminLeadsList, adminLeadDetail, type AdminLeadsDeps } from '../../src/server/admin/leadsRoute';
 
 const SOCK = process.env.FIDEON_LRS_PGSOCK ?? '';
 const PORT = Number(process.env.FIDEON_LRS_PGPORT ?? 0);
@@ -189,4 +190,35 @@ test('P8 트랜잭션 안에서만 app_staff·시간 제한, 종료 뒤 app_serv
   } finally {
     await broken.end({ timeout: 1 }).catch(() => {});
   }
+});
+
+// ---- PM 6913462268: HTTP 출처 분기 조합 → 어댑터 → withRoleOn(주입 소켓 실행기) → 실제 PG ----
+// 주의: 아래 실행기는 시험용 Unix socket 주입 실행기다. 기본 withRole(db(), DATABASE_URL 접속)의 실제 연결 검증이 아니다.
+
+test('P9 route 조합(db 출처·지정 폐기 DB 판정) → 실제 PG: owner 200 마스킹 목록, counselor 본인 건, 만료 세션 403, 상세 503', async () => {
+  const env = { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: `postgres://app_server@127.0.0.1:${PORT}/${DB}` };
+  const mk = (identity: StaffIdentity): AdminLeadsDeps => ({
+    env: () => env,
+    mode: () => 'supabase',
+    requireStaff: async () => identity,
+    runInTransaction: (fn) => withRoleOn(app, 'staff', (tx) => fn(tx as unknown as SqlTag)),
+    mockList: async () => new Response('mock', { status: 299 }),
+    mockDetail: async () => new Response('mock', { status: 299 }),
+  });
+  const before = await counts();
+  const o = await adminLeadsList(mk(who(OWNER, S(1), 'owner')), new Request('http://localhost/api/admin/leads?limit=2'));
+  assert.equal(o.status, 200);
+  assert.equal(o.headers.get('cache-control'), 'private, no-store');
+  const ob = (await o.json()) as { data_source: string; items: { id: string }[] };
+  assert.equal(ob.data_source, 'db');
+  assert.deepEqual(ob.items.map((i) => i.id), [L(3), L(2)]);
+  assert.ok(!SECRETS.some((m) => JSON.stringify(ob).includes(m)));
+  const c = (await (await adminLeadsList(mk(who(CA, S(2), 'counselor')), new Request('http://localhost/api/admin/leads'))).json()) as { items: { id: string }[] };
+  assert.deepEqual(c.items.map((i) => i.id), [L(1)]);
+  const ex = await adminLeadsList(mk(who(OWNER, S(7), 'owner')), new Request('http://localhost/api/admin/leads'));
+  assert.equal(ex.status, 403);
+  assert.deepEqual(await ex.json(), { ok: false, code: 'FORBIDDEN' });
+  const d = await adminLeadDetail(mk(who(OWNER, S(1), 'owner')));
+  assert.equal(d.status, 503);
+  assert.deepEqual(await counts(), before, '조회 전후 변화 없음');
 });

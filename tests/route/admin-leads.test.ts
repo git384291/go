@@ -120,7 +120,7 @@ test('L9 실제 route.ts: 인증 기본값(꺼짐)에서 목록·상세 모두 5
   try {
     const list = await import('../../src/app/api/admin/leads/route');
     const detail = await import('../../src/app/api/admin/leads/[id]/route');
-    for (const r of [await list.GET(), await detail.GET(new Request('http://localhost/api/admin/leads/mock-0006'), { params: Promise.resolve({ id: 'mock-0006' }) })]) {
+    for (const r of [await list.GET(new Request('http://localhost/api/admin/leads')), await detail.GET(new Request('http://localhost/api/admin/leads/mock-0006'), { params: Promise.resolve({ id: 'mock-0006' }) })]) {
       assert.deepEqual(await read(r), { status: 503, body: { ok: false, code: 'ADMIN_AUTH_DISABLED' } });
     }
   } finally {

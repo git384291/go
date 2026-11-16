@@ -189,7 +189,9 @@ test('L7 실제 API·페이지·클라이언트 코드는 새 어댑터를 impor
   };
   walk(root);
   // 미배선 HTTP 조합 모듈(leadsReadApi.ts)만 타입을 가져간다. 그 모듈의 미연결은 leads-read-api.test.ts A6이 확인한다
-  const importers = files.filter((f) => !/leadsRead(Store|Api)\.ts$/.test(f) && /leadsReadStore/.test(readFileSync(f, 'utf8')));
+  // 허용된 import: HTTP 조합(leadsReadApi.ts)·출처 분기(leadsRoute.ts)·목록 route(app/api/admin/leads/route.ts, PM 6913462268)
+  const allowed = [/server[\\/]admin[\\/]leadsRead(Store|Api)\.ts$/, /server[\\/]admin[\\/]leadsRoute\.ts$/, /app[\\/]api[\\/]admin[\\/]leads[\\/]route\.ts$/];
+  const importers = files.filter((f) => !allowed.some((re) => re.test(f)) && /leadsReadStore/.test(readFileSync(f, 'utf8')));
   assert.deepEqual(importers, [], '배선은 별도 승인 범위');
   const src = readFileSync(path.join(root, 'server/admin/leadsReadStore.ts'), 'utf8');
   assert.ok(!/process\.env|withRole|from '\.\.\/db\/|postgres\(|reveal_contact\(|\.unsafe\(/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), '환경값·기본 DB·열람 함수·unsafe SQL 없음');
