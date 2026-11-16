@@ -50,23 +50,20 @@
 - **검증:** 단계 D 로그인 성공 = 서명 일치.
 - **되돌리기:** DB 행 비활성 또는 삭제, env 값 제거. 새 `key_id`로 교체한다.
 
-### 단계 C — owner 계정·직원 등록·**앱 사용자** TOTP 최초 등록 (D12) — PM 6917234887 정정
-- **구분:** Supabase 대시보드 계정의 MFA(프로젝트 관리자 로그인)와 **앱 Auth 사용자의 MFA**(FIDEON 관리자 로그인)는 다르다. 이 단계는 후자다.
-- **공식 흐름(PM 제공 근거: auth-mfa/totp):** aal1 로그인 세션 → `mfa.enroll({factorType:'totp'})`(QR·secret 발급, 미검증 factor) → `mfa.challenge` → `mfa.verify`(코드 확인 → verified, 세션 aal2). 조회는 `listFactors`, 해제는 `unenroll`이다.
-- **현재 구현 상태(코드 기준)**
-  - 로그인 화면은 **이미 verified TOTP가 있는 사용자만** 처리한다(`supabaseServer.ts`의 `verifiedTotpFactorId`가 `listFactors()`에서 **첫 verified factor**를 고르고, `challengeAndVerify`).
-  - **앱에는 enroll 화면·경로가 없다.** 최초 등록을 할 수 없다.
-  - DB 세션(`staff_session_open`)은 aal2 클레임만 확인한다. **어떤 factor로 aal2가 됐는지 DB 세션과 결합하지 않는다**(설계 8-3, 미구현).
-  - aal1 상태에서 등록 자격(이 사용자가 owner로 등록될 직원인지)을 확인하는 DB 함수가 없다(설계 7-1).
-- **변경안(승인 필요, 미적용) — 최초 owner 1명 기준**
-  1. 등록 자격: 새 DB 함수 `api.staff_enroll_eligible(actor, one_time_token)`. 대표 발급 1회용 등록 승인(설계 7-2)을 검증한다. 만료 15분, 1회 사용, 감사 기록. owner가 아직 없는 최초 1회는 프로젝트 소유자가 SQL로 승인 행을 직접 만든다.
-  2. 등록 경로: `/admin/login`에 aal1 + 자격 확인을 통과했을 때만 열리는 서버 단계를 둔다(enroll → QR 표시 → verify). secret은 서버 응답 1회 표시만 하고 저장하지 않는다.
-  3. factor 결합: verify 성공 factor id를 DB 세션 열기 서명 필드에 포함하는 변경(설계 8-3). "첫 verified factor" 선택을 "이 세션이 검증한 factor"로 바꾼다.
-  4. 실패·복구: verify 실패는 미검증 factor를 `unenroll`하고 재시도. 분실은 프로젝트 소유자가 공식 절차로 해당 사용자 factor를 해제한 뒤 1회용 승인을 새로 발급한다. 감사 기록을 남긴다.
-  5. 시험: 로컬 가짜 Auth 포트 경로 시험 + 로컬 PG(자격·1회용·만료·감사). 실제 계정 등록은 단계 D 이후 사용자가 직접 한다.
-- **[사용자]** 대표 Auth 계정 생성, `core.staff` owner 행, 최초 1회용 승인 행 생성(소유자 SQL 권한), 실제 TOTP 등록
-- **[Claude]** 위 1~5 구현(별도 승인 뒤). 이 문서 정정은 등록 화면·DB 함수·migration·계정·factor 생성의 승인이 아니다.
-- **되돌리기:** 직원 `active=false`, factor `unenroll`(소유자), 승인 행 폐기
+### 단계 C — owner 계정·직원 등록·**앱 사용자** TOTP 최초 등록 (D12)
+- **구체 변경안은 `docs/design/STAFF-ENROLLMENT-BOOTSTRAP.md`로 옮겼다**(PM 6919431756). 이 절은 요약만 둔다.
+- 대시보드 계정 MFA와 앱 Auth 사용자 MFA는 다르다. 이 단계는 앱 사용자 MFA다.
+- **현재 미구현**
+  - 앱 enroll 경로가 없다.
+  - 로그인은 `listFactors`의 첫 verified factor를 고른다.
+  - DB 세션과 factor가 결합돼 있지 않다.
+  - aal1 등록 자격 함수가 없다.
+- **제안 요지**
+  - 프로젝트 소유자 SQL로 최초 1회용 코드를 발급한다.
+  - aal1 서명 begin → `mfa.enroll` → record → `challenge`·`verify` → bind로 진행한다. `core.staff.totp_factor_id`를 설정한다.
+  - `staff_session_open` 서명에 `factor_id`를 넣는다.
+  - 상태 전이표와 실패별 처리(verified factor는 자동 삭제하지 않음)는 새 문서 4절에 있다.
+- **되돌리기:** 등록 스위치 끄기, 미종료 grant revoke, `staff_recovery_reset`(새 문서 7절)
 
 ### 단계 D — 풀러·CA 실연결: 별도 읽기 전용 프로브 (D9·D10) — **실제 로그인보다 먼저** (PM 6917234887 정정)
 - **이유:** 실제 로그인(세션 열기·서명 확인)은 DB 연결이 성립해야 의미가 있다. 그래서 DB·풀러·CA를 먼저 검증한다.
@@ -136,7 +133,7 @@
 |---|---|
 | Supabase 대시보드 Auth·MFA·Sessions·Redirect·JWT 설정 확인·변경 | 확인 절차·기대 결과표·체크리스트 기록 |
 | `staff` 키 생성, DB·env 등록 | 값 없는 확인 SQL, 서명 일치 진단 |
-| 대표 Auth 계정·`core.staff` 행·TOTP 등록 | 등록 뒤 확인 절차, 거부 경로 시험 설계 |
+| 대표 Auth 계정·`core.staff` 행·부트스트랩 코드 발급·TOTP 등록(`STAFF-ENROLLMENT-BOOTSTRAP.md` 2절) | 등록·결합 구현과 시험(승인 뒤, 같은 문서 6·7절) |
 | 프로브용 환경변수(풀러 URL·CA)를 자기 터미널에 두고 실행 | 읽기 전용 프로브 구현(승인 뒤), CA 음성 시험·출력 허용 목록 시험 |
 | 실제 브라우저 로그인·TOTP 입력 | 로그 기반 판정, 실패 원인 분리 |
 | 승인된 migration 실행 권한 | reviewer 정정·0007 migration 작성(승인 뒤), 로컬·CI 시험 |
@@ -148,7 +145,7 @@
 
 ## 4. 남은 결정점 (PM)
 1. Pro 전용 세션 통제(time-box·비활성·단일 세션)·유출 비밀번호 차단 없이 무료 fideon-dev로 진행할지(대체 통제와 한계 수용 여부)
-2. 앱 사용자 TOTP 최초 등록을 앱 안(1회용 승인 + enroll 단계, 새 DB 함수·migration)으로 할지, 다른 공식 경로를 쓸지
+2. 앱 사용자 TOTP 최초 등록: `STAFF-ENROLLMENT-BOOTSTRAP.md` 8절 결정점(서명 방식·코드 전달·응답 유실 처리·적용 순서)
 3. factor 결합(설계 8-3)을 실제 로그인 전에 필수로 할지
 4. 읽기 전용 프로브 구현 승인과 실행 주체(사용자 터미널)
 5. reviewer 정정·0007 migration의 적용 순서(단계 E 전후)
