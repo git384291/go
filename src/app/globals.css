@@ -146,6 +146,12 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
 .consent-box details { font-size: 13px; color: var(--muted); padding-left: 30px; }
 .consent-box details p { margin: 4px 0; }
 .form-result { padding: 12px; border-radius: 10px; background: var(--wash); font-size: 14px; }
+.form-result.error { background: #fef2f2; color: #7f1d1d; }
+.field-error { display: block; font-size: 13px; font-weight: 600; color: #b91c1c; }
+.field-hint { font-size: 13px; color: var(--muted); margin: 0; }
+.field input[aria-invalid='true'] { border-color: #b91c1c; }
+.check input[aria-invalid='true'] { outline: 2px solid #b91c1c; outline-offset: 2px; }
+.turnstile-box { min-height: 65px; }
 
 /* admin */
 .admin { min-height: 100vh; background: var(--wash); padding-bottom: 24px; }
