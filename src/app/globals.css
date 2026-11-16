@@ -243,3 +243,12 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .read-empty { background: #fff; border-radius: 12px; padding: 16px; text-align: center; margin: 0; }
 .read-pager { display: flex; justify-content: space-between; font-size: 14px; }
 .read-pager a { padding: 8px 12px; background: #fff; border-radius: 10px; }
+
+/* 총판 공식 접수처 연결(기본 꺼짐 — 등록·검수 전에는 그려지지 않음) */
+.official-intake { margin-top: 18px; display: grid; gap: 10px; }
+.official-intake-title { margin: 0; font-weight: 700; }
+.official-intake-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.official-intake-list li { display: grid; gap: 4px; min-width: 0; }
+.official-intake-list .btn { white-space: normal; text-align: center; }
+.official-intake-host, .official-intake-note { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.official-intake-note { margin: 0; }

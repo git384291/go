@@ -2,11 +2,15 @@ import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/Site';
 import { isActiveSlug, productBySlug, type ProductSlug } from '@/content/products';
 import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
+import { OfficialIntakeCta } from '@/components/OfficialIntakeCta';
+import { officialIntakeFor } from '@/server/intake/officialIntakeConfig';
 
 export function ProductPage({ slug }: { slug: ProductSlug }) {
   // PHASE 1: 예약 상품 상세는 주소로 직접 들어와도 404. 화면 코드는 보존한다.
   if (!isActiveSlug(slug)) notFound();
   const p = productBySlug(slug);
+  // 총판 공식 접수처 연결: 서버 상수 등록부만 사용(현재 꺼짐·빈 등록부 → 아무것도 그리지 않음)
+  const intake = officialIntakeFor(slug);
   return (
     <PageShell>
       <section className="hero hero-compact">
@@ -14,6 +18,7 @@ export function ProductPage({ slug }: { slug: ProductSlug }) {
         <h1>{p.title}</h1>
         <p className="hero-lead">{p.lead}</p>
         <a className="btn btn-primary btn-lg" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
+        <OfficialIntakeCta intake={intake} />
       </section>
 
       <section className="section">

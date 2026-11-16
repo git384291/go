@@ -3,6 +3,8 @@ import { ACTIVE_PRODUCTS, CARRIERS } from '@/content/products';
 import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
 import type { Metadata } from 'next';
 import { pageMetadata } from '@/content/seo';
+import { OfficialIntakeCta } from '@/components/OfficialIntakeCta';
+import { officialIntakeFor } from '@/server/intake/officialIntakeConfig';
 
 // 공식 주소 확정 전에는 canonical·OG URL 없음, 검색 차단은 layout이 유지
 export function generateMetadata(): Metadata {
@@ -10,6 +12,8 @@ export function generateMetadata(): Metadata {
 }
 
 export default function HomePage() {
+  // 총판 공식 접수처 연결: 서버 상수 등록부만 사용(현재 꺼짐·빈 등록부 → 아무것도 그리지 않음)
+  const intake = officialIntakeFor('internet-tv');
   return (
     <PageShell>
       <section className="hero">
@@ -26,6 +30,7 @@ export default function HomePage() {
           <a className="btn btn-primary btn-lg" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
           <a className="btn btn-ghost btn-lg" href="#products">상품 둘러보기</a>
         </div>
+        <OfficialIntakeCta intake={intake} />
         <ul className="carrier-row" aria-label="상담 가능 통신사">
           {CARRIERS.map((c) => (
             <li key={c}>{c}</li>

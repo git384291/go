@@ -15,6 +15,9 @@ import { AdminMockView } from '../../src/app/admin/AdminMockView';
 import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
 import { ProgressView } from '../../src/app/admin/progress/ProgressView';
 import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
+import { PageShell } from '../../src/components/Site';
+import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
+import { resolveOfficialIntake } from '../../src/content/officialIntake';
 
 // 진행판 미리보기는 실제 서버 스냅샷이 아닌 화면 확인용 고정 예시를 쓴다(가로 넘침·표시 확인)
 const PROGRESS_FIXTURE = {
@@ -53,6 +56,17 @@ function expect404(label: string, render: () => unknown): string {
   return `${label}\t404=false(렌더링됨)`;
 }
 
+// 공식 접수처 연결 표시 확인용 가상 등록부(실제 목적지 아님, example.com은 IANA 예시 도메인). 실제 설정은 꺼짐·빈 등록부다.
+const FAKE_INTAKE = resolveOfficialIntake({
+  enabled: true,
+  slug: 'internet-tv',
+  registry: [
+    { id: 'fake-a', label: '가상 접수처 A', url: 'https://intake-a.example.com/apply', products: ['internet-tv'], reviewRef: 'PM-000000' },
+    { id: 'fake-b', label: '가상 접수처 B (긴 이름 표시 확인)', url: 'https://very-long-subdomain-for-wrap-check.intake-b.example.com/internet-tv/apply', products: ['internet-tv'], reviewRef: 'PM-000000' },
+  ],
+});
+const FAKE_HREFS = ['https://intake-a.example.com/apply', 'https://very-long-subdomain-for-wrap-check.intake-b.example.com/internet-tv/apply'];
+
 const OUT = process.argv[2] ?? 'test-results/screens';
 // 검사 폭: 좁은 휴대폰(320)과 일반 휴대폰(390). 둘 다 통과해야 한다.
 const WIDTHS = [320, 390] as const;
@@ -69,6 +83,8 @@ async function main() {
     // 로컬 시험용 읽기 전용 목록(가상 7키 DTO, 실제 데이터 아님)과 잠금 화면
     ['09-admin-read', <LeadsReadView key="read" items={READ_FIXTURE} actor={READ_ACTOR} offset={20} limit={2} headerExtra={<span className="admin-role">대표</span>} />],
     ['10-admin-read-locked', <LeadsReadLocked key="read-locked" kind="failed" />],
+    // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
+    ['11-official-intake-fake', <PageShell key="intake-fake"><section className="hero"><h1>가상 공식 접수처 표시</h1><OfficialIntakeCta intake={FAKE_INTAKE} /></section></PageShell>],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),
@@ -105,7 +121,19 @@ async function main() {
       const notice = PUBLIC_PAGES.has(name) ? `\t준비 중 안내=${body.includes(NOTICE)}` : '';
       const fixed = name.startsWith('05')
         ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
-      report.push(`${label}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}\t접수 오해 문구=${intake.length ? intake.join(',') : '없음'}${notice}${fixed}`);
+      // 공식 접수처 연결: 기본(실제 설정) 화면에는 표식이 없어야 하고, 가상 화면은 고정 목적지·비전달 속성만 가져야 한다
+      let intakeCheck = '';
+      if (name.startsWith('11')) {
+        const anchors = await page.evaluate(() => Array.from(document.querySelectorAll('[data-official-intake] a')).map((a) => ({
+          href: a.getAttribute('href'), rel: a.getAttribute('rel'), rp: a.getAttribute('referrerpolicy'), target: a.getAttribute('target') })));
+        const inputs = await page.evaluate(() => document.querySelectorAll('[data-official-intake] input, [data-official-intake] form, [data-official-intake] iframe, [data-official-intake] script, [data-official-intake] img').length);
+        const okLinks = FAKE_INTAKE.state === 'on' && anchors.length === FAKE_HREFS.length
+          && anchors.every((a, i) => a.href === FAKE_HREFS[i] && !/[?#]/.test(a.href ?? '') && /\bnoreferrer\b/.test(a.rel ?? '') && /\bnoopener\b/.test(a.rel ?? '') && a.rp === 'no-referrer' && a.target === '_blank');
+        intakeCheck = `\t공식접수 가상 링크=${okLinks}\t공식접수 입력·외부요소=${inputs}`;
+      } else {
+        intakeCheck = `\t공식접수 표식 없음=${!body.includes('data-official-intake')}`;
+      }
+      report.push(`${label}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}\t접수 오해 문구=${intake.length ? intake.join(',') : '없음'}${notice}${fixed}${intakeCheck}`);
       await page.close();
     }
     await ctx.close();
@@ -116,7 +144,7 @@ async function main() {
   console.log(report.join('\n'));
   const bad = report.filter((r) =>
     r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
-    || /(404|고정)=false/.test(r));
+    || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r));
   if (bad.length) {
     console.error('PREVIEW FAIL\n' + bad.join('\n'));
     process.exit(1);

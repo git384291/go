@@ -9,7 +9,11 @@ const FALLBACKS = {
   'next/link': `${__dirname}/next-link-stub.tsx`,
 };
 const origResolve = Module._resolveFilename;
+// 미리보기는 react-server 조건 없이 서버 컴포넌트를 정적으로 렌더링한다. 실제 server-only 패키지는 이 조건에서
+// import만으로 예외를 내므로, 미리보기에서만 항상 빈 모듈로 바꾼다(실제 빌드·route 시험·server smoke는 원래 동작 유지).
+const SERVER_ONLY_STUB = `${__dirname}/../../tests/route/stubs/empty.cjs`;
 Module._resolveFilename = function (request, ...rest) {
+  if (request === 'server-only') return SERVER_ONLY_STUB;
   try {
     return origResolve.call(this, request, ...rest);
   } catch (e) {
