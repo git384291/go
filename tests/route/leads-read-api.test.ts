@@ -151,3 +151,42 @@ test('A6 기존 route·page 미연결, 모듈은 환경값·기본 DB를 읽지 
   assert.ok(!/process\.env|withRole|from '\.\.\/db\/|postgres|fetch\(/.test(src));
   assert.match(readFileSync(path.join(root, 'server/admin/leadsApi.ts'), 'utf8'), /data_source: 'mock'/);
 });
+
+test('A7 응답 조립 경계: null·불완전·형식 밖 항목, 직렬화 불가·getter 예외 → 503 UNAVAILABLE(no-store), 원문 미반환', async () => {
+  const bigint = { ...ITEM, assignedTo: null, extra: BigInt(1) };
+  const throwing = Object.defineProperty({ ...ITEM }, 'nameMasked', { enumerable: true, get() { throw new Error('getter SECRET'); } });
+  const circular: Record<string, unknown> = { ...ITEM };
+  circular.self = circular;
+  const cases: [string, unknown[]][] = [
+    ['null 항목', [null]],
+    ['불완전 항목', [{ id: ITEM.id }]],
+    ['원문 이름', [{ ...ITEM, nameMasked: 'FullName*' }]],
+    ['원문 번호', [{ ...ITEM, phoneMasked: '010-1234-5678' }]],
+    ['시각 형식 밖', [{ ...ITEM, createdAt: '2026-02-31T00:00:00.000Z' }]],
+    ['예약 상품', [{ ...ITEM, interest: 'cctv_security' }]],
+    ['정상 + null 혼합', [ITEM, null]],
+    ['getter 예외', [throwing]],
+  ];
+  for (const [label, items] of cases) {
+    const { d } = deps({ list: { ok: true, items } as unknown as ListResult });
+    const res = await listLeadsReadResponse(d, q());
+    const r = await read(res);
+    assert.equal(r.status, 503, label);
+    assert.deepEqual(r.body, { ok: false, code: 'UNAVAILABLE' }, label);
+    assert.ok(!/SECRET|FullName|1234-5678/.test(r.text), label);
+    assertHeaders(r.h, label);
+  }
+  // 직렬화 불가 값이 있어도(추가 필드) 7키만 골라 직렬화하므로 정상 항목은 200, 추가 필드는 버린다
+  for (const extra of [bigint, circular]) {
+    const { d } = deps({ list: { ok: true, items: [extra] } as unknown as ListResult });
+    const r = await read(await listLeadsReadResponse(d, q()));
+    assert.equal(r.status, 200);
+    assert.deepEqual(Object.keys((r.body.items as object[])[0]).sort(), ['assignedTo', 'createdAt', 'id', 'interest', 'nameMasked', 'phoneMasked', 'status']);
+  }
+  // 의존성 자체가 예외를 던지는 경우(mode)
+  const { d } = deps();
+  d.mode = () => { throw new Error('mode SECRET'); };
+  const m = await read(await listLeadsReadResponse(d, q()));
+  assert.equal(m.status, 503);
+  assert.ok(!m.text.includes('SECRET'));
+});

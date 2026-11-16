@@ -2,7 +2,7 @@ import 'server-only';
 import type { AdminAuthMode } from '../auth/adminAuthMode';
 import { StaffAuthError } from '../auth/staffAssertion';
 import type { StaffIdentity } from '../auth/staffSession';
-import type { ListResult, MaskedLead } from './leadsReadStore';
+import { isMaskedLeadDto, type ListResult, type MaskedLead } from './leadsReadStore';
 
 /**
  * 실제 DB 마스킹 목록의 HTTP 응답 조합 (PM 6910895023). **미배선.**
@@ -67,7 +67,16 @@ function safeBool(f: () => unknown): boolean {
   }
 }
 
+/** 조립·직렬화를 포함한 모든 예기치 않은 실패를 503 UNAVAILABLE(no-store·nosniff)로 닫는다 */
 export async function listLeadsReadResponse(deps: LeadsReadApiDeps, params: URLSearchParams): Promise<Response> {
+  try {
+    return await respond(deps, params);
+  } catch {
+    return fail('UNAVAILABLE', 503);
+  }
+}
+
+async function respond(deps: LeadsReadApiDeps, params: URLSearchParams): Promise<Response> {
   let mode: AdminAuthMode | null = null;
   try {
     mode = deps.mode();
@@ -96,7 +105,14 @@ export async function listLeadsReadResponse(deps: LeadsReadApiDeps, params: URLS
     return fail('UNAVAILABLE', 503);
   }
   if (result && result.ok === true && Array.isArray(result.items)) {
-    return json({ ok: true, data_source: READ_DATA_SOURCE, items: result.items.map(pick) }, 200);
+    // 항목은 store 계약(7키·마스킹 모양·ISO 시각)으로 다시 확인한다. null·불완전 항목이 하나라도 있으면 성공 응답을 만들지 않는다
+    try {
+      if (!result.items.every((i) => isMaskedLeadDto(i))) return fail('UNAVAILABLE', 503);
+      const body = JSON.stringify({ ok: true, data_source: READ_DATA_SOURCE, items: result.items.map(pick) });
+      return new Response(body, { status: 200, headers: HEADERS });
+    } catch {
+      return fail('UNAVAILABLE', 503);
+    }
   }
   const code = result && result.ok === false ? result.code : undefined;
   if (code === 'FORBIDDEN') return fail('FORBIDDEN', 403);

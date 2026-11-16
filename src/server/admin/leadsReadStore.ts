@@ -144,6 +144,29 @@ function maskedLead(row: unknown, scope: { role: ListRole; actor: string }): Mas
   });
 }
 
+const ISO_OUT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/**
+ * 이 모듈이 만든 마스킹 DTO 계약(7키) 확인. HTTP 조합 단계가 같은 규칙으로 다시 확인할 때 쓴다(규칙 복제 방지).
+ * 접근 중 예외(getter 등)는 false로 처리한다.
+ */
+export function isMaskedLeadDto(x: unknown): x is MaskedLead {
+  try {
+    if (x === null || typeof x !== 'object' || Array.isArray(x)) return false;
+    const r = x as Record<string, unknown>;
+    if (!isUuid(r.id)) return false;
+    if (typeof r.createdAt !== 'string' || !ISO_OUT_RE.test(r.createdAt)) return false;
+    const t = Date.parse(r.createdAt);
+    if (!Number.isFinite(t) || new Date(t).toISOString() !== r.createdAt) return false;
+    if (typeof r.nameMasked !== 'string' || !NAME_MASKED_RE.test(r.nameMasked)) return false;
+    if (typeof r.phoneMasked !== 'string' || !PHONE_MASKED_RE.test(r.phoneMasked)) return false;
+    if (typeof r.interest !== 'string' || !isActiveInterest(r.interest)) return false;
+    if (typeof r.status !== 'string' || !(LEAD_STATUSES as readonly string[]).includes(r.status)) return false;
+    return r.assignedTo === null || isUuid(r.assignedTo);
+  } catch {
+    return false;
+  }
+}
+
 /** DB 오류는 고정 코드로만 바꾼다(원문·쿼리·파라미터·cause를 로그·반환에 싣지 않는다) */
 function dbErrorCode(e: unknown): ReadErrorCode {
   const code = e !== null && typeof e === 'object' ? (e as { code?: unknown }).code : undefined;
