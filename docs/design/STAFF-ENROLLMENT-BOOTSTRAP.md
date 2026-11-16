@@ -245,6 +245,26 @@
 - `docs/design/staff-enrollment/model.ts`(비활성 순수 함수)와 `tests/route/staff-enrollment-model.test.ts`가 9-1~9-5 규칙을 가상 상태로 실행한다.
 - **이 모델의 통과는 실제 JWT 검증·RLS·PG 동시성·Auth 원자성·실계정 복구 통과가 아니다.**
 
+### 9-7. 검증 뒤 멱등 (PM 6920128585)
+- **처리 순서는 모든 단계·재시도·`status`에 같다**
+  1. 공통 검증(직원 활성 owner·허용 AAL)
+  2. operation 소유(actor·세션)
+  3. 만료 commit
+  4. 내용·상태·revision 검증
+  5. 동일 요청이면 멱등 응답
+- **우선순위:** 권한·소유 불일치 거부(rollback)가 만료 commit보다 먼저다.
+- **동일 요청:** grant에 마지막 반영 요청(`단계 + 정규화 내용`)을 저장하고, 정확히 같을 때만 동일 요청이다.
+  - begin: 코드 지문
+  - record_factor: digest·기대 revision·factor
+  - bind: digest·기대 revision·factor·verified 목록(정렬)
+  - fail: digest·기대 revision·사유
+  - 사유·digest·revision이 하나라도 다르면 거부한다. 정상 중복은 감사 0, 원본 불변이다.
+- **종료된 grant(`bound`·`failed`):** 상태 변경 없는 기존 결과 확인만 한다. 재예약이나 권한 복원으로 이어지지 않는다. 다음 단계로 간 operation에 begin을 다시 보내도 되돌아가지 않는다.
+- **세션 개설**
+  - 세션 id는 서버가 검증한 auth 세션과 같아야 한다.
+  - 같은 id의 기존 세션이 다른 사용자 것이거나 폐기됐으면 거부한다(폐기를 되돌리지 않음).
+  - 유효한 같은 세션 재시도만 멱등이다.
+
 ## 8. 결정점 (PM·사용자)
 1. 서명: 기존 `staff` 키 + 첫 필드 분리(제안) vs 새 목적 `enroll`(별도 키·env)
 2. 최초 코드 전달: SQL 편집기 결과 1회 표시(제안) vs 소유자가 로컬에서 만든 해시만 입력하는 방식

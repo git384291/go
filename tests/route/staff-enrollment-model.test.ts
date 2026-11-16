@@ -30,9 +30,9 @@ test('E1 정상: 발급→예약→기록→결합→세션 개설(등록 factor
   assert.equal(b.code, 'BOUND');
   assert.equal(b.world.staff[U].factorId, 'F1');
   assert.deepEqual(b.world.audit.map((a) => a.op), ['enroll.bootstrap_issue', 'enroll.begin', 'enroll.record_factor', 'enroll.bind']);
-  assert.equal(sessionOpen(b.world, c2(), 's-db-1', 'F1').code, 'OPENED');
-  assert.equal(sessionOpen(b.world, c2(), 's-db-2', 'F2').code, 'FORBIDDEN', '다른 factor 거부');
-  assert.equal(sessionOpen(b.world, c1(), 's-db-3', 'F1').code, 'FORBIDDEN', 'aal1 거부');
+  assert.equal(sessionOpen(b.world, c2(), 'auth-s1', 'F1').code, 'OPENED');
+  assert.equal(sessionOpen(b.world, c2(), 'auth-s1', 'F2').code, 'FORBIDDEN', '다른 factor 거부');
+  assert.equal(sessionOpen(b.world, c1(), 'auth-s1', 'F1').code, 'FORBIDDEN', 'aal1 거부');
 });
 
 test('E2 안정 operation: 같은 actor·세션·코드 재시도는 같은 opId·감사 추가 0, 다른 세션·코드는 거부(원본 불변)', () => {
@@ -128,14 +128,14 @@ test('E7 전역 불변식: bound owner가 있으면 bootstrap 발급·결합 거
 test('E8 마지막 owner 복구(소유자 SQL 전용): 비활성·결합 해제·세션·grant 폐기 → 재활성 → aal2-only 로그인 불가 → 새 등록', () => {
   const { w, opId, digest, rev } = toEnrolling();
   const bound = bind(w, c2(), { opId, beginDigest: digest, expectedRevision: rev, factorId: 'F1', verifiedIds: ['F1'] }).world;
-  const opened = sessionOpen(bound, c2(), 's-db-1', 'F1').world;
+  const opened = sessionOpen(bound, c2(), 'auth-s1', 'F1').world;
   const reset = ownerRecoveryReset(opened, U).world;
-  assert.deepEqual([reset.staff[U].active, reset.staff[U].factorId, reset.sessions['s-db-1'].revoked], [false, null, true]);
-  assert.equal(sessionOpen(reset, c2(), 's-db-2', 'F1').code, 'FORBIDDEN');
+  assert.deepEqual([reset.staff[U].active, reset.staff[U].factorId, reset.sessions['auth-s1'].revoked], [false, null, true]);
+  assert.equal(sessionOpen(reset, c2(), 'auth-s1', 'F1').code, 'FORBIDDEN');
   const re = ownerRecoveryReactivate(reset, U).world;
   assert.equal(re.staff[U].active, true);
-  assert.equal(sessionOpen(re, c2(), 's-db-3', null).code, 'FORBIDDEN', 'factor 없이 aal2만으로 세션 불가(우회 없음)');
-  assert.equal(sessionOpen(re, c2(), 's-db-3', 'F1').code, 'FORBIDDEN', '예전 factor로도 불가');
+  assert.equal(sessionOpen(re, c2(T0, 'auth-s3'), 'auth-s3', null).code, 'FORBIDDEN', 'factor 없이 aal2만으로 세션 불가(우회 없음)');
+  assert.equal(sessionOpen(re, c2(T0, 'auth-s3'), 'auth-s3', 'F1').code, 'FORBIDDEN', '예전 factor로도 불가');
   const again = bootstrapIssue(re, U, 'h-new', T0 + 60_000);
   assert.equal(again.code, 'ISSUED', '새 1회 코드로 재등록');
   assert.equal(ownerRecoveryReactivate(bound, U).code, 'NOT_ELIGIBLE', '결합 해제 전 재활성 불가');
@@ -153,4 +153,107 @@ test('E9 직원 비활성화 중에는 begin·bind 거부, 모델은 앱·서버
   assert.deepEqual(files.filter((f) => /staff-enrollment\/model/.test(readFileSync(f, 'utf8'))), []);
   const src = readFileSync(path.resolve(__dirname, '../../docs/design/staff-enrollment/model.ts'), 'utf8').replace(/\/\/.*$/gm, '');
   assert.ok(!/from ['"]|require\(|process\.|fetch\(|Date\.now/.test(src), '외부 import·환경·네트워크·실시각 없음');
+});
+
+// ---- PM 6920128585: 공통 검증 후 멱등(재시도가 권한·상태 검사의 우회가 되지 않음) ----
+const inactive = (w: World) => ({ ...w, staff: { ...w.staff, [U]: { ...w.staff[U], active: false } } }) as World;
+function bound() {
+  const e = toEnrolling();
+  const args = { opId: e.opId, beginDigest: e.digest, expectedRevision: e.rev, factorId: 'F1', verifiedIds: ['F1'] };
+  return { ...e, args, w: bind(e.w, c2(), args).world };
+}
+
+test('E10 재현1 recordFactor: 같은 요청이라도 직원 비활성이면 거부, 15분 지나면 EXPIRED(commit), 재시도 성공은 감사 0', () => {
+  const { w, opId, digest, rev } = toEnrolling();
+  const same = { opId, beginDigest: digest, expectedRevision: rev - 1, factorId: 'F1' };
+  const off = inactive(w);
+  const r1 = recordFactor(off, c1(), same);
+  assert.deepEqual([r1.code, r1.world === off], ['NOT_ELIGIBLE', true]);
+  const r2 = recordFactor(w, c1(T0 + 16 * 60_000), same);
+  assert.equal(r2.code, 'EXPIRED');
+  assert.equal(r2.world.grants[0].state, 'expired');
+  const ok = recordFactor(w, c1(), same);
+  assert.deepEqual([ok.code, ok.world === w], ['RETRY_SAME', true]);
+  for (const [label, a, code] of [
+    ['다른 factor', { ...same, factorId: 'F2' }, 'STATE_MISMATCH'],
+    ['다른 revision', { ...same, expectedRevision: 999 }, 'STATE_MISMATCH'],
+    ['다른 digest', { ...same, beginDigest: 'wrong' }, 'DIGEST_MISMATCH'],
+  ] as const) {
+    const x = recordFactor(w, c1(), a);
+    assert.deepEqual([x.code, x.world === w], [code, true], label);
+  }
+  assert.equal(recordFactor(w, c1(T0 + 1000, 'auth-s2'), same).code, 'SESSION_MISMATCH');
+  assert.equal(recordFactor(w, c2(), same).code, 'AAL_MISMATCH');
+});
+
+test('E11 재현2 bind 성공 후 재시도: 비활성·wrong digest·revision 999·verified 빈 목록·다른 세션·aal1은 모두 거부, 정확히 같은 요청만 RETRY_SAME', () => {
+  const { w, args } = bound();
+  const cases: [string, World, Ctx, typeof args, string][] = [
+    ['비활성', inactive(w), c2(), args, 'NOT_ELIGIBLE'],
+    ['wrong digest', w, c2(), { ...args, beginDigest: 'wrong' }, 'DIGEST_MISMATCH'],
+    ['revision 999', w, c2(), { ...args, expectedRevision: 999 }, 'STATE_MISMATCH'],
+    ['verified 빈 목록', w, c2(), { ...args, verifiedIds: [] }, 'VERIFIED_NOT_EXACTLY_ONE'],
+    ['다른 세션', w, c2(T0 + 2000, 'auth-s2'), args, 'SESSION_MISMATCH'],
+    ['aal1', w, c1(), args, 'AAL_MISMATCH'],
+    ['다른 factor', w, c2(), { ...args, factorId: 'F2', verifiedIds: ['F2'] }, 'FACTOR_MISMATCH'],
+  ];
+  for (const [label, world, ctx, a, code] of cases) {
+    const x = bind(world, ctx, a);
+    assert.deepEqual([x.code, x.world === world], [code, true], label);
+  }
+  const ok = bind(w, c2(T0 + 99 * 60_000), args);
+  assert.deepEqual([ok.code, ok.world === w], ['RETRY_SAME', true], '종료(bound) grant: 상태 변경 없는 기존 결과 확인');
+  assert.equal(ok.world.audit.filter((x) => x.op === 'enroll.bind').length, 1);
+});
+
+test('E12 재현3 fail: 다른 세션·digest·revision·사유는 동일 요청 아님, 같은 요청만 RETRY_SAME(감사 1회)', () => {
+  const b = begin(fresh(), c1(), 'h-code');
+  const a = { opId: b.opId!, beginDigest: b.world.grants[0].beginDigest!, expectedRevision: b.revision! };
+  const f = fail(b.world, c1(), a, 'DB_RECORD_FAILED').world;
+  for (const [label, ctx, args, reason, code] of [
+    ['다른 세션', c1(T0 + 1000, 'auth-s2'), a, 'DB_RECORD_FAILED', 'SESSION_MISMATCH'],
+    ['다른 digest', c1(), { ...a, beginDigest: 'x' }, 'DB_RECORD_FAILED', 'DIGEST_MISMATCH'],
+    ['다른 revision', c1(), { ...a, expectedRevision: 7 }, 'DB_RECORD_FAILED', 'STATE_MISMATCH'],
+    ['다른 사유', c1(), a, 'ENROLL_FAILED', 'STATE_MISMATCH'],
+  ] as const) {
+    const x = fail(f, ctx, args, reason);
+    assert.deepEqual([x.code, x.world === f], [code, true], label);
+  }
+  assert.equal(fail(inactive(f), c1(), a, 'DB_RECORD_FAILED').code, 'NOT_ELIGIBLE');
+  const same = fail(f, c1(), a, 'DB_RECORD_FAILED');
+  assert.deepEqual([same.code, same.world === f], ['RETRY_SAME', true]);
+  assert.equal(same.world.audit.filter((x) => x.op === 'enroll.failed').length, 1);
+});
+
+test('E13 재현4 status: 비활성 직원 거부, 만료면 EXPIRED(commit), 다른 세션 없음', () => {
+  const { w } = toEnrolling();
+  assert.equal(status(inactive(w), c1()).code, 'NOT_ELIGIBLE');
+  const ex = status(w, c1(T0 + 16 * 60_000));
+  assert.deepEqual([ex.code, ex.ok, ex.world.grants[0].state], ['EXPIRED', false, 'expired']);
+  assert.equal(status(w, c1(T0 + 1000, 'auth-s2')).code, 'NO_OPERATION');
+  assert.deepEqual([status(w, c2()).code, status(w, c2()).ok], ['ENROLLING', true], 'aal2 재진입도 같은 검증');
+});
+
+test('E14 재현5 sessionOpen: 서버 검증 세션과 다른 id 거부, 폐기된 세션 되살리기·다른 사용자 세션 덮어쓰기 거부, 같은 세션 재시도만 멱등', () => {
+  const { w } = bound();
+  assert.equal(sessionOpen(w, c2(), 'other-id', 'F1').code, 'FORBIDDEN', '다른 id');
+  const opened = sessionOpen(w, c2(), 'auth-s1', 'F1').world;
+  const again = sessionOpen(opened, c2(), 'auth-s1', 'F1');
+  assert.deepEqual([again.code, again.world === opened], ['OPENED_EXISTING', true]);
+  const revoked = { ...opened, sessions: { ...opened.sessions, 'auth-s1': { userId: U, revoked: true } } } as World;
+  const rr = sessionOpen(revoked, c2(), 'auth-s1', 'F1');
+  assert.deepEqual([rr.code, rr.world.sessions['auth-s1'].revoked], ['FORBIDDEN', true], '폐기 유지');
+  const foreign = { ...w, sessions: { 'auth-s1': { userId: 'someone-else', revoked: false } } } as World;
+  const fr = sessionOpen(foreign, c2(), 'auth-s1', 'F1');
+  assert.deepEqual([fr.code, fr.world.sessions['auth-s1'].userId], ['FORBIDDEN', 'someone-else']);
+  assert.equal(sessionOpen(inactive(opened), c2(), 'auth-s1', 'F1').code, 'FORBIDDEN', '비활성 재시도 거부');
+});
+
+test('E15 성공 전 교차: begin 재시도도 비활성·만료·aal 검증, 다음 단계로 간 operation은 begin 재시도로 되돌리지 않음', () => {
+  const b = begin(fresh(), c1(), 'h-code');
+  assert.equal(begin(inactive(b.world), c1(), 'h-code').code, 'NOT_ELIGIBLE');
+  assert.equal(begin(b.world, c1(T0 + 16 * 60_000), 'h-code').code, 'EXPIRED');
+  const { w } = toEnrolling();
+  const x = begin(w, c1(), 'h-code');
+  assert.deepEqual([x.code, x.world === w], ['STATE_MISMATCH', true]);
 });
