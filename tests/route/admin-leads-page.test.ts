@@ -163,6 +163,22 @@ test('V5 빈 목록과 실패 구분, 페이지 이동은 검증한 offset만(�
   assert.deepEqual(forged.n.sql[0].slice(0, 3), [CA, '00000000-0000-4000-8000-0000000000aa', 'TOKEN-SECRET']);
 });
 
+test('V7 최대 offset 경계: 허용 범위를 넘는 다음 링크를 만들지 않음(최대 직전·최대·빈 마지막 페이지)', async () => {
+  const full = Array.from({ length: PAGE_SIZE }, (_, i) => row(1, null, { lead_id: `10000000-0000-4000-8000-0000000000${String(i).padStart(2, '0')}` }));
+  const at = async (off: string, rows: unknown[]) => (await render(deps(OK_ENV, { rows, sp: { offset: off } }).d)).s;
+  const before = await at('99980', full);
+  assert.ok(before.includes('href=/admin?offset=100000') && before.includes('href=/admin?offset=99960'), '최대 직전: 다음=최대');
+  assert.ok(!before.includes('마지막 페이지'));
+  const max = await at('100000', full);
+  assert.ok(!/offset=1000[2-9]\d|offset=100020/.test(max), '최대: 허용 밖 다음 링크 없음');
+  assert.ok(max.includes('href=/admin?offset=99980') && max.includes('마지막 페이지입니다'), '이전 이동·안내 유지');
+  assert.ok(!max.includes('다음 페이지가 있을 수 있습니다'));
+  const empty = await at('100000', []);
+  assert.ok(empty.includes('이 페이지에 표시할 상담이 없습니다') && empty.includes('href=/admin?offset=99980') && !empty.includes('offset=100020'));
+  const over = await render(deps(OK_ENV, { sp: { offset: '100020' } }).d);
+  assert.match(over.s, /불러오지 못했습니다/, '로더는 여전히 100020 거부(범위 확장 없음)');
+});
+
 const req = createRequire(import.meta.url);
 let realDeps = true;
 try {

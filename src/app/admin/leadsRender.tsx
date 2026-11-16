@@ -4,7 +4,7 @@ import { StaffAuthError } from '@/server/auth/staffAssertion';
 import type { StaffIdentity } from '@/server/auth/staffSession';
 import { listMaskedLeads, type TxRunner } from '@/server/admin/leadsReadStore';
 import { dbReadReady, leadsSource } from '@/server/admin/leadsSource';
-import { LeadsReadLocked, LeadsReadView } from './LeadsReadView';
+import { LeadsReadLocked, LeadsReadView, MAX_OFFSET } from './LeadsReadView';
 
 /**
  * /admin 응답 결정(시험용으로 분리, PM 6915664371). 의존성은 page.tsx가 서버 기본값으로 넘긴다(요청으로 주입 불가).
@@ -34,7 +34,7 @@ function offsetFrom(sp: AdminLeadsPageDeps['searchParams']): number | null {
   if (v === undefined) return 0;
   if (typeof v !== 'string' || !/^\d{1,6}$/.test(v)) return null;
   const n = Number(v);
-  return n <= 100_000 && n % PAGE_SIZE === 0 ? n : null;
+  return n <= MAX_OFFSET && n % PAGE_SIZE === 0 ? n : null;
 }
 
 export async function renderAdminLeads(deps: AdminLeadsPageDeps): Promise<AdminLeadsPageResult> {

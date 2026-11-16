@@ -35,6 +35,9 @@ function fmt(iso: string): string {
   return `${k.getUTCFullYear()}-${p(k.getUTCMonth() + 1)}-${p(k.getUTCDate())} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
 }
 
+/** 화면이 허용하는 최대 offset. 로더(leadsRender)와 같은 값을 쓴다(이를 넘는 링크를 만들지 않음) */
+export const MAX_OFFSET = 100_000;
+
 export type LeadsReadViewProps = {
   items: readonly MaskedLead[];
   actor: string;
@@ -45,7 +48,10 @@ export type LeadsReadViewProps = {
 
 export function LeadsReadView({ items, actor, offset, limit, headerExtra }: LeadsReadViewProps) {
   const hasPrev = offset > 0;
-  const hasNext = items.length === limit;
+  const full = items.length === limit;
+  // 다음 페이지 offset이 허용 최대를 넘으면 링크를 만들지 않는다(로더가 거부하는 주소)
+  const hasNext = full && offset + limit <= MAX_OFFSET;
+  const atLimit = full && !hasNext;
   return (
     <div className="admin">
       <Bar headerExtra={headerExtra} />
@@ -78,6 +84,7 @@ export function LeadsReadView({ items, actor, offset, limit, headerExtra }: Lead
           </nav>
         )}
         {hasNext && <p className="read-note">다음 페이지가 있을 수 있습니다(전체 건수 미확인).</p>}
+        {atLimit && <p className="read-note">이 화면에서 볼 수 있는 마지막 페이지입니다. 이전 페이지로만 이동할 수 있습니다.</p>}
       </main>
     </div>
   );
