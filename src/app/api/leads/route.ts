@@ -20,21 +20,32 @@ export async function POST(req: Request) {
   if (!gate.enabled) return rejected(gate.reason, 503);
 
   if (!(req.headers.get('content-type') ?? '').includes('application/json')) return rejected('UNSUPPORTED_MEDIA', 415);
-  const raw = await req.text();
-  if (raw.length > 4096) return rejected('PAYLOAD_TOO_LARGE', 413);
-
-  let body: Record<string, unknown>;
+  let raw: string;
   try {
-    body = JSON.parse(raw) as Record<string, unknown>;
+    raw = await req.text();
   } catch {
     return rejected('INVALID_JSON');
   }
+  if (raw.length > 4096) return rejected('PAYLOAD_TOO_LARGE', 413);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return rejected('INVALID_JSON');
+  }
+  // 루트는 일반 객체만(null·배열·문자열·숫자는 구조 분해 전에 거부한다)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return rejected('INVALID_JSON');
+  const body = parsed as Record<string, unknown>;
 
   const ip = clientIpFrom((name) => req.headers.get(name));
   const { turnstileToken, ...lead } = body;
   // PHASE 1: 예약 상품은 외부 확인(Turnstile) 호출 전에 바로 거부한다
   if (!isActiveInterest(lead.interest)) return rejected('PRODUCT_NOT_ACTIVE', 403);
-  if (!(await verifyTurnstile(String(turnstileToken ?? ''), ip))) return rejected('BOT_SUSPECTED', 403);
+  // 봇 확인은 예외를 던지지 않는다. 'ok'가 아니면 저장으로 진행하지 않는다(외부 확인 실패 = 접수 안 함)
+  const bot = await verifyTurnstile(typeof turnstileToken === 'string' ? turnstileToken : '', ip);
+  if (bot === 'unavailable') return rejected('BOT_CHECK_UNAVAILABLE', 503);
+  if (bot !== 'ok') return rejected('BOT_SUSPECTED', 403);
 
   try {
     const a = buildCreateLeadArgs(lead, {

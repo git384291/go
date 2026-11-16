@@ -12,9 +12,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-const ENV_KEYS = ['LEAD_INTAKE_MODE', 'DATABASE_URL', 'VERCEL_ENV', 'TURNSTILE_SECRET_KEY'] as const;
+const ENV_KEYS = ['LEAD_INTAKE_MODE', 'DATABASE_URL', 'VERCEL_ENV', 'TURNSTILE_SECRET_KEY', 'PUBLIC_HOSTNAME'] as const;
 const saved: Record<string, string | undefined> = {};
 let fetchCalls = 0;
+const botFail = () => new Response(JSON.stringify({ success: false }), { status: 200, headers: { 'content-type': 'application/json' } });
+// 가짜 봇 확인 응답(시험별로 바꾼다). 기본은 확인 실패
+let botReply: () => Response | Promise<Response> = botFail;
 const realFetch = globalThis.fetch;
 
 type Post = (req: Request) => Promise<Response>;
@@ -35,7 +38,7 @@ before(async () => {
   for (const k of ENV_KEYS) saved[k] = process.env[k];
   globalThis.fetch = (async () => {
     fetchCalls += 1;
-    return new Response(JSON.stringify({ success: false }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return botReply();
   }) as typeof fetch;
   ({ POST } = (await import('../../src/app/api/leads/route')) as { POST: Post });
 });
@@ -141,4 +144,111 @@ test('R5 Vercel 배포 환경에서는 로컬 모드 설정이 있어도 수집�
     assert.deepEqual(r.body, { ok: false, code: 'LOCAL_MODE_NOT_ALLOWED_ON_VERCEL' }, v);
   }
   delete process.env.VERCEL_ENV;
+});
+
+// ---- PM 6907697718 B-3: 비활성 경로 사전 보완(JSON 루트·봇 확인 예외) ----
+
+async function callRaw(raw: string) {
+  const res = await POST(
+    new Request('http://localhost/api/leads', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.10' },
+      body: raw,
+    }),
+  );
+  const text = await res.text();
+  return { status: res.status, type: res.headers.get('content-type') ?? '', text, body: JSON.parse(text) as unknown };
+}
+
+test('R6 JSON 루트가 객체가 아니면(null·배열·문자열·숫자·true) 예외 없이 400 INVALID_JSON, 외부 호출 0', async () => {
+  setGate(true);
+  for (const raw of ['null', '[]', '[{"interest":"internet_tv"}]', '"internet_tv"', '1', 'true']) {
+    fetchCalls = 0;
+    const r = await callRaw(raw);
+    assert.equal(r.status, 400, raw);
+    assert.match(r.type, /application\/json/, raw);
+    assert.deepEqual(r.body, { ok: false, code: 'INVALID_JSON' }, raw);
+    assert.equal(fetchCalls, 0, raw);
+  }
+});
+
+test('R7 봇 확인 네트워크 실패·시간 초과·HTTP 오류·비JSON·형태 오류 → 503 BOT_CHECK_UNAVAILABLE(저장 단계로 가지 않음)', async () => {
+  setGate(true);
+  process.env.PUBLIC_HOSTNAME = 'example.test';
+  const cases: [string, () => Response | Promise<Response>][] = [
+    ['네트워크 실패', () => Promise.reject(new TypeError('fetch failed'))],
+    ['시간 초과', () => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError'))],
+    ['HTTP 500', () => new Response('<html>oops</html>', { status: 500, headers: { 'content-type': 'text/html' } })],
+    ['비JSON 200', () => new Response('<html>not json</html>', { status: 200, headers: { 'content-type': 'text/html' } })],
+    ['JSON null', () => new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })],
+    ['JSON 배열', () => new Response('[true]', { status: 200, headers: { 'content-type': 'application/json' } })],
+    ['success 누락', () => new Response('{"action":"lead_form"}', { status: 200, headers: { 'content-type': 'application/json' } })],
+    ['success 문자열', () => new Response('{"success":"true"}', { status: 200, headers: { 'content-type': 'application/json' } })],
+  ];
+  try {
+    for (const [label, reply] of cases) {
+      botReply = reply;
+      fetchCalls = 0;
+      const r = await callRaw(JSON.stringify({ ...base, interest: 'internet_tv' }));
+      assert.equal(r.status, 503, label);
+      assert.deepEqual(r.body, { ok: false, code: 'BOT_CHECK_UNAVAILABLE' }, label);
+      assert.equal(fetchCalls, 1, label);
+      // 응답에 외부 응답 원문·토큰·오류 문구가 반사되지 않는다
+      for (const leak of ['oops', 'not json', 'fetch failed', 'timed out', base.turnstileToken, '010']) {
+        assert.ok(!r.text.includes(leak), `${label}: ${leak}`);
+      }
+    }
+  } finally {
+    botReply = botFail;
+  }
+});
+
+test('R8 봇 확인 action·hostname 검사는 약해지지 않는다(불일치·기대 호스트 미설정 → 403 BOT_SUSPECTED)', async () => {
+  setGate(true);
+  const ok = (body: unknown) => () => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  const cases: [string, string | undefined, () => Response][] = [
+    ['action 불일치', 'example.test', ok({ success: true, action: 'login', hostname: 'example.test' })],
+    ['hostname 불일치', 'example.test', ok({ success: true, action: 'lead_form', hostname: 'evil.test' })],
+    ['hostname 누락', 'example.test', ok({ success: true, action: 'lead_form' })],
+    ['기대 호스트 미설정', undefined, ok({ success: true, action: 'lead_form' })],
+    ['success false', 'example.test', ok({ success: false, action: 'lead_form', hostname: 'example.test' })],
+  ];
+  try {
+    for (const [label, host, reply] of cases) {
+      if (host === undefined) delete process.env.PUBLIC_HOSTNAME;
+      else process.env.PUBLIC_HOSTNAME = host;
+      botReply = reply;
+      fetchCalls = 0;
+      const r = await call({ ...base, interest: 'internet_tv' });
+      assert.equal(r.status, 403, label);
+      assert.deepEqual(r.body, { ok: false, code: 'BOT_SUSPECTED' }, label);
+      assert.equal(fetchCalls, 1, label);
+    }
+    // 토큰이 문자열이 아니면 외부 확인 없이 거부
+    for (const t of [null, 123, { a: 1 }, ['x']]) {
+      fetchCalls = 0;
+      const r = await call({ ...base, interest: 'internet_tv', turnstileToken: t });
+      assert.equal(r.status, 403, JSON.stringify(t));
+      assert.deepEqual(r.body, { ok: false, code: 'BOT_SUSPECTED' });
+      assert.equal(fetchCalls, 0, JSON.stringify(t));
+    }
+  } finally {
+    botReply = botFail;
+  }
+});
+
+test('R9 예약 상품은 봇 확인 예외 상황에서도 외부 호출 0, 403 PRODUCT_NOT_ACTIVE', async () => {
+  setGate(true);
+  botReply = () => Promise.reject(new TypeError('fetch failed'));
+  try {
+    for (const interest of RESERVED) {
+      fetchCalls = 0;
+      const r = await call({ ...base, interest });
+      assert.equal(r.status, 403, interest);
+      assert.deepEqual(r.body, NOT_ACTIVE, interest);
+      assert.equal(fetchCalls, 0, interest);
+    }
+  } finally {
+    botReply = botFail;
+  }
 });
