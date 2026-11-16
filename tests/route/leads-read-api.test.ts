@@ -16,9 +16,10 @@ const ITEM: MaskedLead = Object.freeze({ id: '10000000-0000-4000-8000-0000000000
 
 function deps(o: { mode?: string; ready?: boolean | (() => boolean); staff?: StaffIdentity | Error; list?: ListResult | Error } = {}) {
   const calls = { staff: 0, list: 0, args: [] as unknown[] };
+  const ready = o.ready;
   const d: LeadsReadApiDeps = {
     mode: () => (o.mode ?? 'supabase') as 'supabase',
-    readReady: typeof o.ready === 'function' ? o.ready : () => o.ready ?? true,
+    readReady: typeof ready === 'function' ? ready : () => ready !== false,
     requireStaff: async () => {
       calls.staff++;
       if (o.staff instanceof Error) throw o.staff;
