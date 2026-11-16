@@ -126,23 +126,26 @@ export async function runProbe({ connect, target, ca, badCa, expect = PROBE_EXPE
   const checks = [];
   const add = (id, pass, value) => checks.push(value === undefined ? { id, status: pass ? 'PASS' : 'FAIL' } : { id, status: pass ? 'PASS' : 'FAIL', value });
   const deadline = now() + timeoutMs;
+  // 마감 타이머가 한 번이라도 울리면 이후는 마감 지남으로 본다(타이머와 시계의 1ms 차이로 새 작업이 시작되지 않게)
+  let expired = false;
+  const left = () => (expired ? 0 : deadline - now());
   /** p를 ms 안에 끝내지 못하면 PROBE_TIMEOUT. 타이머는 항상 해제 */
   const within = (p, ms) => new Promise((resolve, reject) => {
     if (ms <= 0) { reject(timeoutError()); return; }
     const h = timers.set(() => reject(timeoutError()), ms);
     Promise.resolve(p).then((v) => { timers.clear(h); resolve(v); }, (e) => { timers.clear(h); reject(e); });
   });
-  const beforeDeadline = (p) => within(p, deadline - now());
+  const beforeDeadline = (p) => within(p, left()).catch((e) => { if (e && e.code === 'PROBE_TIMEOUT') expired = true; throw e; });
   const run = async (client, text) => {
     if (!ALLOWED_SQL.has(text)) throw Object.assign(new Error('sql not allowed'), { code: 'SQL_NOT_ALLOWED' });
-    if (deadline - now() <= 0) throw timeoutError(); // 마감 뒤 새 SQL 시작 안 함
+    if (left() <= 0) throw timeoutError(); // 마감 뒤 새 SQL 시작 안 함
     const rows = await beforeDeadline(client.query(text));
     if (!Array.isArray(rows)) throw Object.assign(new Error('bad rows'), { code: 'BAD_RESULT' });
     return rows;
   };
   /** 연결 시작: 마감 전일 때만. 늦게 도착해도 소유권을 잃지 않도록 원래 Promise를 돌려준다 */
   const startConnect = (cfg) => {
-    if (deadline - now() <= 0) return null;
+    if (left() <= 0) return null;
     try { return Promise.resolve(connect(cfg)); } catch (e) { return Promise.reject(e); }
   };
   /** 자기 연결 정리(별도 짧은 한도). 늦게 생긴 client도 기다렸다가 닫는다. 확인 못 하면 false */
