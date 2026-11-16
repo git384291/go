@@ -51,7 +51,7 @@
 | `src/content/officialIntake.ts` | 순수 검증·판정. 주소 검증(`validateOfficialIntakeUrl`)과 설정 판정(`resolveOfficialIntake`)을 맡는다. 실제 목적지·스위치는 없다. |
 | `src/server/intake/officialIntakeConfig.ts` | `server-only`. `OFFICIAL_INTAKE_ENABLED=false`, `OFFICIAL_INTAKE_REGISTRY=[]`(동결). `officialIntakeFor(slug)` |
 | `src/components/OfficialIntakeCta.tsx` | `state:'on'`일 때만 링크를 그린다. 그 밖에는 `null`을 돌려준다. |
-| `src/app/page.tsx`, `src/components/ProductPage.tsx` | 서버 판정 결과를 표시하는 최소 변경. 기존 "온라인 상담 서비스 준비 중" 안내는 그대로다. |
+| `src/app/page.tsx`, `src/app/products/internet-tv/page.tsx`, `src/components/ProductPage.tsx` | 페이지(서버)가 판정하고 결과를 넘겨 표시하는 최소 변경. 화면 컴포넌트는 서버 모듈을 import하지 않는다(lint 규칙). 기존 "온라인 상담 서비스 준비 중" 안내는 그대로다. |
 
 ### 2-2. 동작 규칙
 - **목적지 출처:** 서버 코드 상수 등록부만 쓴다.

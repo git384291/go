@@ -124,7 +124,12 @@ test('OI9 화면 배선: 홈·상품 화면은 서버 상수 판정만 쓰고 �
   const product = readFileSync('src/components/ProductPage.tsx', 'utf8');
   const tv = readFileSync('src/app/products/internet-tv/page.tsx', 'utf8');
   assert.match(home, /officialIntakeFor\('internet-tv'\)/);
-  assert.match(product, /officialIntakeFor\(slug\)/);
+  assert.match(tv, /intake=\{officialIntakeFor\('internet-tv'\)\}/);
+  assert.ok(!/@\/server\//.test(product), '화면 컴포넌트는 서버 모듈을 import하지 않는다');
+  assert.match(product, /\{intake && <OfficialIntakeCta intake=\{intake\} \/>\}/);
+  for (const other of ['src/app/products/internet-phone/page.tsx', 'src/app/products/cctv-security/page.tsx']) {
+    assert.ok(!readFileSync(other, 'utf8').includes('officialIntakeFor'), other);
+  }
   for (const s of [home, product, tv]) assert.ok(!/searchParams|useSearchParams|headers\(|cookies\(/.test(s));
   const cta = readFileSync('src/components/OfficialIntakeCta.tsx', 'utf8');
   assert.ok(!/'use client'|<form|<input|<iframe|<script|<img|fetch\(|useEffect/.test(cta), '링크만 그린다');

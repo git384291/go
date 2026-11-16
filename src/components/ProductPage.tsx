@@ -3,14 +3,13 @@ import { PageShell } from '@/components/Site';
 import { isActiveSlug, productBySlug, type ProductSlug } from '@/content/products';
 import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
 import { OfficialIntakeCta } from '@/components/OfficialIntakeCta';
-import { officialIntakeFor } from '@/server/intake/officialIntakeConfig';
+import type { OfficialIntakeResult } from '@/content/officialIntake';
 
-export function ProductPage({ slug }: { slug: ProductSlug }) {
+// intake: 페이지(서버)가 서버 상수 등록부로 판정해 넘긴 결과. 넘기지 않으면 표시하지 않는다(화면 컴포넌트는 서버 모듈을 import하지 않음).
+export function ProductPage({ slug, intake }: { slug: ProductSlug; intake?: OfficialIntakeResult }) {
   // PHASE 1: 예약 상품 상세는 주소로 직접 들어와도 404. 화면 코드는 보존한다.
   if (!isActiveSlug(slug)) notFound();
   const p = productBySlug(slug);
-  // 총판 공식 접수처 연결: 서버 상수 등록부만 사용(현재 꺼짐·빈 등록부 → 아무것도 그리지 않음)
-  const intake = officialIntakeFor(slug);
   return (
     <PageShell>
       <section className="hero hero-compact">
@@ -18,7 +17,7 @@ export function ProductPage({ slug }: { slug: ProductSlug }) {
         <h1>{p.title}</h1>
         <p className="hero-lead">{p.lead}</p>
         <a className="btn btn-primary btn-lg" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
-        <OfficialIntakeCta intake={intake} />
+        {intake && <OfficialIntakeCta intake={intake} />}
       </section>
 
       <section className="section">
