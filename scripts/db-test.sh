@@ -433,3 +433,10 @@ if [ "${CI:-}" = true ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
   echo "== design draft 0007 (login attempt limits): local disposable DB + safety tests (CI only)"
   npm run -s test:design:login-limits || { echo "FAIL | 설계 초안 0007 시험 실패(기본 DB 검사와 별도)"; exit 1; }
 fi
+
+# 마스킹 목록 어댑터 PG 통합 시험(PM 6909719658): GitHub Actions CI에서만, 위 검사가 모두 통과한 뒤 별도 폐기 DB에서 실행.
+# 기존 집계(DB·설계 초안·안전장치)와 섞지 않고 자기 라벨로 보고한다. 실패하면 전체 DB 검사도 실패한다.
+if [ "${CI:-}" = true ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+  echo "== leads read adapter: real PostgreSQL integration (disposable DB, CI only)"
+  npm run -s test:integration:leads-read || { echo "FAIL | 목록 어댑터 PG 통합 시험 실패(기본 DB 검사와 별도)"; exit 1; }
+fi

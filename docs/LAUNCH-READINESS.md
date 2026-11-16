@@ -152,7 +152,12 @@
 - **DB 범위 정정안(변경 안 함, 승인 필요):** 현재 `api.list_leads`는 `assert_staff(..., ['owner','counselor','reviewer'])`이고 `where role in ('owner','reviewer') or assigned_to = actor`라서 **reviewer 전체 조회를 허용한다**(0002).
   - 서버 모듈이 더 좁게 적용하지만, 이는 DB 권한 변경이나 RLS 보강이 아니다.
   - 정정 시 새 migration으로 허용 역할에서 reviewer를 빼고, where 절을 `role = 'owner' or assigned_to = actor`로 바꾼다. 이와 함께 `catalog_audit` V13 본문 고정 갱신과 DB 시험(reviewer 거부)을 추가해야 한다.
-- **실행하지 않은 것:** 실제 DB 접속·조회, 연락처 열람(`reveal_contact`)·복호화·상태 변경, API·화면 배선, 실제 PostgreSQL·RLS·풀러·Auth 검증
+- **실제 로컬 PostgreSQL 통합 시험(PM 6909719658):** `scripts/integration/leads-read-store-pg.sh` + `tests/pg-integration/leads-read-store.pg.ts`(P1~P8)
+  - 폐기용 DB에 0001~0006 + zz_grants + 전용 가상 fixture를 넣고, app_server → `withRoleOn('staff')` → 어댑터 → `api.list_leads` 경로로 실행한다.
+  - 시험 클러스터 확인(TCP 미수신) 뒤 고유 DB를 만들고, 그 DB만 정리한다.
+  - CI에서 기존 검사 통과 뒤 별도 집계로 돌린다. 드라이버가 없으면 실패하며 SKIP으로 통과시키지 않는다.
+  - 관찰: DB 함수는 reviewer에게 전체 목록을 준다(P4에서 기록만 하고 고치지 않음).
+- **실행하지 않은 것:** 실고객·원격 DB 접속, 연락처 열람(`reveal_contact`)·복호화·상태 변경, `withRole` 기본 실행기·API·화면 배선, 원격 Auth·풀러·CA 검증
 
 ## 1. 현재 상태 (코드 기준, 2026-11-16 `f96ad8e`)
 | 항목 | 상태 |
