@@ -18,7 +18,7 @@ function check(name, cond, detail = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'} | ${name}${detail ? ` | ${detail}` : ''}`);
 }
 
-async function bundle({ enabled, siteKey }) {
+async function bundle({ enabled, siteKey, privacy = 'privacy-test-v1', dev = false }) {
   const entry = `
     import { StrictMode } from 'react';
     import { createRoot } from 'react-dom/client';
@@ -35,29 +35,39 @@ async function bundle({ enabled, siteKey }) {
     jsx: 'automatic',
     logLevel: 'silent',
     define: {
-      'process.env.NODE_ENV': '"production"',
+      'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'),
       'process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED': JSON.stringify(enabled ? 'true' : 'false'),
-      'process.env.NEXT_PUBLIC_PRIVACY_POLICY_VERSION': '"privacy-test-v1"',
+      'process.env.NEXT_PUBLIC_PRIVACY_POLICY_VERSION': JSON.stringify(privacy),
       'process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY': JSON.stringify(siteKey),
     },
   });
   return out.outputFiles[0].text;
 }
 
-// 가짜 Turnstile: 명시적 렌더 호출을 기록하고, 시험이 토큰 발급·만료·오류를 직접 일으킨다
+// 가짜 Turnstile: 명시적 렌더 호출을 기록한다. 시나리오별 설정(window.__tsConf, addInitScript로 주입)으로
+// 자동 토큰 발급(render·reset 뒤 SDK가 스스로 새 토큰을 줌)과 SDK 예외·render 실패를 흉내 낸다.
 const FAKE_TURNSTILE = `
-  window.__ts = { renders: 0, resets: 0, removes: 0, opts: null };
-  window.turnstile = {
-    render(el, opts) { window.__ts.renders++; window.__ts.opts = opts; el.setAttribute('data-fake-turnstile', '1'); return 'w' + window.__ts.renders; },
-    reset() { window.__ts.resets++; },
-    remove() { window.__ts.removes++; },
-  };`;
+  (function () {
+    var conf = window.__tsConf || {};
+    var st = window.__ts = { renders: 0, resets: 0, removes: 0, renderCalls: 0, opts: null, issued: 0, loads: (window.__ts && window.__ts.loads || 0) + 1 };
+    function issue() { if (!conf.auto) return; setTimeout(function () { st.issued++; st.opts && st.opts.callback('auto-tok-' + st.issued); }, 10); }
+    window.turnstile = {
+      render: function (el, opts) {
+        st.renderCalls++;
+        if (conf.renderFailTimes > 0) { conf.renderFailTimes--; if (conf.renderFailMode === 'undefined') return undefined; throw new Error('fake render failure'); }
+        st.renders++; st.opts = opts; el.setAttribute('data-fake-turnstile', '1'); issue(); return 'w' + st.renders;
+      },
+      reset: function () { st.resets++; if (conf.resetThrows) throw new Error('fake reset failure'); issue(); },
+      remove: function () { st.removes++; if (conf.removeThrows) throw new Error('fake remove failure'); },
+    };
+  })();`;
 
-async function openForm(browser, { enabled, siteKey, api, clock = false }) {
-  const js = await bundle({ enabled, siteKey });
+async function openForm(browser, { enabled, siteKey, api, clock = false, privacy, dev = false, tsConf = {}, scriptFailTimes = 0 }) {
+  const js = await bundle({ enabled, siteKey, privacy, dev });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
   const page = await ctx.newPage();
-  const seen = { external: [], turnstile: 0, api: [], pageErrors: [] };
+  const seen = { external: [], turnstile: 0, api: [], pageErrors: [], scriptFails: 0 };
+  await page.addInitScript((c) => { window.__tsConf = c; }, tsConf);
   page.on('pageerror', (e) => seen.pageErrors.push(e.message.split('\n')[0]));
   page.on('request', (r) => {
     const u = new URL(r.url());
@@ -76,7 +86,13 @@ async function openForm(browser, { enabled, siteKey, api, clock = false }) {
       seen.api.push(body);
       return api(route, body, seen.api.length);
     }
-    if (u.host === TS_HOST && u.pathname === '/turnstile/v0/api.js') return route.fulfill({ contentType: 'text/javascript', body: FAKE_TURNSTILE });
+    if (u.host === TS_HOST && u.pathname === '/turnstile/v0/api.js') {
+      if (seen.scriptFails < scriptFailTimes) {
+        seen.scriptFails++;
+        return route.abort('failed'); // 초기 스크립트 로딩 실패
+      }
+      return route.fulfill({ contentType: 'text/javascript', body: FAKE_TURNSTILE });
+    }
     return route.abort('blockedbyclient');
   });
   if (clock) await page.clock.install();
@@ -155,8 +171,8 @@ async function scenarioMain(browser) {
   await token(page, 'tok-1');
   await submitAndSettle(page, seen);
   const k1 = seen.api[0]?.idempotencyKey;
-  check('F6 응답 유실: 일시 장애 안내, 입력 보존, 전송 잠금 해제, 봇 토큰 재발급(reset) 요청',
-    seen.api.length === 1 && (await resultText(page)).includes('일시적인 문제') && (await page.inputValue('input[name=phone]')) === '010-0000-0001' &&
+  check('F6 응답 유실: 결과 미확인 안내(접수 안 됨 단정 없음), 입력 보존, 전송 잠금 해제, 봇 토큰 재발급(reset) 요청',
+    seen.api.length === 1 && (await resultText(page)).includes('확인하지 못했습니다') && !(await resultText(page)).includes('접수되지 않았') && (await page.inputValue('input[name=phone]')) === '010-0000-0001' &&
       !(await page.evaluate(() => document.querySelector('fieldset').disabled)) && (await page.evaluate(() => window.__ts.resets)) === 1 && seen.api[0].turnstileToken === 'tok-1');
 
   await page.click('button[type=submit]');
@@ -175,8 +191,8 @@ async function scenarioMain(browser) {
   await token(page, 'tok-3');
   await submitAndSettle(page, seen);
   const bodyText = await page.locator('body').innerText();
-  check('F10 예상 못한 응답(HTML 500): 일시 장애 고정 문구, 응답 원문·태그 반사 없음',
-    (await resultText(page)).includes('일시적인 문제') && !bodyText.includes('pii.customers') && (await page.locator('form img').count()) === 0 && seen.api[2].idempotencyKey === k1);
+  check('F10 예상 못한 응답(HTML 500): 결과 미확인 고정 문구, 응답 원문·태그 반사 없음',
+    (await resultText(page)).includes('확인하지 못했습니다') && !bodyText.includes('pii.customers') && (await page.locator('form img').count()) === 0 && seen.api[2].idempotencyKey === k1);
 
   // 내용 변경 → 새 키 → 202
   mode = 'ok';
@@ -256,8 +272,8 @@ async function scenarioTimeout(browser) {
   await page.waitForFunction(() => document.querySelector('fieldset').disabled);
   await page.clock.runFor(16000);
   await page.waitForFunction(() => document.querySelector('.form-result.error'));
-  check('F21 응답 없음 15초 → 시간 초과 안내, 잠금 해제, 입력 보존',
-    (await resultText(page)).includes('일시적인 문제') && !(await page.evaluate(() => document.querySelector('fieldset').disabled)) && (await page.inputValue('input[name=name]')) === '테스트' && seen.api.length === 1);
+  check('F21 응답 없음 15초 → 결과 미확인 안내, 잠금 해제, 입력 보존',
+    (await resultText(page)).includes('확인하지 못했습니다') && !(await page.evaluate(() => document.querySelector('fieldset').disabled)) && (await page.inputValue('input[name=name]')) === '테스트' && seen.api.length === 1);
   await ctx.close();
 }
 
@@ -282,6 +298,119 @@ async function scenarioClosed(browser) {
   }
 }
 
+const recoverBtn = (page) => page.locator('.bot-recover button');
+const waitToken = (page, n) => page.waitForFunction((k) => window.__ts && window.__ts.issued >= k, n);
+
+/** PM 6908334832 1항: 만료·오류 → 사용자의 '다시 확인' → SDK reset → SDK가 새 토큰 발급 → 제출(시험이 토큰을 직접 넣지 않음) */
+async function scenarioBotRecovery(browser) {
+  const { page, ctx, seen } = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', api: reply(202, { ok: true }), tsConf: { auto: true } });
+  await waitToken(page, 1);
+  await fill(page);
+  await page.evaluate(() => window.__ts.opts['expired-callback']());
+  await page.click('button[type=submit]');
+  check('F25 만료 뒤 제출: 전송 0회, 다시 확인 버튼 표시', seen.api.length === 0 && (await recoverBtn(page).count()) === 1);
+  const resets0 = await page.evaluate(() => window.__ts.resets);
+  await recoverBtn(page).click();
+  await waitToken(page, 2);
+  check('F26 다시 확인 → SDK reset 1회 → SDK가 새 토큰 발급, 버튼 사라짐',
+    (await page.evaluate(() => window.__ts.resets)) === resets0 + 1 && (await recoverBtn(page).count()) === 0);
+  await page.evaluate(() => window.__ts.opts['error-callback']());
+  await page.waitForFunction(() => document.querySelector('.bot-recover'));
+  await recoverBtn(page).click();
+  await waitToken(page, 3);
+  await submitAndSettle(page, seen);
+  check('F27 오류 → 다시 확인 → 새 토큰으로 접수(전송 토큰 = SDK 최신 발급)',
+    seen.api.length === 1 && seen.api[0].turnstileToken === 'auto-tok-3' && (await resultText(page)).includes('접수되었습니다'));
+  check('F27b 페이지 예외 0', seen.pageErrors.length === 0, seen.pageErrors.join(','));
+  await ctx.close();
+}
+
+/** 1항: 초기 스크립트 로딩 실패 → 오류·재시도(실패 태그 정리 후 새로 삽입, 중복 없음) */
+async function scenarioScriptFailure(browser) {
+  const { page, ctx, seen } = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', api: reply(202, { ok: true }), tsConf: { auto: true }, scriptFailTimes: 1 });
+  await page.waitForFunction(() => document.querySelector('.bot-recover'));
+  const tags1 = await page.evaluate(() => document.querySelectorAll('script[src*="turnstile"]').length);
+  check('F28 초기 스크립트 실패: 무한 로딩 대신 고정 오류·다시 확인, 실패 태그 정리', (await recoverBtn(page).count()) === 1 && tags1 === 0 && seen.turnstile === 1, `tags=${tags1} req=${seen.turnstile}`);
+  await recoverBtn(page).click();
+  await waitToken(page, 1);
+  const tags2 = await page.evaluate(() => document.querySelectorAll('script[src*="turnstile"]').length);
+  check('F29 다시 확인 → 스크립트 새로 1개 삽입·로드 → render → 새 토큰', tags2 === 1 && seen.turnstile === 2 && (await page.evaluate(() => window.__ts.renders)) === 1, `tags=${tags2} req=${seen.turnstile}`);
+  await fill(page);
+  await submitAndSettle(page, seen);
+  check('F30 복구 뒤 접수', seen.api.length === 1 && seen.api[0].turnstileToken === 'auto-tok-1');
+  await ctx.close();
+}
+
+/** 1항: render 예외·ID 미반환 → 오류·재마운트 */
+async function scenarioRenderFailure(browser) {
+  for (const mode of ['throw', 'undefined']) {
+    const { page, ctx, seen } = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', api: reply(202, { ok: true }), tsConf: { auto: true, renderFailTimes: 1, renderFailMode: mode } });
+    await page.waitForFunction(() => document.querySelector('.bot-recover'));
+    check(`F31 render ${mode}: 고정 오류·다시 확인(무한 로딩 없음), 페이지 예외 0`, (await recoverBtn(page).count()) === 1 && seen.pageErrors.length === 0);
+    await recoverBtn(page).click();
+    await waitToken(page, 1);
+    check(`F32 render ${mode}: 다시 확인 → 재마운트 render 성공 → 새 토큰, 스크립트 1개`,
+      (await page.evaluate(() => window.__ts.renderCalls)) === 2 && (await page.evaluate(() => document.querySelectorAll('script[src*="turnstile"]').length)) === 1);
+    await ctx.close();
+  }
+}
+
+/** 2항: SDK reset·remove 예외가 폼을 잠그지 않음 */
+async function scenarioSdkThrows(browser) {
+  let mode = 'abort';
+  const { page, ctx, seen } = await openForm(browser, {
+    enabled: true,
+    siteKey: 'test-only-site-key',
+    tsConf: { auto: true, resetThrows: true, removeThrows: true },
+    api: (route) => (mode === 'abort' ? route.abort('failed') : reply(202, { ok: true })(route)),
+  });
+  await waitToken(page, 1);
+  await fill(page);
+  await submitAndSettle(page, seen);
+  const st = await page.evaluate(() => ({ locked: document.querySelector('fieldset').disabled, busy: document.querySelector('form').getAttribute('aria-busy') }));
+  check('F33 reset 예외 + 응답 유실: 잠금 해제·aria-busy 해제·결과 문구·입력 보존·페이지 예외 0',
+    !st.locked && st.busy !== 'true' && (await resultText(page)).includes('확인하지 못했습니다') && (await page.inputValue('input[name=phone]')) === '010-0000-0001' && seen.pageErrors.length === 0,
+    `${JSON.stringify(st)} err=${seen.pageErrors.join(',')}`);
+  // reset 실패 → 재마운트(render 2회째)로 새 토큰. 새 토큰을 받은 뒤에만 다시 보낸다
+  await page.waitForFunction(() => window.__ts.renders >= 2 && window.__ts.issued >= 2);
+  const beforeRetry = seen.api.length;
+  mode = 'ok';
+  await submitAndSettle(page, seen);
+  check('F34 reset 실패 → 재마운트·새 토큰으로 같은 키 재시도 → 접수, remove 예외에도 페이지 예외 0',
+    beforeRetry === 1 && seen.api.length === 2 && seen.api[1].idempotencyKey === seen.api[0].idempotencyKey && seen.api[1].turnstileToken !== seen.api[0].turnstileToken &&
+      (await resultText(page)).includes('접수되었습니다') && seen.pageErrors.length === 0, `api=${seen.api.length} err=${seen.pageErrors.join(',')}`);
+  await ctx.close();
+}
+
+/** 3항: 처리방침 버전·공개 키가 비거나 공백이면 위젯·접수 요청 0 */
+async function scenarioNotReady(browser) {
+  for (const [label, privacy, siteKey] of [['처리방침 버전 빈 값', '', 'test-only-site-key'], ['처리방침 버전 공백', '   ', 'test-only-site-key'], ['공개 키 공백', 'privacy-test-v1', '   ']]) {
+    const { page, ctx, seen } = await openForm(browser, { enabled: true, siteKey, privacy, api: reply(202, { ok: true }), tsConf: { auto: true } });
+    await page.waitForTimeout(300);
+    await fill(page);
+    await page.click('button[type=submit]');
+    await page.waitForTimeout(200);
+    check(`F35 ${label}: 위젯 외부 요청 0·접수 요청 0·준비 안 됨 안내`,
+      seen.turnstile === 0 && seen.api.length === 0 && (await resultText(page)).includes('지금은 신청을 받을 수 없습니다'), `ts=${seen.turnstile} api=${seen.api.length}`);
+    await ctx.close();
+  }
+}
+
+/** development 번들 + StrictMode: effect 정리·재마운트에서 위젯·스크립트 중복 없음(관찰값 그대로 보고) */
+async function scenarioDevStrict(browser) {
+  const { page, ctx, seen } = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', dev: true, api: reply(202, { ok: true }), tsConf: { auto: true } });
+  await waitToken(page, 1);
+  await page.waitForTimeout(200);
+  const o = await page.evaluate(() => ({ renderCalls: window.__ts.renderCalls, renders: window.__ts.renders, removes: window.__ts.removes, loads: window.__ts.loads, tags: document.querySelectorAll('script[src*="turnstile"]').length, boxes: document.querySelectorAll('[data-fake-turnstile]').length }));
+  const isDev = await page.evaluate(() => typeof document.querySelector('form') !== 'undefined');
+  check('F36 development·StrictMode: 스크립트 요청 1·태그 1·SDK 실행 1, 위젯 render 1·표시 1(관찰값 기록)',
+    isDev && seen.turnstile === 1 && o.tags === 1 && o.loads === 1 && o.renders === 1 && o.boxes === 1, JSON.stringify({ ...o, scriptRequests: seen.turnstile }));
+  await fill(page);
+  await submitAndSettle(page, seen);
+  check('F37 development·StrictMode: 접수 1회, 페이지 예외 0', seen.api.length === 1 && seen.pageErrors.length === 0, seen.pageErrors.join(','));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 try {
   await scenarioMain(browser);
@@ -289,6 +418,12 @@ try {
   await scenarioBotStates(browser);
   await scenarioTimeout(browser);
   await scenarioClosed(browser);
+  await scenarioBotRecovery(browser);
+  await scenarioScriptFailure(browser);
+  await scenarioRenderFailure(browser);
+  await scenarioSdkThrows(browser);
+  await scenarioNotReady(browser);
+  await scenarioDevStrict(browser);
 } catch (e) {
   check('시나리오 실행 중 예외 없음', false, String(e && e.message ? e.message.split('\n')[0] : e));
 } finally {

@@ -83,7 +83,7 @@ export class IdempotencyKeeper {
   }
 }
 
-export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'rate' | 'bot' | 'not_ready' | 'temporary';
+export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'rate' | 'bot' | 'not_ready' | 'temporary' | 'unknown';
 export type SubmitOutcome = { kind: OutcomeKind; message: string; field?: ConsultField; retryable: boolean };
 
 export const OUTCOME_MESSAGES = {
@@ -95,6 +95,8 @@ export const OUTCOME_MESSAGES = {
   bot_pending: '자동 입력 방지 확인을 완료한 뒤 신청해 주세요.',
   not_ready: '지금은 신청을 받을 수 없습니다.',
   temporary: '일시적인 문제로 접수되지 않았습니다. 입력 내용은 그대로 있으니 다시 시도해 주세요.',
+  // 응답 없음·시간 초과·해석 불가: 저장 여부를 모른다. 접수됐다/안 됐다고 단정하지 않는다
+  unknown: '접수 결과를 확인하지 못했습니다. 입력 내용은 그대로 있으니 같은 내용으로 다시 시도해 주세요.',
 } as const;
 
 /** 서버가 보내는 오류 코드 허용 목록 → 분류. 목록 밖 코드는 일시 장애로 본다(원문을 보여 주지 않는다) */
@@ -115,7 +117,7 @@ const CODE_KIND: Readonly<Record<string, { kind: OutcomeKind; field?: ConsultFie
   LOCAL_MODE_NOT_ALLOWED_ON_VERCEL: { kind: 'not_ready' },
   DATABASE_URL_INVALID: { kind: 'not_ready' },
   NON_LOCAL_DATABASE: { kind: 'not_ready' },
-  INTERNAL: { kind: 'temporary' },
+  INTERNAL: { kind: 'unknown' }, // 서버 내부 오류: 저장 여부를 화면에서 단정하지 않는다
 };
 
 function outcome(kind: OutcomeKind, field?: ConsultField): SubmitOutcome {
@@ -129,6 +131,8 @@ function outcome(kind: OutcomeKind, field?: ConsultField): SubmitOutcome {
     }
     case 'temporary':
       return { kind, message: OUTCOME_MESSAGES.temporary, retryable: true };
+    case 'unknown':
+      return { kind, message: OUTCOME_MESSAGES.unknown, retryable: true };
     case 'rate':
       return { kind, message: OUTCOME_MESSAGES.rate, retryable: true };
     case 'bot':
@@ -142,8 +146,8 @@ function outcome(kind: OutcomeKind, field?: ConsultField): SubmitOutcome {
   }
 }
 
-/** 네트워크 실패·시간 초과(응답 없음) */
-export const NETWORK_FAILURE: SubmitOutcome = outcome('temporary');
+/** 네트워크 실패·시간 초과(응답 없음): 서버 저장 여부 미확인 */
+export const NETWORK_FAILURE: SubmitOutcome = outcome('unknown');
 
 /**
  * 응답을 고정 분류로 바꾼다. 202만 접수 성공이고, 신규·중복을 구분하지 않는다.
@@ -156,7 +160,8 @@ export function classifyResponse(status: number, body: unknown): SubmitOutcome {
   if (known) return outcome(known.kind, known.field);
   if (status === 429) return outcome('rate');
   if (status === 503) return outcome('not_ready');
-  return outcome('temporary');
+  // 허용 목록 밖·해석 불가 응답: 서버가 무엇을 했는지 모르므로 미확인으로 안내한다
+  return outcome('unknown');
 }
 
 /** 응답 본문을 안전하게 읽는다(비JSON·과대 본문은 무시). 원문 문자열은 돌려주지 않는다 */

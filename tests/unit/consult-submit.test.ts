@@ -6,6 +6,7 @@ import {
   firstErrorField,
   FIELD_MESSAGES,
   IdempotencyKeeper,
+  NETWORK_FAILURE,
   normalizePhoneDigits,
   OUTCOME_MESSAGES,
   readResponseBody,
@@ -61,7 +62,7 @@ test('C3 요청 키: 같은 내용 재시도 = 같은 키, 내용이 바뀌면 �
 test('C4 응답 분류: 202만 접수, 허용 목록 코드만 고정 문구, 목록 밖·원문은 반사 안 함', () => {
   assert.equal(classifyResponse(202, null).kind, 'accepted');
   assert.equal(classifyResponse(202, { ok: false, code: 'X' }).kind, 'accepted', '202는 본문과 관계없이 신규·중복 구분 없는 접수');
-  assert.equal(classifyResponse(200, { ok: true }).kind, 'temporary', '202가 아닌 2xx는 접수로 보지 않음');
+  assert.equal(classifyResponse(200, { ok: true }).kind, 'unknown', '202가 아닌 2xx는 접수로 보지 않음(결과 미확인)');
   const table: [number, string, string, string?][] = [
     [400, 'INVALID_PHONE', 'field', 'phone'],
     [400, 'CONSENT_REQUIRED', 'field', 'consent'],
@@ -73,7 +74,7 @@ test('C4 응답 분류: 202만 접수, 허용 목록 코드만 고정 문구, �
     [503, 'SERVICE_NOT_READY', 'not_ready'],
     [503, 'LEAD_INTAKE_DISABLED', 'not_ready'],
     [403, 'PRODUCT_NOT_ACTIVE', 'not_ready'],
-    [500, 'INTERNAL', 'temporary'],
+    [500, 'INTERNAL', 'unknown'],
   ];
   for (const [status, code, kind, field] of table) {
     const o = classifyResponse(status, { ok: false, code });
@@ -90,10 +91,14 @@ test('C4 응답 분류: 202만 접수, 허용 목록 코드만 고정 문구, �
     }
   }
   for (const body of [null, 'INVALID_PHONE', ['INVALID_PHONE'], 1, { code: 1 }]) {
-    assert.equal(classifyResponse(400, body).kind, 'temporary', JSON.stringify(body));
+    assert.equal(classifyResponse(400, body).kind, 'unknown', JSON.stringify(body));
   }
   assert.equal(classifyResponse(429, null).kind, 'rate');
   assert.equal(classifyResponse(503, null).kind, 'not_ready');
+  // 응답 유실·해석 불가는 '접수되지 않았습니다'라고 단정하지 않는다(PM 6908334832 4항)
+  assert.equal(NETWORK_FAILURE.kind, 'unknown');
+  assert.ok(NETWORK_FAILURE.message.includes('확인하지 못했습니다') && !NETWORK_FAILURE.message.includes('접수되지 않았'));
+  assert.ok(!classifyResponse(502, '<html>bad gateway</html>').message.includes('접수되지 않았'));
   for (const m of Object.values(OUTCOME_MESSAGES)) assert.ok(!/개통|가입 완료|확정|분 안에|오늘 중/.test(m), `과장 약속 금지: ${m}`);
 });
 

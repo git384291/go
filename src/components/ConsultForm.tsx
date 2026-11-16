@@ -20,9 +20,9 @@ import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './T
 
 // REV-004: 실제 고객정보 수집은 재검수 통과 전까지 비활성. 화면만 제공한다.
 const FORM_ENABLED = process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED === 'true';
-const PRIVACY_VERSION = process.env.NEXT_PUBLIC_PRIVACY_POLICY_VERSION ?? '';
+const PRIVACY_VERSION = (process.env.NEXT_PUBLIC_PRIVACY_POLICY_VERSION ?? '').trim();
 // 공개 사이트 키(비밀 아님). 비어 있으면 위젯·스크립트를 만들지 않고 전송하지 않는다(기본 비어 있음).
-const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
+const TURNSTILE_SITE_KEY = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim();
 
 // PHASE 1: 이 파일은 브라우저로 내려가는 코드다. 예약 상품의 이름·값을 여기에 두지 않는다.
 // 선택지는 서버(상담 페이지)가 활성 상품만 골라 넘긴다. 예약 상품을 포함한 전체 선택지는
@@ -41,12 +41,15 @@ const newKey = (): string => {
 // kakaoUrl: 외부 상담 채널 주소. 서버가 채널을 열지 않으면 null을 넘긴다(PHASE 1 보완: 현재 null).
 export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string | null }) {
   const hasOption = options.length > 0;
-  const botEnabled = FORM_ENABLED && hasOption && TURNSTILE_SITE_KEY !== '';
+  // 공개 준비값(사이트 키·처리방침 버전)이 하나라도 비면 위젯 외부 요청과 접수 요청을 모두 만들지 않는다
+  const botEnabled = FORM_ENABLED && hasOption && TURNSTILE_SITE_KEY !== '' && PRIVACY_VERSION !== '';
   const [consent, setConsent] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [message, setMessage] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [botStatus, setBotStatus] = useState<TurnstileStatus>('loading');
+  // 위젯 재마운트 번호: 초기 로딩·render 실패나 SDK reset 실패 때 바꿔 스크립트부터 다시 시도한다
+  const [widgetMount, setWidgetMount] = useState(0);
 
   // 동기 잠금: 상태 반영(재렌더) 전에 들어오는 빠른 이중 클릭·Enter 재제출을 막는다
   const inFlight = useRef(false);
@@ -97,6 +100,21 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
     }
   }
 
+  /** 새 봇 토큰 받기. 그려진 위젯은 reset, 실패·미완료 위젯은 재마운트. 예외를 밖으로 내보내지 않는다 */
+  function refreshBot() {
+    botToken.current = null;
+    let ok = false;
+    try {
+      ok = widget.current?.reset() ?? false;
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      setBotStatus('loading');
+      setWidgetMount((n) => n + 1);
+    }
+  }
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (inFlight.current || accepted.current) return;
@@ -131,7 +149,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       const token = botToken.current;
       if (!token) {
         setPhase('error');
-        setMessage(OUTCOME_MESSAGES.bot_pending);
+        setMessage(botStatus === 'expired' || botStatus === 'error' ? OUTCOME_MESSAGES.bot : OUTCOME_MESSAGES.bot_pending);
         return;
       }
 
@@ -170,8 +188,9 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       } finally {
         clearTimeout(timer);
       }
-      if (result.kind !== 'accepted') widget.current?.reset();
+      // 폼 상태부터 정리한다(위젯 SDK가 실패해도 잠금이 남지 않게)
       finish(result);
+      if (result.kind !== 'accepted') refreshBot();
     } finally {
       inFlight.current = false;
     }
@@ -281,6 +300,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
 
         {botEnabled && phase !== 'done' && (
           <TurnstileWidget
+            key={widgetMount}
             ref={widget}
             siteKey={TURNSTILE_SITE_KEY}
             onToken={(t) => {
@@ -289,8 +309,13 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
             onStatus={setBotStatus}
           />
         )}
-        {botEnabled && botStatus === 'expired' && phase !== 'done' && (
-          <p className="field-hint" role="status">자동 입력 방지 확인 시간이 지났습니다. 다시 확인해 주세요.</p>
+        {botEnabled && phase !== 'done' && (botStatus === 'expired' || botStatus === 'error') && (
+          <div className="bot-recover" role="status">
+            <p className="field-hint">
+              {botStatus === 'expired' ? '자동 입력 방지 확인 시간이 지났습니다.' : '자동 입력 방지 확인을 불러오지 못했습니다.'}
+            </p>
+            <button type="button" className="btn btn-block" onClick={refreshBot}>자동 입력 방지 다시 확인</button>
+          </div>
         )}
 
         <button className="btn btn-primary btn-block" type="submit" disabled={!hasOption}>

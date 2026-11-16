@@ -152,6 +152,7 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
 .field input[aria-invalid='true'] { border-color: #b91c1c; }
 .check input[aria-invalid='true'] { outline: 2px solid #b91c1c; outline-offset: 2px; }
 .turnstile-box { min-height: 65px; }
+.bot-recover { display: grid; gap: 8px; }
 
 /* admin */
 .admin { min-height: 100vh; background: var(--wash); padding-bottom: 24px; }

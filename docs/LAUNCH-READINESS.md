@@ -52,11 +52,11 @@
 |---|---|---|---|---|---|---|
 | ① 개인정보 고지 확정(처리 주체·목적·항목·보존 기간·제3자(총판) 제공·위탁·파기·문의처) | △ 동의 체크·버전 검사만 | ○ 버전 불일치 거부 시험 | × | × | 사용자 + PM(내용 확정), Claude(게시) | `src/app/privacy/page.tsx`, `src/components/ConsultForm.tsx`(동의 문구·버전), `core.settings`의 `privacy_policy_version`·`lead_retention_days`(운영 값 입력, 승인 필요) |
 | ② 총판 제공 동의 분리 | × | × | × | × | PM(제공이 필요한지 결정) → Claude | 제공이 필요하면 별도 동의 필드: `intake.ts` 스키마·서명 필드, `create_lead` 인자 → **migration 필요(승인 대상)** |
-| ③ 봇 방지 | ○ 서버 검증 + 위젯(`TurnstileWidget.tsx`, 명시적 렌더·`action: 'lead_form'`, 공개 키 없으면 미생성) | ○ 경로 R6~R9, 폼 상호작용 F1·F5~F8·F18~F22(가짜 위젯) | × 실제 Cloudflare 미연결 | × | 사용자(Cloudflare 계정·사이트 키 발급) | 코드 완료(PM 6907697718 B). CSP는 이미 `challenges.cloudflare.com`의 script-src·frame-src를 허용하므로 바꾸지 않았다 |
+| ③ 봇 방지 | ○ 서버 검증 + 위젯(`TurnstileWidget.tsx`, 명시적 렌더·`action: 'lead_form'`, 공개 키 없으면 미생성) | ○ 경로 R6~R9, 폼 상호작용 F1·F5~F8·F18~F22(가짜 위젯) | × 실제 Cloudflare 미연결 | × | 사용자(Cloudflare 계정·사이트 키 발급) | 코드 작성·가상 검증(PM 6907697718 B, 6908334832 보완). PM 재검수 대기, 실연결 미검증. CSP는 이미 `challenges.cloudflare.com`의 script-src·frame-src를 허용하므로 바꾸지 않았다 |
 | ④ 접수 저장(운영 DB) | ○ API·DB 함수 | ○ DB 176·경로 시험, 로컬 가상 DB | △ **기존 스키마(0001~0006 + zz_grants)는 fideon-dev에 `fideon_phase1_initial`로 이미 적용됨.** 실제 접수·Auth·풀러·CA 실연결은 미검증(새 프로젝트·중복 초기화 불필요) | × | 사용자(원격 프로젝트·키), PM(승인), Claude(운영 게이트) | `intake.ts`의 `leadIntakeGate`에 운영 모드 추가(원격 DB + 필수 키·설정이 모두 있을 때만, 기본은 닫힘) |
-| ⑤ 저장 성공/실패의 정확한 안내 | ○ 허용 목록 코드만 고정 문구(`consultSubmit.ts`), 202만 성공 | ○ 단위 C4·C5, 폼 F6·F9·F10·F12 | × | × | Claude | 코드 완료(PM 6907697718 A) |
-| ⑥ 중복 신청 방지 | ○ 같은 내용 재시도 = 같은 키, 내용 변경 = 새 키. 동기 전송 잠금, 성공 후 잠금 + DB 번호 기준 7일 병합·키 unique | ○ 단위 C3, 폼 F8·F11·F13·F16·F17, DB 시험 | × | × | Claude | 코드 완료. 한계는 0-3 참고 |
-| ⑦ 모바일 입력·오류 복구 | ○ 필드별 오류·`aria-invalid`·오류 연결·첫 오류 초점, 입력 보존, 15초 시간 초과 후 재시도 | ○ 폼 F2~F4·F6·F21(390px 폭), 미리보기 폭 검사 | × 실기기 미확인 | × | Claude | 코드 완료 |
+| ⑤ 저장 성공/실패의 정확한 안내 | ○ 허용 목록 코드만 고정 문구(`consultSubmit.ts`), 202만 성공 | ○ 단위 C4·C5, 폼 F6·F9·F10·F12 | × | × | Claude | 코드 작성·가상 검증(PM 6907697718 A, 6908334832 보완). PM 재검수 대기, 실연결 미검증 |
+| ⑥ 중복 신청 방지 | ○ 같은 내용 재시도 = 같은 키, 내용 변경 = 새 키. 동기 전송 잠금, 성공 후 잠금 + DB 번호 기준 7일 병합·키 unique | ○ 단위 C3, 폼 F8·F11·F13·F16·F17, DB 시험 | × | × | Claude | 코드 작성·가상 검증, PM 재검수 대기. 한계는 0-3 참고 |
+| ⑦ 모바일 입력·오류 복구 | ○ 필드별 오류·`aria-invalid`·오류 연결·첫 오류 초점, 입력 보존, 15초 시간 초과 후 재시도 | ○ 폼 F2~F4·F6·F21(390px 폭), 미리보기 폭 검사 | × 실기기 미확인 | × | Claude | 코드 작성·가상 검증, PM 재검수 대기 |
 | ⑧ 직원 접근(실Auth·TOTP) | △ 서버 판정·세션 코드 | ○ 경로·단위 시험 | × fideon-dev 연결 미검증 | × | 사용자(Supabase 계정·TOTP 등록·대표 계정), PM(승인), Claude(연결 검증 절차) | 원격 Auth 설정·계정 생성은 승인 대상. 코드는 `ADMIN-AUTH-OPERATIONS.md` 3절 체크리스트 대로 |
 | ⑨ 관리자 실제 리드 조회 | × 가상 데이터만 | △ 가상 데이터 권한 시험 | × | × | Claude(코드), PM(승인) | `src/server/admin/leadsApi.ts`·`mockLeads` 대체: `api.list_leads`·`api.reveal_contact` 호출(기본 마스킹, 열람은 사유 + 감사), `src/app/admin/page.tsx` 실데이터 보기 |
 | ⑩ 로그인 시도 제한 | △ 설계 초안 0007(비활성) | ○ 초안 57·안전 6 | × | × | PM(승인), Claude | 0007 정식 migration·로그인 경로 연결(승인 대상) |
@@ -105,6 +105,15 @@
   - 폼 꺼짐(기본) 또는 공개 사이트 키 없음(기본): Turnstile 스크립트·iframe·외부 요청을 만들지 않는다.
   - 키가 없으면 접수 요청도 보내지 않는다.
 
+**보완(PM 6908334832)**
+- **봇 확인 복구:** 만료·오류·초기 스크립트 실패·render 실패(예외·ID 미반환)가 나면 고정 오류와 "자동 입력 방지 다시 확인" 버튼을 보여준다.
+  - 그려진 위젯은 SDK reset으로 다시 확인한다.
+  - reset이 실패하거나 위젯이 미완료 상태면 재마운트한다. 실패한 스크립트 태그를 지운 뒤 새로 1개만 넣는다.
+  - 로딩이 20초를 넘기면 오류로 처리한다. 정리된 뒤 늦게 도착한 콜백은 무시한다.
+- **SDK 예외 격리:** reset·remove·render 예외는 밖으로 나가지 않는다. 폼은 결과 처리(잠금 해제·문구)를 먼저 한 뒤 새 토큰을 요청하고, 새 토큰을 받기 전에는 보내지 않는다.
+- **공개 준비값:** 사이트 키나 처리방침 버전이 비거나 공백이면 위젯 외부 요청과 접수 요청이 모두 0이다.
+- **결과 미확인 안내:** 응답 없음·시간 초과·해석 불가·목록 밖 코드·`INTERNAL`에는 "접수 결과를 확인하지 못했습니다"를 보여준다. 같은 내용이면 같은 키로 재시도한다. 확정된 차단(봇 확인 불가·입력 오류 등)과 구분한다.
+
 **서버 경계**
 - JSON 루트가 객체가 아니면 400 `INVALID_JSON`을 돌려준다.
 - 봇 확인의 네트워크 실패·시간 초과·HTTP 오류·비JSON·형태 오류는 503 `BOT_CHECK_UNAVAILABLE`을 돌려주고, 저장으로 진행하지 않는다.
@@ -120,7 +129,7 @@
 - 이번 묶음은 DB 멱등·동의 스키마를 바꾸지 않았다.
 
 **검증 구분**
-- 단위 C1~C5, 경로 R6~R9, 실제 렌더링 폼 상호작용 F1~F24(`scripts/preview/form-interaction.mjs`)를 실행했다.
+- 단위 C1~C5, 경로 R6~R9, 실제 렌더링 폼 상호작용 F1~F37(46건, `scripts/preview/form-interaction.mjs`)을 실행했다. production 번들과 별도의 development·StrictMode 번들(F36·F37)로 나눠 돌렸다.
   - 폼 상호작용은 esbuild 번들 + Chromium + 가짜 `/api/leads`·가짜 Turnstile로 돌렸다. 실제 외부 요청은 차단했다.
   - `npm run test:preview`의 마지막 단계에서 실행된다.
 - **실제 Cloudflare·실제 DB 저장·실기기 시험은 하지 않았다.** CI 통과는 실접수·출시 완료가 아니다.
