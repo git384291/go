@@ -11,9 +11,14 @@
 // 출력: 고정 검사 ID·상태·허용 값(역할 이름·버전 숫자·boolean)만. 오류 원문·URL·호스트·인증서·키는 출력하지 않는다.
 import { pathToFileURL } from 'node:url';
 
-/** @typedef {{ host: string | null, port: number | null, database: string | null, user: string | null }} ProbeExpect */
+/**
+ * loginUser: 풀러 접속 username(예: 프로젝트 suffix가 붙은 이름). dbRole: 접속 뒤 DB의 current_user(예: app_server). 둘을 따로 대조한다.
+ * @typedef {{ host: string | null, port: number | null, database: string | null, loginUser: string | null, dbRole: string | null }} ProbeExpect
+ */
 /** @type {Readonly<ProbeExpect>} */
-export const PROBE_EXPECT = Object.freeze({ host: null, port: null, database: null, user: null });
+export const PROBE_EXPECT = Object.freeze({ host: null, port: null, database: null, loginUser: null, dbRole: null });
+/** 출력에 실을 수 있는 역할 이름(고정 허용 목록). 그 밖의 값은 'invalid'로만 표시 */
+export const OUTPUT_ROLES = Object.freeze(['app_server', 'app_staff']);
 export const ENV_NAME_RE = /^FIDEON_PROBE_[A-Z0-9_]{1,40}$/;
 
 /** 고정 SQL 허용 목록. 이 밖의 문장은 실행하지 않는다(모두 읽기·세션 설정·트랜잭션 제어) */
@@ -53,7 +58,7 @@ const INTERNAL_SUFFIX = /(\.local|\.internal|\.localhost|\.lan|\.home|\.corp)$/i
 /** 네트워크 호출 전 대상 검증. 기대값과 정확히 같은 호스트·포트·DB·역할만 */
 /** @param {unknown} rawUrl @param {Readonly<ProbeExpect>} [expect] */
 export function validateTarget(rawUrl, expect = PROBE_EXPECT) {
-  if (!expect || !expect.host || !expect.database || !expect.user || !expect.port) return { ok: false, code: 'EXPECT_UNSET' };
+  if (!expect || !expect.host || !expect.database || !expect.loginUser || !expect.dbRole || !expect.port) return { ok: false, code: 'EXPECT_UNSET' };
   if (typeof rawUrl !== 'string' || rawUrl.length === 0 || rawUrl.length > 1024) return { ok: false, code: 'URL_MISSING' };
   let u;
   try { u = new URL(rawUrl); } catch { return { ok: false, code: 'URL_INVALID' }; }
@@ -65,11 +70,16 @@ export function validateTarget(rawUrl, expect = PROBE_EXPECT) {
   const port = u.port === '' ? 5432 : Number(u.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, code: 'PORT_INVALID' };
   if (port !== expect.port) return { ok: false, code: 'PORT_MISMATCH' };
-  const database = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  let database, user, password;
+  try {
+    database = decodeURIComponent(u.pathname.replace(/^\//, ''));
+    user = decodeURIComponent(u.username);
+    password = decodeURIComponent(u.password);
+  } catch {
+    return { ok: false, code: 'URL_ENCODING' }; // 잘못된 퍼센트 인코딩: 예외 없이 고정 거부
+  }
   if (database !== expect.database) return { ok: false, code: 'DB_MISMATCH' };
-  const user = decodeURIComponent(u.username);
-  if (user !== expect.user) return { ok: false, code: 'USER_MISMATCH' };
-  const password = decodeURIComponent(u.password);
+  if (user !== expect.loginUser) return { ok: false, code: 'USER_MISMATCH' };
   if (!password) return { ok: false, code: 'PASSWORD_MISSING' };
   return { ok: true, target: { host, port, database, user, password } };
 }
@@ -99,48 +109,82 @@ export function classifyError(e) {
 }
 
 const isBool = (v) => typeof v === 'boolean';
-const ROLE_RE = /^[a-z_][a-z0-9_]{0,62}$/;
+const roleOut = (u) => (typeof u === 'string' && OUTPUT_ROLES.includes(u) ? u : 'invalid');
+const timeoutError = () => Object.assign(new Error('timeout'), { code: 'PROBE_TIMEOUT' });
 
 /**
- * 프로브 본체. deps.connect(config) → { query(text): Promise<rows>, close(): Promise<void> }
- * 결과: { ok, checks: [{ id, status: 'PASS'|'FAIL'|'NOT_RUN', value? }] } — value는 허용 형식만
- */
-/**
+ * 프로브 본체. connect(config) → client 또는 Promise<client>. client = { query(text): Promise<rows>, close(): Promise<void> }
+ * - 실행 단계 전체(정상 연결 + 잘못된 CA 연결)는 **하나의 절대 마감 시각**(now()+timeoutMs) 안에서만 진행한다.
+ *   마감이 지나면 다음 SQL·연결을 시작하지 않는다. 대기 타이머는 끝나면 해제한다.
+ * - 정리(close)는 별도의 짧은 한도(cleanupMs)로 한다. 마감 뒤 늦게 도착한 자기 client도 그 한도 안에서 닫고, 확인 못 하면 FAIL.
+ * 결과: { ok(실행한 검사 전부 PASS), complete(미실행 없음), checks: [{ id, status: 'PASS'|'FAIL'|'NOT_RUN', value? }] }
  * @param {{ connect: (cfg: Record<string, unknown>) => any, target: any, ca: string, badCa?: string | null,
- *           expect?: Readonly<ProbeExpect>, timeoutMs?: number, sleep?: (ms: number) => Promise<unknown> }} opts
+ *           expect?: Readonly<ProbeExpect>, timeoutMs?: number, cleanupMs?: number, now?: () => number,
+ *           timers?: { set: (fn: () => void, ms: number) => any, clear: (h: any) => void } }} opts
  */
-export async function runProbe({ connect, target, ca, badCa, expect = PROBE_EXPECT, timeoutMs = 30_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+export async function runProbe({ connect, target, ca, badCa, expect = PROBE_EXPECT, timeoutMs = 30_000, cleanupMs = 5_000, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } }) {
   const checks = [];
   const add = (id, pass, value) => checks.push(value === undefined ? { id, status: pass ? 'PASS' : 'FAIL' } : { id, status: pass ? 'PASS' : 'FAIL', value });
-  const withTimeout = (p) => Promise.race([p, sleep(timeoutMs).then(() => { throw Object.assign(new Error('timeout'), { code: 'PROBE_TIMEOUT' }); })]);
+  const deadline = now() + timeoutMs;
+  /** p를 ms 안에 끝내지 못하면 PROBE_TIMEOUT. 타이머는 항상 해제 */
+  const within = (p, ms) => new Promise((resolve, reject) => {
+    if (ms <= 0) { reject(timeoutError()); return; }
+    const h = timers.set(() => reject(timeoutError()), ms);
+    Promise.resolve(p).then((v) => { timers.clear(h); resolve(v); }, (e) => { timers.clear(h); reject(e); });
+  });
+  const beforeDeadline = (p) => within(p, deadline - now());
   const run = async (client, text) => {
     if (!ALLOWED_SQL.has(text)) throw Object.assign(new Error('sql not allowed'), { code: 'SQL_NOT_ALLOWED' });
-    const rows = await withTimeout(client.query(text));
+    if (deadline - now() <= 0) throw timeoutError(); // 마감 뒤 새 SQL 시작 안 함
+    const rows = await beforeDeadline(client.query(text));
     if (!Array.isArray(rows)) throw Object.assign(new Error('bad rows'), { code: 'BAD_RESULT' });
     return rows;
+  };
+  /** 연결 시작: 마감 전일 때만. 늦게 도착해도 소유권을 잃지 않도록 원래 Promise를 돌려준다 */
+  const startConnect = (cfg) => {
+    if (deadline - now() <= 0) return null;
+    try { return Promise.resolve(connect(cfg)); } catch (e) { return Promise.reject(e); }
+  };
+  /** 자기 연결 정리(별도 짧은 한도). 늦게 생긴 client도 기다렸다가 닫는다. 확인 못 하면 false */
+  const closeOwned = async (pending, client) => {
+    let c = client;
+    if (!c && pending) {
+      try { c = await within(pending, cleanupMs); } catch (e) {
+        if (e && e.code === 'PROBE_TIMEOUT') {
+          pending.then((late) => late && late.close && Promise.resolve(late.close()).catch(() => {}), () => {});
+          return false; // 연결 여부 미확인: 정리 성공으로 기록하지 않음(늦게 오면 그때 닫는다)
+        }
+        return null; // 연결 자체가 실패: 정리할 자기 client 없음
+      }
+    }
+    if (!c) return null;
+    try { await within(Promise.resolve(c.close()), cleanupMs); return true; } catch { return false; }
   };
 
   // 1) 정상 CA 연결
   let client = null;
+  let pending = null;
   try {
-    client = await withTimeout(Promise.resolve(connect(connectionConfig(target, ca))));
+    pending = startConnect(connectionConfig(target, ca));
+    if (!pending) throw timeoutError();
+    client = await beforeDeadline(pending);
     const w = (await run(client, SQL.whoami))[0] ?? {};
     const vOk = typeof w.v === 'string' && /^\d{5,6}$/.test(w.v);
     add('D1_CONNECT_TLS', true);
-    add('D2_LOGIN_ROLE', w.u === expect.user, typeof w.u === 'string' && ROLE_RE.test(w.u) ? w.u : 'invalid');
+    add('D2_DB_ROLE', w.u === expect.dbRole, roleOut(w.u));
     add('D3_SERVER_VERSION', vOk, vOk ? w.v : 'invalid');
     await run(client, SQL.begin);
     try {
       await run(client, SQL.setRole);
       await run(client, SQL.setTimeout);
       const r = (await run(client, SQL.inRole))[0] ?? {};
-      add('D4_SET_LOCAL_ROLE', r.u === 'app_staff', typeof r.u === 'string' && ROLE_RE.test(r.u) ? r.u : 'invalid');
+      add('D4_SET_LOCAL_ROLE', r.u === 'app_staff', roleOut(r.u));
       add('D5_READ_ONLY_TX', r.ro === 'on');
     } finally {
-      await run(client, SQL.rollback);
+      try { await run(client, SQL.rollback); } catch (e) { add('D5x_ROLLBACK', false, classifyError(e)); }
     }
     const a = (await run(client, SQL.afterRole))[0] ?? {};
-    add('D6_ROLE_RESTORED', a.u === expect.user, typeof a.u === 'string' && ROLE_RE.test(a.u) ? a.u : 'invalid');
+    add('D6_ROLE_RESTORED', a.u === expect.dbRole, roleOut(a.u));
     const f = (await run(client, SQL.fnPriv))[0] ?? {};
     add('D7_STAFF_CAN_LIST', f.b === true, isBool(f.b) ? f.b : 'invalid');
     const t = (await run(client, SQL.tablePriv))[0] ?? {};
@@ -150,31 +194,33 @@ export async function runProbe({ connect, target, ca, badCa, expect = PROBE_EXPE
     if (!checks.some((c) => c.id === 'D1_CONNECT_TLS')) add('D1_CONNECT_TLS', false, classifyError(e));
     else add('D1x_PROBE_ERROR', false, classifyError(e));
   } finally {
-    if (client) {
-      try { await withTimeout(Promise.resolve(client.close())); add('D9_CLOSE', true); } catch { add('D9_CLOSE', false); }
-    }
+    const closed = await closeOwned(pending, client);
+    if (closed !== null) add('D9_CLOSE', closed);
   }
 
-  // 2) 잘못된 CA 음성 시험(별도 연결). 인증서 검증 오류만 통과, 그 밖의 오류·성공은 실패
+  // 2) 잘못된 CA 음성 시험(별도 연결, 같은 마감 안). 인증서 검증 오류만 통과, 그 밖의 오류·성공은 실패
   if (!badCa) {
-    checks.push({ id: 'D10_BAD_CA_REJECTED', status: 'NOT_RUN' });
+    checks.push({ id: 'D10_BAD_CA_REJECTED', status: 'NOT_RUN' }); // 미실행: CA 거부 통과로 세지 않음
   } else {
     let bad = null;
+    let badPending = null;
     try {
-      bad = await withTimeout(Promise.resolve(connect(connectionConfig(target, badCa))));
+      badPending = startConnect(connectionConfig(target, badCa));
+      if (!badPending) throw timeoutError();
+      bad = await beforeDeadline(badPending);
       await run(bad, SQL.whoami);
       add('D10_BAD_CA_REJECTED', false, 'CONNECTED');
     } catch (e) {
       const c = classifyError(e);
       add('D10_BAD_CA_REJECTED', c === 'TLS_CA_REJECTED', c);
     } finally {
-      if (bad) {
-        try { await withTimeout(Promise.resolve(bad.close())); } catch { add('D11_BAD_CA_CLOSE', false); }
-      }
+      const closed = await closeOwned(badPending, bad);
+      if (closed === false) add('D11_BAD_CA_CLOSE', false);
     }
   }
-  const ok = checks.every((c) => c.status === 'PASS' || c.id === 'D10_BAD_CA_REJECTED' && c.status === 'NOT_RUN');
-  return { ok, checks };
+  const ok = checks.every((c) => c.status !== 'FAIL');
+  const complete = checks.every((c) => c.status !== 'NOT_RUN');
+  return { ok, complete, checks };
 }
 
 export function formatChecks(checks) {
@@ -212,7 +258,8 @@ export async function main(argv, env, deps = {}) {
   }
   const r = await runProbe({ connect, target: v.target, ca, badCa, expect: deps.expect ?? PROBE_EXPECT });
   out(formatChecks(r.checks));
-  return r.ok ? 0 : 1;
+  if (!r.ok) return 1;
+  return r.complete ? 0 : 3; // 3: 실행한 검사는 통과했지만 잘못된 CA 음성 시험이 미실행(전체 통과 아님)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
