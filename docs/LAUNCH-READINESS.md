@@ -52,13 +52,13 @@
 |---|---|---|---|---|---|---|
 | ① 개인정보 고지 확정(처리 주체·목적·항목·보존 기간·제3자(총판) 제공·위탁·파기·문의처) | △ 동의 체크·버전 검사만 | ○ 버전 불일치 거부 시험 | × | × | 사용자 + PM(내용 확정), Claude(게시) | `src/app/privacy/page.tsx`, `src/components/ConsultForm.tsx`(동의 문구·버전), `core.settings`의 `privacy_policy_version`·`lead_retention_days`(운영 값 입력, 승인 필요) |
 | ② 총판 제공 동의 분리 | × | × | × | × | PM(제공이 필요한지 결정) → Claude | 제공이 필요하면 별도 동의 필드: `intake.ts` 스키마·서명 필드, `create_lead` 인자 → **migration 필요(승인 대상)** |
-| ③ 봇 방지 | ○ 서버 검증 + 위젯(`TurnstileWidget.tsx`, 명시적 렌더·`action: 'lead_form'`, 공개 키 없으면 미생성) | ○ 경로 R6~R9, 폼 상호작용 F1·F5~F8·F18~F22(가짜 위젯) | × 실제 Cloudflare 미연결 | × | 사용자(Cloudflare 계정·사이트 키 발급) | 코드 작성·가상 검증(PM 6907697718 B, 6908334832 보완). PM 재검수 대기, 실연결 미검증. CSP는 이미 `challenges.cloudflare.com`의 script-src·frame-src를 허용하므로 바꾸지 않았다 |
+| ③ 봇 방지 | ○ 서버 검증 + 위젯(`TurnstileWidget.tsx`, 명시적 렌더·`action: 'lead_form'`, 공개 키 없으면 미생성) | ○ 경로 R6~R9, 폼 상호작용 F1·F5~F8·F18~F22(가짜 위젯) | × 실제 Cloudflare 미연결 | × | 사용자(Cloudflare 계정·사이트 키 발급) | 코드 작성·가상 검증(PM 6907697718 B, 6908334832 보완). **개발 검수 통과(PM 6908711385)**, 실연결 미검증. CSP는 이미 `challenges.cloudflare.com`의 script-src·frame-src를 허용하므로 바꾸지 않았다 |
 | ④ 접수 저장(운영 DB) | ○ API·DB 함수 | ○ DB 176·경로 시험, 로컬 가상 DB | △ **기존 스키마(0001~0006 + zz_grants)는 fideon-dev에 `fideon_phase1_initial`로 이미 적용됨.** 실제 접수·Auth·풀러·CA 실연결은 미검증(새 프로젝트·중복 초기화 불필요) | × | 사용자(원격 프로젝트·키), PM(승인), Claude(운영 게이트) | `intake.ts`의 `leadIntakeGate`에 운영 모드 추가(원격 DB + 필수 키·설정이 모두 있을 때만, 기본은 닫힘) |
-| ⑤ 저장 성공/실패의 정확한 안내 | ○ 허용 목록 코드만 고정 문구(`consultSubmit.ts`), 202만 성공 | ○ 단위 C4·C5, 폼 F6·F9·F10·F12 | × | × | Claude | 코드 작성·가상 검증(PM 6907697718 A, 6908334832 보완). PM 재검수 대기, 실연결 미검증 |
-| ⑥ 중복 신청 방지 | ○ 같은 내용 재시도 = 같은 키, 내용 변경 = 새 키. 동기 전송 잠금, 성공 후 잠금 + DB 번호 기준 7일 병합·키 unique | ○ 단위 C3, 폼 F8·F11·F13·F16·F17, DB 시험 | × | × | Claude | 코드 작성·가상 검증, PM 재검수 대기. 한계는 0-3 참고 |
-| ⑦ 모바일 입력·오류 복구 | ○ 필드별 오류·`aria-invalid`·오류 연결·첫 오류 초점, 입력 보존, 15초 시간 초과 후 재시도 | ○ 폼 F2~F4·F6·F21(390px 폭), 미리보기 폭 검사 | × 실기기 미확인 | × | Claude | 코드 작성·가상 검증, PM 재검수 대기 |
+| ⑤ 저장 성공/실패의 정확한 안내 | ○ 허용 목록 코드만 고정 문구(`consultSubmit.ts`), 202만 성공 | ○ 단위 C4·C5, 폼 F6·F9·F10·F12 | × | × | Claude | 코드 작성·가상 검증(PM 6907697718 A, 6908334832 보완). **개발 검수 통과(PM 6908711385)**, 실연결 미검증 |
+| ⑥ 중복 신청 방지 | ○ 같은 내용 재시도 = 같은 키, 내용 변경 = 새 키. 동기 전송 잠금, 성공 후 잠금 + DB 번호 기준 7일 병합·키 unique | ○ 단위 C3, 폼 F8·F11·F13·F16·F17, DB 시험 | × | × | Claude | 개발 검수 통과, 실연결 미검증. 한계는 0-3 참고 |
+| ⑦ 모바일 입력·오류 복구 | ○ 필드별 오류·`aria-invalid`·오류 연결·첫 오류 초점, 입력 보존, 15초 시간 초과 후 재시도 | ○ 폼 F2~F4·F6·F21(390px 폭), 미리보기 폭 검사 | × 실기기 미확인 | × | Claude | 개발 검수 통과, 실연결 미검증 |
 | ⑧ 직원 접근(실Auth·TOTP) | △ 서버 판정·세션 코드 | ○ 경로·단위 시험 | × fideon-dev 연결 미검증 | × | 사용자(Supabase 계정·TOTP 등록·대표 계정), PM(승인), Claude(연결 검증 절차) | 원격 Auth 설정·계정 생성은 승인 대상. 코드는 `ADMIN-AUTH-OPERATIONS.md` 3절 체크리스트 대로 |
-| ⑨ 관리자 실제 리드 조회 | × 가상 데이터만 | △ 가상 데이터 권한 시험 | × | × | Claude(코드), PM(승인) | `src/server/admin/leadsApi.ts`·`mockLeads` 대체: `api.list_leads`·`api.reveal_contact` 호출(기본 마스킹, 열람은 사유 + 감사), `src/app/admin/page.tsx` 실데이터 보기 |
+| ⑨ 관리자 실제 리드 조회 | △ 마스킹 목록 어댑터 준비(`leadsReadStore.ts`, **미연결**). API·화면은 여전히 가상 데이터 | △ 가짜 실행기 시험 L1~L7(실제 PG·RLS·Auth 아님) | × | × | Claude(코드), PM(승인) | `src/server/admin/leadsApi.ts`·`mockLeads` 대체: `api.list_leads`·`api.reveal_contact` 호출(기본 마스킹, 열람은 사유 + 감사), `src/app/admin/page.tsx` 실데이터 보기 |
 | ⑩ 로그인 시도 제한 | △ 설계 초안 0007(비활성) | ○ 초안 57·안전 6 | × | × | PM(승인), Claude | 0007 정식 migration·로그인 경로 연결(승인 대상) |
 | ⑪ 도메인·TLS | × | — | × | × | 사용자(도메인 구매·연결, 비용은 PM 결정) | 운영 환경변수 `PUBLIC_SITE_ORIGIN`·`PUBLIC_HOSTNAME`(Turnstile hostname 검사와 일치) |
 | ⑫ 운영 배포 | — | — | × | × | PM(승인) | main 병합·배포는 이번 범위 밖 |
@@ -134,6 +134,23 @@
   - `npm run test:preview`의 마지막 단계에서 실행된다.
 - **실제 Cloudflare·실제 DB 저장·실기기 시험은 하지 않았다.** CI 통과는 실접수·출시 완료가 아니다.
 - server smoke의 통과 수는 smoke 표의 `PASS |` 행 수로 센다. 로그 전체의 PASS 단어 수와 다르다.
+
+### 0-4. 관리자 마스킹 목록 어댑터 (PM 6908711385) — 준비만, 미연결
+- **파일:** `src/server/admin/leadsReadStore.ts`(server-only), 시험 `tests/route/leads-read-store.test.ts`
+- **실행 순서:** 비활성 확인 → 서버가 검증한 직원 컨텍스트·역할 → 페이지 인자(정수, limit 1~200, offset 0~100000) → 주입된 트랜잭션 실행기로 `api.list_leads`를 바인딩 호출 → 행 런타임 검증 → 새 마스킹 DTO
+- **연결 방식:** 실행기는 필수 주입이다. 모듈은 환경값·기본 DB(`withRole`)를 읽거나 부르지 않는다. API·페이지는 이 모듈을 import하지 않는다(L7이 확인).
+- **역할**
+  - owner: 전체(미배정 포함)
+  - counselor: 본인 배정만. 결과도 다시 확인하고, 범위 밖 행이 섞이면 전체 실패(`SCOPE_VIOLATION`)로 처리한다.
+  - reviewer·policy_editor·알 수 없는 역할: 실행기 호출 전에 거부한다.
+- **DTO:** `id, createdAt(ISO), nameMasked(* 포함 필수), phoneMasked(010-****-dddd), interest(활성 상품만), status(enum), assignedTo(null|UUID)`
+  - SQL에서도 `contact_time`·`utm_source`를 고르지 않는다.
+  - 암호문·원문·HMAC·주소·메모·키·세션·서명·DB 오류 원문은 DTO에 넣지 않는다.
+- **오류:** 오류는 고정 코드만 돌려준다(`DISABLED/FORBIDDEN/INVALID_PAGE/UNAVAILABLE/INVALID_DATA/SCOPE_VIOLATION`). DB 권한 거부(42501)는 `FORBIDDEN`, 그 밖의 장애는 `UNAVAILABLE`이며, 빈 목록 성공으로 감추지 않는다.
+- **DB 범위 정정안(변경 안 함, 승인 필요):** 현재 `api.list_leads`는 `assert_staff(..., ['owner','counselor','reviewer'])`이고 `where role in ('owner','reviewer') or assigned_to = actor`라서 **reviewer 전체 조회를 허용한다**(0002).
+  - 서버 모듈이 더 좁게 적용하지만, 이는 DB 권한 변경이나 RLS 보강이 아니다.
+  - 정정 시 새 migration으로 허용 역할에서 reviewer를 빼고, where 절을 `role = 'owner' or assigned_to = actor`로 바꾼다. 이와 함께 `catalog_audit` V13 본문 고정 갱신과 DB 시험(reviewer 거부)을 추가해야 한다.
+- **실행하지 않은 것:** 실제 DB 접속·조회, 연락처 열람(`reveal_contact`)·복호화·상태 변경, API·화면 배선, 실제 PostgreSQL·RLS·풀러·Auth 검증
 
 ## 1. 현재 상태 (코드 기준, 2026-11-16 `f96ad8e`)
 | 항목 | 상태 |
