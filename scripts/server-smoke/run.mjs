@@ -217,6 +217,15 @@ try {
   r = await get('/');
   t = await r.text();
   report('H7 /: noindex 메타', r.status === 200 && /<meta name="robots" content="noindex, nofollow"/.test(t));
+  // H9 인터넷TV 상세(기본 꺼짐, PM 6925800166): 상품 안내 패널·공식 접수 표식 없음, 준비 중 안내·검색 차단 유지
+  const GUIDE_MARKS = ['data-product-guide', 'data-guide-topic', 'data-official-intake', '규칙 기반 상품 안내', '자주 묻는 질문'];
+  for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
+    r = await get('/products/internet-tv', h);
+    t = await r.text();
+    const robots = label === 'HTML' ? /<meta name="robots" content="noindex, nofollow"/.test(t) : true;
+    report(`H9 /products/internet-tv ${label}: 안내 패널·공식 접수 표식 0·준비 중 안내${label === 'HTML' ? '·noindex' : ''}`,
+      r.status === 200 && leaks(t, GUIDE_MARKS) === 0 && t.includes('온라인 상담 서비스 준비 중') && robots, `표식 ${leaks(t, GUIDE_MARKS)}개`);
+  }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
   report('H8 서버의 외부 접속 시도 0건', blocked === 0, `차단 ${blocked}건`);

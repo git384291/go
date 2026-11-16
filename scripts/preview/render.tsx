@@ -17,7 +17,10 @@ import { ProgressView } from '../../src/app/admin/progress/ProgressView';
 import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
-import { resolveOfficialIntake } from '../../src/content/officialIntake';
+import { resolveOfficialIntake, type OfficialIntakeResult } from '../../src/content/officialIntake';
+import { ProductGuidePanel } from '../../src/components/ProductGuidePanel';
+import { GUIDE_TOPICS } from '../../src/content/productGuide';
+import type { Page } from 'playwright';
 
 // 진행판 미리보기는 실제 서버 스냅샷이 아닌 화면 확인용 고정 예시를 쓴다(가로 넘침·표시 확인)
 const PROGRESS_FIXTURE = {
@@ -67,6 +70,66 @@ const FAKE_INTAKE = resolveOfficialIntake({
 });
 const FAKE_HREFS = ['https://intake-a.example.com/apply', 'https://very-long-subdomain-for-wrap-check.intake-b.example.com/internet-tv/apply'];
 
+const INTAKE_OFF: OfficialIntakeResult = { state: 'off', reason: 'DISABLED' };
+const GUARANTEE = /최저|무료|당일|보장|100%|AI 상담 중|상담원 연결됨/;
+
+/** 상품 안내 패널 실브라우저 조작: details/summary 펼침·닫기·반복·키보드·초점·주소 불변·요청 0·신청 안내 상태 */
+async function guideInteraction(page: Page, intakeOn: boolean, requests: () => number): Promise<string> {
+  const startUrl = page.url();
+  const req0 = requests();
+  const topics = await page.$$eval('[data-product-guide] details', (ds) => ds.map((d) => d.getAttribute('data-guide-topic')));
+  const nine = JSON.stringify(topics) === JSON.stringify([...GUIDE_TOPICS]);
+  const allClosed = await page.$$eval('[data-product-guide] details', (ds) => ds.every((d) => !(d as HTMLDetailsElement).open));
+  const openAt = (i: number) => page.$$eval('[data-product-guide] details', (ds, k) => (ds[k] as HTMLDetailsElement).open, i);
+  const summaries = page.locator('[data-product-guide] summary');
+  // 펼침·닫기 반복 클릭(모든 주제, 3회)
+  let clicks = true;
+  for (let i = 0; i < topics.length; i++) {
+    for (let k = 0; k < 3; k++) {
+      await summaries.nth(i).click();
+      clicks &&= await openAt(i);
+      await summaries.nth(i).click();
+      clicks &&= !(await openAt(i));
+    }
+  }
+  // 키보드: Enter 펼침, Space 닫기, 초점은 summary에 유지, Tab은 다음 summary로
+  const active = () => page.evaluate(() => {
+    const a = document.activeElement;
+    return a && a.tagName === 'SUMMARY' ? a.closest('details')?.getAttribute('data-guide-topic') ?? null : a?.tagName ?? null;
+  });
+  let keys = true;
+  await summaries.nth(0).focus();
+  keys &&= (await active()) === GUIDE_TOPICS[0];
+  await page.keyboard.press('Enter');
+  keys &&= (await openAt(0)) && (await active()) === GUIDE_TOPICS[0];
+  await page.keyboard.press('Space');
+  keys &&= !(await openAt(0)) && (await active()) === GUIDE_TOPICS[0];
+  for (let i = 1; i < GUIDE_TOPICS.length; i++) {
+    await page.keyboard.press('Tab');
+    keys &&= (await active()) === GUIDE_TOPICS[i];
+    await page.keyboard.press('Space');
+    keys &&= await openAt(i);
+    await page.keyboard.press('Enter');
+    keys &&= !(await openAt(i));
+  }
+  // 신청 안내: 꺼짐이면 준비 중·링크 0, 가상 켜짐이면 검수된 OfficialIntakeCta만(열지 않음)
+  const applyIdx = GUIDE_TOPICS.indexOf('apply');
+  await summaries.nth(applyIdx).click();
+  const apply = await page.$eval('[data-guide-topic="apply"]', (d) => ({
+    text: (d as HTMLElement).innerText, links: Array.from(d.querySelectorAll('a')).map((a) => a.getAttribute('href')),
+  }));
+  const applyOk = intakeOn
+    ? apply.links.length === 2 && apply.links.every((h) => FAKE_HREFS.includes(h ?? '')) && !apply.text.includes('준비 중')
+    : apply.links.length === 0 && apply.text.includes('준비 중');
+  await summaries.nth(applyIdx).click();
+  const text = await page.$eval('[data-product-guide]', (el) => (el as HTMLElement).innerText);
+  const inputs = await page.$$eval('[data-product-guide] input, [data-product-guide] form, [data-product-guide] textarea, [data-product-guide] select, [data-product-guide] button, [data-product-guide] iframe, [data-product-guide] script, [data-product-guide] img', (n) => n.length);
+  const same = page.url() === startUrl && !page.url().includes('#');
+  const reqs = requests() - req0;
+  return `\t상품안내 9주제=${nine}\t상품안내 처음 닫힘=${allClosed}\t상품안내 펼침·닫기 반복=${clicks}\t상품안내 키보드·초점=${keys}`
+    + `\t상품안내 신청 안내=${applyOk}\t상품안내 보장·AI 표현 없음=${!GUARANTEE.test(text)}\t상품안내 주소 변화 없음=${same}\t상품안내 입력·외부요소=${inputs}\t상품안내 요청=${reqs}`;
+}
+
 const OUT = process.argv[2] ?? 'test-results/screens';
 // 검사 폭: 좁은 휴대폰(320)과 일반 휴대폰(390). 둘 다 통과해야 한다.
 const WIDTHS = [320, 390] as const;
@@ -85,6 +148,9 @@ async function main() {
     ['10-admin-read-locked', <LeadsReadLocked key="read-locked" kind="failed" />],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
     ['11-official-intake-fake', <PageShell key="intake-fake"><section className="hero"><h1>가상 공식 접수처 표시</h1><OfficialIntakeCta intake={FAKE_INTAKE} /></section></PageShell>],
+    // 선택형 상품 안내 패널(실제 코드 상수는 false). 가상 켜짐 화면: 접수 꺼짐(12)과 가상 접수 켜짐(13). 공개 화면 아님
+    ['12-product-guide-intake-off', <PageShell key="guide-off"><ProductGuidePanel intake={INTAKE_OFF} /></PageShell>],
+    ['13-product-guide-intake-fake-on', <PageShell key="guide-on"><ProductGuidePanel intake={FAKE_INTAKE} /></PageShell>],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),
@@ -104,6 +170,8 @@ async function main() {
         .replace('<html lang="ko">', '<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + css + '</style></head>');
       await writeFile(`${OUT}/${name}.html`, html);
       const page = await ctx.newPage();
+      let requestCount = 0;
+      page.on('request', () => { requestCount++; });
       await page.setContent(html, { waitUntil: 'load' });
       // 모바일 에뮬레이션(isMobile)에서는 내용이 넓으면 브라우저가 레이아웃 폭(innerWidth)까지 넓혀 버린다.
       // 그래서 innerWidth가 아니라 '설정한 화면 폭'과 비교한다(이전 검사는 이 때문에 넘침을 못 잡을 수 있었다).
@@ -130,8 +198,13 @@ async function main() {
         const okLinks = FAKE_INTAKE.state === 'on' && anchors.length === FAKE_HREFS.length
           && anchors.every((a, i) => a.href === FAKE_HREFS[i] && !/[?#]/.test(a.href ?? '') && /\bnoreferrer\b/.test(a.rel ?? '') && /\bnoopener\b/.test(a.rel ?? '') && a.rp === 'no-referrer' && a.target === '_blank');
         intakeCheck = `\t공식접수 가상 링크=${okLinks}\t공식접수 입력·외부요소=${inputs}`;
-      } else {
+      } else if (!name.startsWith('13')) {
         intakeCheck = `\t공식접수 표식 없음=${!body.includes('data-official-intake')}`;
+      }
+      if (name.startsWith('12') || name.startsWith('13')) {
+        intakeCheck += await guideInteraction(page, name.startsWith('13'), () => requestCount);
+      } else {
+        intakeCheck += `\t상품안내 표식 없음=${!body.includes('data-product-guide')}`;
       }
       report.push(`${label}\t가로 넘침=${overflow}\t금액 표기=${prices}\t예약 상품 노출=${leaked.length ? leaked.join(',') : '없음'}\t외부 상담 연결=${ext.length ? ext.join(',') : '없음'}\t접수 오해 문구=${intake.length ? intake.join(',') : '없음'}${notice}${fixed}${intakeCheck}`);
       await page.close();
@@ -144,7 +217,8 @@ async function main() {
   console.log(report.join('\n'));
   const bad = report.filter((r) =>
     r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
-    || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r));
+    || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
+    || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r));
   if (bad.length) {
     console.error('PREVIEW FAIL\n' + bad.join('\n'));
     process.exit(1);

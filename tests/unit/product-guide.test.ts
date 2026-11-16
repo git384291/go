@@ -93,18 +93,60 @@ test('PG4 원본 불변·입력 미반환', () => {
   assert.ok(Object.isFrozen(menu) && Object.isFrozen(menu[0]));
 });
 
-test('PG5 정적: 저장·로그·네트워크·환경·LLM 접근 없음, 화면·API 미연결', () => {
+test('PG6 공유 목록·메뉴·응답은 runtime에서도 동결, 외부 수정 시도로 바뀌지 않음', () => {
+  const snapshot = JSON.stringify({ topics: GUIDE_TOPICS, menu: guideMenu(), all: GUIDE_TOPICS.map((t) => answerGuide({ product: 'internet-tv', topic: t })) });
+  assert.ok(Object.isFrozen(GUIDE_TOPICS));
+  const topics = GUIDE_TOPICS as unknown as string[];
+  assert.throws(() => { topics.push('price'); });
+  assert.throws(() => { topics[0] = 'price'; });
+  assert.throws(() => { topics.length = 0; });
+  const menu = guideMenu() as unknown as { topic: string; title: string }[];
+  assert.throws(() => { menu.push({ topic: 'x', title: 'x' }); });
+  assert.throws(() => { menu[0]!.title = '변조된 제목'; });
+  for (const t of GUIDE_TOPICS) {
+    const a = answerGuide({ product: 'internet-tv', topic: t }) as unknown as { lines: string[]; kind: string };
+    assert.throws(() => { a.lines[0] = '변조'; });
+    assert.throws(() => { a.kind = 'general'; });
+  }
+  assert.deepEqual(answerGuide({ product: 'internet-tv', topic: 'price' }), UNSUP, '추가 시도된 주제는 여전히 미지원');
+  assert.equal(JSON.stringify({ topics: GUIDE_TOPICS, menu: guideMenu(), all: GUIDE_TOPICS.map((t) => answerGuide({ product: 'internet-tv', topic: t })) }), snapshot);
+  // 설치·이사 문구는 확인 완료·설치 가능을 약속하지 않는다
+  for (const t of ['install', 'moving'] as const) {
+    const a = answerGuide({ product: 'internet-tv', topic: t });
+    assert.ok(a.status === 'ok' && a.lines.some((l) => l.includes('공식 접수처에서 별도 확인이 필요')), t);
+    assert.ok(!a.lines.some((l) => /접수 단계에서 확인됩니다|설치 가능합니다|설치해 드립니다/.test(l)), t);
+  }
+});
+
+test('PG5 정적: 저장·로그·네트워크·환경·LLM 접근 없음, 표시 경로는 ProductGuidePanel 하나뿐', () => {
   const src = readFileSync('src/content/productGuide.ts', 'utf8').replace(/\/\/.*$/gm, '');
   assert.ok(!/process\.env|fetch\(|console\.|localStorage|sessionStorage|document\.|window\.|import\(|require\(|node:|postgres|supabase|openai|anthropic|https?:\/\//i.test(src));
   const imports = [...src.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
   assert.deepEqual(imports, ['./officialIntake']);
   assert.match(src, /^import type \{ OfficialIntakeResult \} from '\.\/officialIntake';$/m);
-  // 이번 묶음은 화면·API·폼에 연결하지 않는다
+  // 규칙 응답을 쓰는 곳은 정확히 이 표시 경로 하나(HTTP·API·정책·SDK 연결 없음)
   let users = '';
   try {
     users = execFileSync('grep', ['-rlE', "content/productGuide|/productGuide'|answerGuide|guideMenu", 'src'], { encoding: 'utf8' });
   } catch (e) {
     if ((e as { status?: number }).status !== 1) throw e; // grep 1 = 일치 없음
   }
-  assert.deepEqual(users.trim().split('\n').filter(Boolean), ['src/content/productGuide.ts'], '정의 파일 밖에서 쓰는 곳 없음');
+  assert.deepEqual(users.trim().split('\n').filter(Boolean).sort(), ['src/components/ProductGuidePanel.tsx', 'src/content/productGuide.ts']);
+  let panelUsers = '';
+  try {
+    panelUsers = execFileSync('grep', ['-rl', 'ProductGuidePanel', 'src'], { encoding: 'utf8' });
+  } catch (e) {
+    if ((e as { status?: number }).status !== 1) throw e;
+  }
+  assert.deepEqual(panelUsers.trim().split('\n').filter(Boolean).sort(), ['src/components/ProductGuidePanel.tsx', 'src/components/ProductPage.tsx']);
+  const panel = readFileSync('src/components/ProductGuidePanel.tsx', 'utf8');
+  assert.ok(!/'use client'|<form|<input|<textarea|<select|<button|<script|<iframe|<img|onClick|onKeyDown|useState|useEffect|fetch\(|href=|@\/server\/|process\.env|console\./.test(panel), '정적 details/summary만');
+  assert.equal((panel.match(/<details /g) ?? []).length, 1);
+  assert.match(panel, /<summary>/);
+  assert.match(panel, /\{a\.topic === 'apply' && a\.officialIntake === 'available' && <OfficialIntakeCta intake=\{intake\} \/>\}/);
+  // 기본 꺼짐 코드 상수, 인터넷TV에서만
+  assert.match(readFileSync('src/content/channels.ts', 'utf8'), /export const PRODUCT_GUIDE_ENABLED: boolean = false;/);
+  const product = readFileSync('src/components/ProductPage.tsx', 'utf8');
+  assert.match(product, /\{PRODUCT_GUIDE_ENABLED && slug === 'internet-tv' && <ProductGuidePanel intake=\{intake \?\? GUIDE_INTAKE_OFF\} \/>\}/);
+  assert.match(product, /const GUIDE_INTAKE_OFF: OfficialIntakeResult = Object\.freeze\(\{ state: 'off', reason: 'DISABLED' \}\);/);
 });

@@ -9,7 +9,7 @@
 //   목적지 주소나 우회 링크를 응답에 넣지 않는다.
 import type { OfficialIntakeResult } from './officialIntake';
 
-export const GUIDE_TOPICS = ['speed', 'tv', 'bundle', 'contract', 'moving', 'install', 'fees', 'privacy', 'apply'] as const;
+export const GUIDE_TOPICS = Object.freeze(['speed', 'tv', 'bundle', 'contract', 'moving', 'install', 'fees', 'privacy', 'apply'] as const);
 export type GuideTopicId = (typeof GUIDE_TOPICS)[number];
 
 /** general = 확인된 일반 안내, needs_check = 조건 확인이 필요해 여기서 답하지 않음, not_ready = 준비 중 */
@@ -51,11 +51,11 @@ const ENTRIES: ReadonlyMap<Exclude<GuideTopicId, 'apply'>, Entry> = new Map<Excl
   ] }],
   ['moving', { title: '이사할 때는 어떻게 하나요?', kind: 'needs_check', lines: [
     '기존 회선을 옮기는 것과 새로 가입하는 것은 조건이 다를 수 있습니다.',
-    '새 주소의 설치 가능 여부는 접수 단계에서 확인됩니다. 이 안내에서는 주소를 받지 않습니다.',
+    '새 주소의 설치 가능 여부는 공식 접수처에서 별도 확인이 필요합니다. 이 안내에서는 주소를 받지 않습니다.',
   ] }],
   ['install', { title: '설치 가능 지역·일정은요?', kind: 'needs_check', lines: [
     '설치 가능 여부와 일정은 주소와 건물 조건에 따라 달라 이 안내에서 답할 수 없습니다.',
-    '접수 단계에서 확인되며, 이 안내에서는 주소를 받지 않습니다.',
+    '공식 접수처에서 별도 확인이 필요하며, 이 안내에서는 주소를 받지 않습니다.',
   ] }],
   ['fees', { title: '요금과 사은품은 얼마인가요?', kind: 'needs_check', lines: [
     '요금과 사은품은 화면에 게시하지 않고 신청 시점의 확정 조건으로만 안내합니다.',
@@ -110,7 +110,7 @@ function answerGuideUnsafe(input: unknown, intake?: OfficialIntakeResult): Guide
       lines: available ? APPLY_ON : APPLY_OFF, officialIntake: available ? 'available' : 'unavailable',
     });
   }
-  const e = ENTRIES.get(topic);
+  const e = ENTRIES.get(topic); // Map은 모듈 밖으로 내보내지 않는다(외부 수정 불가). 응답은 매번 동결 복사본
   if (!e) return UNSUPPORTED;
   return Object.freeze({ status: 'ok', source: 'rules', topic, title: e.title, kind: e.kind, lines: Object.freeze([...e.lines]) });
 }

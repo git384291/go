@@ -1,9 +1,12 @@
 import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/Site';
 import { isActiveSlug, productBySlug, type ProductSlug } from '@/content/products';
-import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
+import { ONLINE_CONSULT_NOTICE, PRODUCT_GUIDE_ENABLED } from '@/content/channels';
+import { ProductGuidePanel } from '@/components/ProductGuidePanel';
 import { OfficialIntakeCta } from '@/components/OfficialIntakeCta';
 import type { OfficialIntakeResult } from '@/content/officialIntake';
+
+const GUIDE_INTAKE_OFF: OfficialIntakeResult = Object.freeze({ state: 'off', reason: 'DISABLED' });
 
 // intake: 페이지(서버)가 서버 상수 등록부로 판정해 넘긴 결과. 넘기지 않으면 표시하지 않는다(화면 컴포넌트는 서버 모듈을 import하지 않음).
 export function ProductPage({ slug, intake }: { slug: ProductSlug; intake?: OfficialIntakeResult }) {
@@ -50,6 +53,9 @@ export function ProductPage({ slug, intake }: { slug: ProductSlug; intake?: Offi
           ))}
         </ul>
       </section>
+
+      {/* 선택형 상품 안내: 코드 상수가 켜지고 인터넷TV일 때만. 기본 꺼짐 → 그리지 않음 */}
+      {PRODUCT_GUIDE_ENABLED && slug === 'internet-tv' && <ProductGuidePanel intake={intake ?? GUIDE_INTAKE_OFF} />}
     </PageShell>
   );
 }

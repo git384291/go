@@ -10,3 +10,8 @@ export const EXTERNAL_CONSULT_ENABLED: boolean = false;
 // 실제 접수가 비활성인 동안 '무료 상담 신청' 같은 접수 가능 문구 대신 이 안내를 쓴다.
 // 고객정보 수집·외부 상담 연결은 이 문구와 무관하게 계속 비활성이다.
 export const ONLINE_CONSULT_NOTICE = '온라인 상담 서비스 준비 중';
+
+// 선택형 상품 안내 패널(규칙 기반 고정 질문·응답, PM 6925800166). 기본 꺼짐.
+// - 코드 상수다. 환경변수로 켜지지 않는다. 켜려면 문구 PM 검수 → 별도 커밋으로 true → 배포 결정(별도).
+// - 켜도 인터넷TV 상세에만 표시하며, 입력칸·폼·클라이언트 JS·요청·저장이 없다.
+export const PRODUCT_GUIDE_ENABLED: boolean = false;
