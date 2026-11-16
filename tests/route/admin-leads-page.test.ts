@@ -172,21 +172,32 @@ try {
   realDeps = false;
 }
 
-test('V6 실제 page.tsx: 인증 기본값(꺼짐)·기본 mock에서 잠금, 목록·가상 표식 없음', { skip: realDeps ? false : 'next·@supabase/ssr 미설치 — CI·Mac에서 실행' }, async () => {
+test('V6 실제 서버 기본 의존성(leadsDefaults·adminMockVisible): 인증 기본값(꺼짐)·기본 mock 잠금, db 출처도 잠금(목록·가상 표식 없음)', { skip: realDeps ? false : 'next·@supabase/ssr 미설치 — CI·Mac에서 실행' }, async () => {
+  // page.tsx는 로그아웃 Server Action(next/navigation 정적 import)을 함께 불러와 이 시험 조건(react-server)에서 직접 실행할 수 없다.
+  // 그래서 page.tsx가 넘기는 것과 같은 실제 기본 의존성으로 렌더 결정을 실행한다. 실Next HTML 경계는 server smoke가 맡는다.
   const keys = ['ADMIN_AUTH_MODE', 'ADMIN_LEADS_SOURCE'] as const;
   const saved = keys.map((k) => process.env[k]);
   for (const k of keys) delete process.env[k];
   try {
-    const mod = await import('../../src/app/admin/page');
-    const el = await mod.default({ searchParams: Promise.resolve({}) });
-    const s = text(el).join('|');
-    assert.match(s, /인증 연결 후 열립니다/);
-    assert.ok(!/가상 데이터|010-|로컬 시험 데이터/.test(s));
+    const { defaultLeadsServerDeps } = await import('../../src/server/admin/leadsDefaults');
+    const { adminMockVisible } = await import('../../src/server/auth/adminAuthMode');
+    const real = (): AdminLeadsPageDeps => ({
+      ...defaultLeadsServerDeps(),
+      mockVisible: () => adminMockVisible(),
+      searchParams: {},
+      headerExtra: () => null,
+      mockView: () => createElement('div', null, MOCK_MARK),
+    });
+    const r1 = await renderAdminLeads(real());
+    const s1 = 'element' in r1 ? text(r1.element).join('|') : 'redirect';
+    assert.match(s1, /인증 연결 후 열립니다/);
+    assert.ok(!s1.includes(MOCK_MARK) || process.env.NODE_ENV === 'development');
+    assert.ok(!/010-|로컬 시험 데이터/.test(s1));
     process.env.ADMIN_LEADS_SOURCE = 'db';
-    const el2 = await mod.default({ searchParams: Promise.resolve({}) });
-    const s2 = text(el2).join('|');
-    assert.match(s2, /로컬 시험 DB 준비 전|인증 연결 후/);
-    assert.ok(!/가상 데이터|010-/.test(s2));
+    const r2 = await renderAdminLeads(real());
+    const s2 = 'element' in r2 ? text(r2.element).join('|') : 'redirect';
+    assert.match(s2, /로컬 시험 DB 준비 전/);
+    assert.ok(!s2.includes(MOCK_MARK) && !/010-/.test(s2));
   } finally {
     keys.forEach((k, i) => (saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i])));
   }
