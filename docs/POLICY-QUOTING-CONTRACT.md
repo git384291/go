@@ -11,7 +11,9 @@
 | `src/server/policies/types.ts` | 정책 레코드·요청·이유 코드·고객 견적 형태 |
 | `src/server/policies/quote.ts` | `quotePolicy(records, request, now)` 순수 판정 |
 | `src/server/policies/index.ts` | 진입점 |
-| `tests/route/policy-quote.test.ts` | Q1~Q10 |
+| `tests/route/policy-quote.test.ts` | Q1~Q15(6절) |
+
+관련 설계: 검수 저장소(작성·제출·승인·교체)는 `docs/design/POLICY-REVIEW-STORE.md`(미구현 설계)에 있다.
 
 모든 런타임 파일의 첫 줄은 `import 'server-only'`이다. 클라이언트 파일은 이 모듈을 import하지 않고, 아직 어떤 화면·API도 연결하지 않는다(Q10이 확인).
 
@@ -109,7 +111,7 @@
 - 고정 안내: "설치 가능 여부와 장비 재고는 주소 확인 후 통신사가 최종 확정합니다." / "요금·혜택은 표시된 정책 기준 시각의 조건이며, 신청 시점에 다시 확인합니다." 이 모듈은 실제 설치 가능 여부·재고를 조회하지 않는다.
 
 ## 5. 검수 상태는 보안 승인이 아니다
-- `reviewStatus`는 **향후 서버의 검수된 정책 저장소**에서만 채워지는 값이다. 그 저장소는 직원 권한(owner·policy_editor)과 변경 감사 기록을 갖춰야 하며, 별도 설계·승인이 필요하다.
+- `reviewStatus`는 **향후 서버의 검수된 정책 저장소**에서만 채워지는 값이다. 그 저장소의 상태 전이·권한·감사·동시성 설계는 `docs/design/POLICY-REVIEW-STORE.md`에 있고, 구현(migration·권한 변경)은 별도 승인이 필요하다.
 - 이 모듈은 받은 값을 판정할 뿐 승인 주체가 아니다. 지금은 가짜 fixture로만 판정한다.
 - `approved`를 설정하는 API·화면·사용자 입력·AI 경로는 만들지 않았다(Q10이 정책 모듈 안에 검수 상태 대입 코드가 없음을 확인).
 - 실제 정책 자동 업데이트, LLM 호출, 유료 API, 파일 업로드는 연결하지 않았다.
