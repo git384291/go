@@ -22,7 +22,7 @@ const OUT = path.join(ROOT, 'test-results', 'server-smoke');
 const NET_LOG = path.join(OUT, 'blocked-network.log');
 const DENY = path.join(ROOT, 'scripts', 'server-smoke', 'deny-network.mjs');
 const READY_MS = 30_000;
-const TOTAL_MS = 120_000;
+const TOTAL_MS = 240_000; // 기본 + 출처 변형 2회(순차 재기동)
 const results = [];
 const report = (name, ok, note = '') => results.push({ name, ok, note });
 
@@ -117,53 +117,64 @@ try {
   finish(1, '실패(격리 실패 — 서버 시작 안 함)');
 }
 
-const port = await freePort();
-const base = `http://127.0.0.1:${port}`;
-const env = {
-  PATH: process.env.PATH,
-  NODE_ENV: 'production',
-  PORT: String(port),
-  HOSTNAME: '127.0.0.1',
-  NEXT_TELEMETRY_DISABLED: '1',
-  // 닫힌 값 명시(설정 파일이 있어도 이 값이 우선. 격리 루트에는 설정 파일 자체가 없다)
-  ADMIN_AUTH_MODE: 'disabled',
-  LEAD_INTAKE_MODE: 'disabled',
-  NEXT_PUBLIC_LEAD_FORM_ENABLED: 'false',
-  SEARCH_INDEXING: 'deny',
-  NODE_OPTIONS: `--import ${DENY}`,
-  FIDEON_SMOKE_NET_LOG: NET_LOG,
-};
-const server = spawn(process.execPath, [nextBin, 'start', runRoot.root, '-H', '127.0.0.1', '-p', String(port)], { cwd: runRoot.root, env, stdio: ['ignore', 'ignore', 'ignore'], detached: false });
-let exited = false;
-const exitPromise = new Promise((resolve) => server.on('exit', () => { exited = true; resolve(); }));
-const waitExit = (ms) => Promise.race([exitPromise.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
-/** SIGTERM → 종료 이벤트 5초 대기 → SIGKILL → 종료 이벤트 5초 대기. 실제 종료 이벤트를 받았을 때만 true */
-const stop = async () => {
-  if (exited) return true;
-  try { server.kill('SIGTERM'); } catch { /* 이미 종료 */ }
-  if (await waitExit(5_000)) return true;
-  try { server.kill('SIGKILL'); } catch { /* 이미 종료 */ }
-  return waitExit(5_000);
-};
-const total = setTimeout(async () => { report('전체 시간 제한', false, `${TOTAL_MS / 1000}초 초과`); report('서버 정리', await stop()); runRoot.cleanup(); finish(1, '실패(시간 초과)'); }, TOTAL_MS);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await stop(); runRoot.cleanup(); process.exit(1); });
-
-const get = (p, headers = {}) => fetch(base + p, { headers, redirect: 'manual', signal: AbortSignal.timeout(10_000) });
-
-try {
-  // 3) 준비 대기
+/**
+ * 격리 루트에서 Next 프로덕션 서버를 하나 띄운다. env는 닫힌 기본값 + extra(가짜 값만)이며 현재 프로세스 환경을 상속하지 않는다.
+ * stop(): SIGTERM → 종료 이벤트 5초 대기 → SIGKILL → 종료 이벤트 5초 대기. 실제 종료 이벤트를 받았을 때만 true
+ */
+async function startServer(extra = {}) {
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const env = {
+    PATH: process.env.PATH,
+    NODE_ENV: 'production',
+    PORT: String(port),
+    HOSTNAME: '127.0.0.1',
+    NEXT_TELEMETRY_DISABLED: '1',
+    // 닫힌 값 명시(설정 파일이 있어도 이 값이 우선. 격리 루트에는 설정 파일 자체가 없다)
+    ADMIN_AUTH_MODE: 'disabled',
+    LEAD_INTAKE_MODE: 'disabled',
+    NEXT_PUBLIC_LEAD_FORM_ENABLED: 'false',
+    SEARCH_INDEXING: 'deny',
+    NODE_OPTIONS: `--import ${DENY}`,
+    FIDEON_SMOKE_NET_LOG: NET_LOG,
+    ...extra,
+  };
+  const server = spawn(process.execPath, [nextBin, 'start', runRoot.root, '-H', '127.0.0.1', '-p', String(port)], { cwd: runRoot.root, env, stdio: ['ignore', 'ignore', 'ignore'], detached: false });
+  let exited = false;
+  const exitPromise = new Promise((resolve) => server.on('exit', () => { exited = true; resolve(); }));
+  const waitExit = (ms) => Promise.race([exitPromise.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
+  const stop = async () => {
+    if (exited) return true;
+    try { server.kill('SIGTERM'); } catch { /* 이미 종료 */ }
+    if (await waitExit(5_000)) return true;
+    try { server.kill('SIGKILL'); } catch { /* 이미 종료 */ }
+    return waitExit(5_000);
+  };
+  const get = (p, headers = {}) => fetch(base + p, { headers, redirect: 'manual', signal: AbortSignal.timeout(10_000) });
   const t0 = Date.now();
   let ready = false;
   while (Date.now() - t0 < READY_MS && !exited) {
     try { if ((await get('/robots.txt')).status === 200) { ready = true; break; } } catch { /* 아직 준비 안 됨 */ }
     await new Promise((r) => setTimeout(r, 300));
   }
-  report('서버 준비(127.0.0.1 전용)', ready, ready ? '' : exited ? '서버 종료됨' : `${READY_MS / 1000}초 초과`);
-  if (!ready) throw new Error('not ready');
+  return { get, stop, ready, exited: () => exited };
+}
 
-  const noStore = (r) => (r.headers.get('cache-control') ?? '').includes('no-store');
-  const noIndexHeader = (r) => (r.headers.get('x-robots-tag') ?? '') === 'noindex, nofollow';
-  const leaks = (text, list) => list.filter((s) => text.includes(s)).length;
+let current = null; // 지금 떠 있는 서버(정리 대상은 이 실행이 띄운 것뿐)
+const total = setTimeout(async () => { report('전체 시간 제한', false, `${TOTAL_MS / 1000}초 초과`); report('서버 정리', current ? await current.stop() : true); runRoot.cleanup(); finish(1, '실패(시간 초과)'); }, TOTAL_MS);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { if (current) await current.stop(); runRoot.cleanup(); process.exit(1); });
+
+const noStore = (r) => (r.headers.get('cache-control') ?? '').includes('no-store');
+const noIndexHeader = (r) => (r.headers.get('x-robots-tag') ?? '') === 'noindex, nofollow';
+const leaks = (text, list) => list.filter((s) => text.includes(s)).length;
+const netAttempts = () => (existsSync(NET_LOG) ? readFileSync(NET_LOG, 'utf8').trim().split('\n').filter(Boolean).length : 0);
+
+try {
+  // 3) 기본값 서버
+  current = await startServer();
+  report('서버 준비(127.0.0.1 전용)', current.ready, current.ready ? '' : current.exited() ? '서버 종료됨' : `${READY_MS / 1000}초 초과`);
+  if (!current.ready) throw new Error('not ready');
+  const { get } = current;
 
   // H1 진행판 HTML
   let r = await get('/admin/progress');
@@ -206,13 +217,47 @@ try {
   t = await r.text();
   report('H7 /: noindex 메타', r.status === 200 && /<meta name="robots" content="noindex, nofollow"/.test(t));
   // H8 서버가 외부로 나가려 한 흔적
-  const blocked = existsSync(NET_LOG) ? readFileSync(NET_LOG, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+  const blocked = netAttempts();
   report('H8 서버의 외부 접속 시도 0건', blocked === 0, `차단 ${blocked}건`);
+  report('서버 정리(종료 이벤트 확인)', await current.stop());
+  current = null;
+
+  // 4) 관리자 리드 출처 변형(PM 6916935437): 서버를 순차 재기동해 db·invalid에서도 목록·mock·내부 값이 나오지 않는지 확인
+  //    db 변형의 DATABASE_URL은 문법상 로컬 폐기 시험 DB처럼 보이는 가짜 값(열린 포트 없음). production 서버이므로 준비됨이 되면 안 된다.
+  const FAKE_DB_URL = 'postgres://smoke@127.0.0.1:1/fideon_lrs_1_abcdef01';
+  const INTERNAL = ['fideon_lrs', '127.0.0.1:1', 'postgres://', 'smoke@', 'ADMIN_LEADS_SOURCE', 'DATABASE_URL', '010-****-'];
+  const variants = [
+    { id: 'S1', label: 'source=db(production + 폐기 DB처럼 보이는 가짜 URL)', extra: { ADMIN_LEADS_SOURCE: 'db', DATABASE_URL: FAKE_DB_URL }, page: '이 환경에서는 목록을 불러오지 않습니다', list: 'LEADS_READ_DISABLED', detail: 'LEADS_DETAIL_UNAVAILABLE' },
+    { id: 'S2', label: 'source=invalid(DB)', extra: { ADMIN_LEADS_SOURCE: 'DB' }, page: '관리자 목록 설정을 확인할 수 없어', list: 'LEADS_SOURCE_INVALID', detail: 'LEADS_SOURCE_INVALID' },
+  ];
+  for (const v of variants) {
+    rmSync(NET_LOG, { force: true });
+    current = await startServer(v.extra);
+    report(`${v.id} ${v.label}: 서버 준비`, current.ready);
+    if (!current.ready) throw new Error('not ready');
+    for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
+      r = await current.get('/admin', h);
+      t = await r.text();
+      const ok = r.status === 200 && t.includes(v.page) && !t.includes('관리자 화면은 인증 연결 후 열립니다.') && leaks(t, MOCK_TEXT) === 0 && !t.includes('가상 데이터') && leaks(t, INTERNAL) === 0 && noStore(r) && noIndexHeader(r);
+      report(`${v.id} /admin ${label}: 잠금 문구·mock 0·행·내부 값 0·no-store·X-Robots-Tag`, ok);
+    }
+    for (const [p, code] of [['/api/admin/leads', v.list], ['/api/admin/leads/mock-0006', v.detail]]) {
+      r = await current.get(p);
+      const body = await r.text();
+      let got = null;
+      try { got = JSON.parse(body).code; } catch { /* 형식 오류 */ }
+      report(`${v.id} ${p}: 503 ${code}·no-store·nosniff·가상·내부 값 0`, r.status === 503 && got === code && noStore(r) && (r.headers.get('x-content-type-options') ?? '') === 'nosniff' && leaks(body, MOCK_TEXT) === 0 && leaks(body, INTERNAL) === 0);
+    }
+    const n = netAttempts();
+    report(`${v.id} 서버의 외부 접속 시도 0건`, n === 0, `차단 ${n}건`);
+    report(`${v.id} 서버 정리(종료 이벤트 확인)`, await current.stop());
+    current = null;
+  }
 } catch (e) {
   if (!(e instanceof Error && e.message === 'not ready')) report('검사 실행', false, '예외 발생(내용 비공개)');
 } finally {
   clearTimeout(total);
-  report('서버 정리(종료 이벤트 확인)', await stop());
+  if (current) report('서버 정리(종료 이벤트 확인)', await current.stop());
   runRoot.cleanup();
 }
 finish(results.every((x) => x.ok) ? 0 : 1, results.every((x) => x.ok) ? '통과' : '실패');

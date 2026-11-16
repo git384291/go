@@ -240,6 +240,16 @@
   - preview 320·390: `09-admin-read`, `10-admin-read-locked`
   - 원격 Auth E2E가 아니다. 기본 `withRole`(TCP URL)과 주입 소켓 실행기의 차이는 그대로다.
 
+### 0-8. 경계 보완·smoke 변형·실연결 변경안 (PM 6916935437)
+- **다음 링크:** 허용 최대 offset(100000)을 넘는 링크를 만들지 않는다. 대신 "마지막 페이지" 안내와 이전 링크를 둔다(V7). 로더의 허용 범위는 넓히지 않았다.
+- **server smoke 출처 변형:** 같은 격리 루트에서 서버를 순차 재기동한다. 기본 H1~H8은 그대로 두고 아래 두 변형을 추가했다.
+  - S1 `source=db`: production 서버에 폐기 DB처럼 보이는 가짜 URL(열린 포트 없음)을 준다.
+    - `/admin` HTML·RSC: "목록을 불러오지 않습니다" 잠금
+    - 목록 API 503 `LEADS_READ_DISABLED`, 상세 API 503 `LEADS_DETAIL_UNAVAILABLE`
+    - mock·행·URL·DB명 0, no-store·X-Robots-Tag(API는 nosniff), 외부 접속 시도 0, 서버 종료 확인
+  - S2 `source=DB`(invalid): 잠금 문구와 API `LEADS_SOURCE_INVALID`. 나머지 확인 항목은 S1과 같다.
+- **실연결 변경안:** `docs/design/DEV-AUTH-CONNECTION-PLAN.md`(제안만)
+
 ## 1. 현재 상태 (코드 기준, 2026-11-16 `f96ad8e`)
 | 항목 | 상태 |
 |---|---|
