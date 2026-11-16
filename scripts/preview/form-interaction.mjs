@@ -116,7 +116,7 @@ async function scenarioMain(browser) {
   const { page, ctx, seen } = await openForm(browser, {
     enabled: true,
     siteKey: 'test-only-site-key',
-    api: (route, _b, n) => {
+    api: (route) => {
       if (mode === 'abort') return route.abort('failed');
       if (mode === 'invalid_phone') return reply(400, { ok: false, code: 'INVALID_PHONE' })(route);
       if (mode === 'hostile') return reply(500, '<html><img src=x onerror=alert(1)>DB error relation pii.customers</html>', 'text/html')(route);
