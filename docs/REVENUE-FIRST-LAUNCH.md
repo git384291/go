@@ -296,15 +296,22 @@
   - 그 뒤 생성→`validateAdCopy`→비공개 업로드→상태 조회를 조합한다.
   - 생성 결과 계약: ok·source:'model'·generatorCalled===true·같은 situation/product·DRAFT_UNPUBLISHED·executionAllowed:false가 모두 맞아야 한다.
   - 업로드·조회 결과는 state·videoId·uploadAttempted를 한 번만 읽어 상태별 계약과 대조한다. 모순되면 RESULT_UNKNOWN이다.
-  - 마감 계약
-    - 생성·업로드·조회 await가 하나의 절대 마감을 공유하고, 마감 뒤에는 새 단계를 시작하지 않는다.
-    - 생성·업로드 호출은 조합에서 취소할 수 없으므로 늦은 결과는 버린다. 업로드 중 마감이면 RESULT_UNKNOWN이다.
+  - 마감 계약(PM 6952678159 보완)
+    - 조합의 절대 마감 `deadlineAt`을 publisher의 `uploadPrivate`·`getStatus`에 **명시 전달**한다. 어댑터는 자체 상한과 비교해 이른 쪽(min)을 쓰고, 호출자 값이 불량이면 닫힌다.
+    - 마감 대조 시점
+      - 생성 실행 직전, 각 await 뒤, 새 요청·읽기·파싱 직전마다 `Date.now()`로 절대 마감을 직접 대조한다.
+      - 타이머는 abort·반환 보조일 뿐이고, 이미 지난 시각의 성공은 TIMEOUT으로 바꾼다.
+    - 조합이 반환한 뒤 publisher가 늦은 채널 결과로 새 업로드·조회 요청을 시작하지 않는다(R8).
+    - 한계
+      - 이미 시작한 생성 호출은 취소할 수 없어 늦은 결과를 버린다. 이것은 실행 중단이 아니다.
+      - 이미 보낸 업로드는 RESULT_UNKNOWN이다.
+      - 실제 전송·업로드·청구 취소는 보장하지 않는다.
   - 입력: 고정 상황 ID·`internet-tv`·메모리 영상만
   - 생성 실패나 꺼짐이면 업로드 0이다.
   - 결과 stage: `PRIVATE_TEST_ONLY` / `UPLOAD_NOT_COMPLETED` 등. 항상 `publicPublished:false`·`paidExecutionAllowed:false`다.
   - HTTP route/UI 배선은 없다.
 - **시험(가짜 transport, 실네트워크 0을 전역 fetch 차단으로 확인)**
-  - route YT1~YT7·YP1~YP3·R1~R7(PM 재현 결함 회귀), unit AD4(정확 사용처 목록)·AD6(정적)
+  - route YT1~YT7·YP1~YP3·R1~R10(PM 재현 결함·마감 전파 회귀), unit AD4(정확 사용처 목록)·AD6(정적)
   - 가짜 성공은 실영상 품질·실계정·실 AI·문의 성과가 아니다.
 - **남은 실제 조건**
   - 실제 영상 제작 방식과 무료 로컬 도구

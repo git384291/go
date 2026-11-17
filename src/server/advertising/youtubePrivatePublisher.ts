@@ -63,9 +63,27 @@ export type StatusOutcome =
   | { readonly state: 'QUERY_FAILED'; readonly code: YtFailCode }
   | { readonly state: 'PRIVATE_PROCESSING' | 'PRIVATE_PROCESSED' | 'PRIVATE_PROCESSING_FAILED' | 'PRIVATE_PROCESSING_UNKNOWN' };
 
+/** 호출자(서버 주입) 절대 마감. 각 메서드는 자기 상한과 이 값 중 이른 쪽을 적용한다 */
+export type CallerDeadline = { readonly deadlineAt?: number };
+
 export type YoutubePrivatePublisher = {
-  readonly uploadPrivate: (input: unknown) => Promise<UploadOutcome>;
-  readonly getStatus: (videoId: unknown) => Promise<StatusOutcome>;
+  readonly uploadPrivate: (input: unknown, opts?: CallerDeadline) => Promise<UploadOutcome>;
+  readonly getStatus: (videoId: unknown, opts?: CallerDeadline) => Promise<StatusOutcome>;
+};
+
+/** 자체 상한과 호출자 마감의 min. 호출자 값이 불량이면 이미 지난 것으로 본다(닫힘) */
+const effectiveDeadline = (ownMs: number, opts: unknown): number => {
+  const own = Date.now() + ownMs;
+  try {
+    if (opts === undefined) return own;
+    if (opts === null || typeof opts !== 'object') return 0;
+    const d = (opts as Record<string, unknown>).deadlineAt;
+    if (d === undefined) return own;
+    if (typeof d !== 'number' || !Number.isFinite(d)) return 0;
+    return Math.min(own, d);
+  } catch {
+    return 0;
+  }
 };
 
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -231,9 +249,11 @@ export function createYoutubePrivatePublisher(config: YoutubePublisherConfig | n
   const auth = (c: Snapshot, extra: Record<string, string> = {}) => ({ Authorization: `Bearer ${c.token}`, Accept: 'application/json', ...extra });
 
   return fz({
-    uploadPrivate: async (input: unknown): Promise<UploadOutcome> => {
+    uploadPrivate: async (input: unknown, opts?: CallerDeadline): Promise<UploadOutcome> => {
       if (!cfg) return fz({ state: 'NOT_CONFIGURED', uploadAttempted: false });
-      const deadlineAt = Date.now() + cfg.timeoutMs; // 채널 확인과 업로드가 공유하는 하나의 절대 마감
+      // 채널 확인과 업로드가 공유하는 하나의 절대 마감 = min(자체 상한, 호출자 마감)
+      const deadlineAt = effectiveDeadline(cfg.timeoutMs, opts);
+      if (Date.now() >= deadlineAt) return fz({ state: 'TIMEOUT_BEFORE_UPLOAD', uploadAttempted: false });
       const u = readUploadInput(input);
       if (!u) return fz({ state: 'INVALID_INPUT', uploadAttempted: false });
       const mp = buildMultipart(u, newBoundary());
@@ -243,6 +263,7 @@ export function createYoutubePrivatePublisher(config: YoutubePublisherConfig | n
       // 1) 채널 소유 확인: 정확히 1건, 예상 ID와 일치해야만 업로드
       const ch = await boundedRequest(cfg.transport, YT_CHANNELS_URL, { method: 'GET', headers: auth(cfg) }, limits);
       if (ch.kind !== 'ok') return fz({ state: 'CHANNEL_CHECK_FAILED', code: failCode(ch), uploadAttempted: false });
+      if (Date.now() >= deadlineAt) return fz({ state: 'TIMEOUT_BEFORE_UPLOAD', uploadAttempted: false }); // 파싱 전 재대조
       const items = pick(parseJsonSafe(ch.text), 'items');
       if (!Array.isArray(items)) return fz({ state: 'CHANNEL_CHECK_FAILED', code: 'BAD_RESPONSE', uploadAttempted: false });
       const ids = items.map((it) => pick(it, 'id'));
@@ -254,6 +275,7 @@ export function createYoutubePrivatePublisher(config: YoutubePublisherConfig | n
       if (up.kind === 'error' && up.sent === false) return fz({ state: 'TIMEOUT_BEFORE_UPLOAD', uploadAttempted: false });
       if (up.kind === 'http') return fz({ state: 'UPLOAD_FAILED', code: httpCode(up.status), uploadAttempted: true });
       if (up.kind === 'error') return fz({ state: 'RESULT_UNKNOWN', uploadAttempted: true });
+      if (Date.now() >= deadlineAt) return fz({ state: 'RESULT_UNKNOWN', uploadAttempted: true }); // 마감 뒤 판독 안 함
       const res = parseJsonSafe(up.text);
       const id = pick(res, 'id');
       const privacy = pick(res, 'status', 'privacyStatus');
@@ -262,11 +284,14 @@ export function createYoutubePrivatePublisher(config: YoutubePublisherConfig | n
       return fz({ state: 'UPLOADED_PRIVATE', videoId: id, uploadAttempted: true });
     },
 
-    getStatus: async (videoId: unknown): Promise<StatusOutcome> => {
+    getStatus: async (videoId: unknown, opts?: CallerDeadline): Promise<StatusOutcome> => {
       if (!cfg) return fz({ state: 'NOT_CONFIGURED' });
       if (typeof videoId !== 'string' || !VIDEO_ID.test(videoId)) return fz({ state: 'INVALID_INPUT' });
-      const r = await boundedRequest(cfg.transport, YT_VIDEOS_URL_PREFIX + videoId, { method: 'GET', headers: auth(cfg) }, { deadlineAt: Date.now() + cfg.timeoutMs, maxResponseBytes: cfg.maxResponseBytes });
+      const deadlineAt = effectiveDeadline(cfg.timeoutMs, opts);
+      if (Date.now() >= deadlineAt) return fz({ state: 'QUERY_FAILED', code: 'TIMEOUT' });
+      const r = await boundedRequest(cfg.transport, YT_VIDEOS_URL_PREFIX + videoId, { method: 'GET', headers: auth(cfg) }, { deadlineAt, maxResponseBytes: cfg.maxResponseBytes });
       if (r.kind !== 'ok') return fz({ state: 'QUERY_FAILED', code: failCode(r) });
+      if (Date.now() >= deadlineAt) return fz({ state: 'QUERY_FAILED', code: 'TIMEOUT' });
       return judgeVideoStatus(r.text, videoId);
     },
   });

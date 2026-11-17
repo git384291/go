@@ -6,9 +6,11 @@ import 'server-only';
 // - 영상(크기·MIME·서명)은 **생성 전에** 검증·방어 복사한다. 불량이면 생성 0·업로드 0.
 // - 생성 결과는 ok·source:'model'·generatorCalled===true·같은 situationId/product·미게시·executionAllowed:false 계약을 모두 대조하고
 //   validateAdCopy로 다시 검증한 새 title·description만 넘긴다.
-// - 마감 계약: totalTimeoutMs로 정한 하나의 절대 마감을 생성·업로드·조회 await에 공유한다(Promise.race).
-//   마감 뒤에는 새 단계(업로드·조회)를 시작하지 않는다. 생성·업로드 호출 자체는 이 조합에서 취소할 수 없으므로,
-//   마감 뒤 늦게 끝난 결과는 버린다(업로드 단계에서 마감이 오면 결과 미확인 RESULT_UNKNOWN). 업로드 내부에는 어댑터 자체 절대 마감이 따로 있다.
+// - 마감 계약: totalTimeoutMs로 정한 하나의 절대 마감(deadlineAt)을
+//   (1) 생성 실행 직전·각 await 뒤 Date.now() 대조, (2) publisher의 uploadPrivate/getStatus에 **명시 전달**(어댑터는 자체 상한과 min 적용),
+//   (3) await 대기(Promise.race)에 공유한다. 그래서 조합이 반환한 뒤 publisher가 늦은 채널 결과로 새 업로드·조회 요청을 시작하지 않는다.
+//   한계: 이미 시작한 생성 호출(주입 함수)은 취소할 수 없어 늦은 결과를 버릴 뿐이며, 이미 보낸 업로드는 결과 미확인(RESULT_UNKNOWN)이다.
+//   실제 전송·업로드·청구 취소는 보장하지 않는다.
 // - 업로드·조회 결과는 state·videoId·uploadAttempted를 한 번만 읽어 상태별 계약과 대조한다. 모순·알 수 없는 값은 성공으로 처리하지 않는다.
 // - 가짜 영상·가짜 transport 성공은 실제 영상 품질·실 AI·실 계정·문의 성과를 뜻하지 않는다. publicPublished·paidExecutionAllowed는 항상 false.
 import { validateAdCopy, type AdGenerationResult } from './adGeneration';
@@ -108,9 +110,10 @@ export async function prepareYoutubeAdPrivateTest(input: unknown, deps: Preparat
 
   // ── 생성(마감 공유) + 결과 계약 대조 ──
   let copy: { title: string; description: string };
+  if (Date.now() >= deadlineAt) return done('DEADLINE_EXCEEDED', 'NOT_ATTEMPTED', 'NOT_QUERIED'); // 생성 실행 직전 확인
   try {
     const g = await within(Promise.resolve().then(() => generate({ situationId, product: 'internet-tv' })), deadlineAt);
-    if (g === TIMEOUT) return done('DEADLINE_EXCEEDED', 'NOT_ATTEMPTED', 'NOT_QUERIED');
+    if (g === TIMEOUT || Date.now() >= deadlineAt) return done('DEADLINE_EXCEEDED', 'NOT_ATTEMPTED', 'NOT_QUERIED');
     if (!g || typeof g !== 'object') return done('GENERATION_FAILED', 'NOT_ATTEMPTED', 'NOT_QUERIED');
     const r = g as Record<string, unknown>;
     const snap = {
@@ -133,7 +136,7 @@ export async function prepareYoutubeAdPrivateTest(input: unknown, deps: Preparat
   let upState: string;
   let videoId: string | null = null;
   try {
-    const u = await within(Promise.resolve().then(() => upload({ video, mimeType, title: copy.title, description: copy.description })), deadlineAt);
+    const u = await within(Promise.resolve().then(() => upload({ video, mimeType, title: copy.title, description: copy.description }, { deadlineAt })), deadlineAt);
     if (u === TIMEOUT) return done('UPLOAD_NOT_COMPLETED', 'RESULT_UNKNOWN', 'NOT_QUERIED');
     if (!u || typeof u !== 'object') return done('UPLOAD_NOT_COMPLETED', 'RESULT_UNKNOWN', 'NOT_QUERIED');
     const r = u as Record<string, unknown>;
@@ -158,7 +161,7 @@ export async function prepareYoutubeAdPrivateTest(input: unknown, deps: Preparat
 
   // ── 상태 조회(마감 공유), state 한 번만 읽기 ──
   try {
-    const s = await within(Promise.resolve().then(() => status(videoId)), deadlineAt);
+    const s = await within(Promise.resolve().then(() => status(videoId, { deadlineAt })), deadlineAt);
     if (s === TIMEOUT || !s || typeof s !== 'object') return done('PRIVATE_TEST_ONLY', 'UPLOADED_PRIVATE', 'QUERY_FAILED', videoId);
     const state = (s as Record<string, unknown>).state;
     const safe = typeof state === 'string' && STATUS_STATES.includes(state) ? state : 'QUERY_FAILED';

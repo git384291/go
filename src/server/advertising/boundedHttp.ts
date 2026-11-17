@@ -63,9 +63,15 @@ export async function boundedRequest(
     }, remaining);
   });
 
+  // 타이머는 abort·반환 보조일 뿐이다. 각 await 뒤에는 절대 시각을 직접 대조한다(이벤트 루프 지연으로 타이머가 늦어도 성공 불가)
+  const past = () => expired || Date.now() >= limits.deadlineAt;
   const readBody = async (reader: Reader, chunks: Uint8Array[], total: number): Promise<BoundedResult | Uint8Array[]> => {
+    if (past()) {
+      cancelQuiet(reader);
+      return E('TIMEOUT', true);
+    }
     const step = await reader.read();
-    if (expired) {
+    if (past()) {
       cancelQuiet(reader);
       return E('TIMEOUT', true);
     }
@@ -85,6 +91,7 @@ export async function boundedRequest(
   };
 
   const call = (async (): Promise<BoundedResult> => {
+    if (past()) return E('TIMEOUT', false);
     sent = true;
     const res = await transport(url, { ...init, signal: ac.signal, redirect: 'error' });
     // 응답 속성은 각각 한 번만 읽는다(접근자 예외 → 고정 실패)
@@ -96,7 +103,7 @@ export async function boundedRequest(
       cleanup();
       return E('BAD_RESPONSE', true);
     }
-    if (expired) {
+    if (past()) {
       cleanup(); // 마감 뒤 도착: 본문을 읽지 않고 정리만
       return E('TIMEOUT', true);
     }
@@ -124,7 +131,10 @@ export async function boundedRequest(
       return E('TRANSPORT_ERROR', true);
     }
     if (!Array.isArray(got)) return got;
-    if (expired) return E('TIMEOUT', true);
+    if (past()) {
+      cleanup();
+      return E('TIMEOUT', true);
+    }
     const all = new Uint8Array(got.reduce((n, c) => n + c.byteLength, 0));
     let off = 0;
     for (const c of got) {
@@ -143,7 +153,10 @@ export async function boundedRequest(
 
   try {
     const r = await Promise.race([call, deadline]);
-    return r === 'timeout' ? E('TIMEOUT', sent) : r;
+    if (r === 'timeout') return E('TIMEOUT', sent);
+    // 이미 지난 시각의 성공은 허용하지 않는다
+    if (r.kind === 'ok' && Date.now() >= limits.deadlineAt) return E('TIMEOUT', true);
+    return r;
   } finally {
     if (timer) clearTimeout(timer);
   }

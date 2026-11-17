@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createYoutubePrivatePublisher, YT_CHANNELS_URL, YT_UPLOAD_URL, YT_VIDEOS_URL_PREFIX, YT_MAX_VIDEO_BYTES, buildMultipart, type YoutubePublisherConfig } from '../../src/server/advertising/youtubePrivatePublisher';
-import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
+import { boundedRequest, type BodyTransport } from '../../src/server/advertising/boundedHttp';
 import { prepareYoutubeAdPrivateTest } from '../../src/server/advertising/youtubeAdPreparation';
 import { generateAdCopy, type AdCopyGenerator } from '../../src/server/advertising/adGeneration';
 
@@ -400,4 +400,58 @@ test('R7 read reject·getReader 예외·status/body getter 예외 → 소유 rea
   const r3 = await createYoutubePrivatePublisher(cfg(async () => resp as never)).getStatus(VID);
   assert.deepEqual(r3, { state: 'QUERY_FAILED', code: 'BAD_RESPONSE' });
   assert.equal(bc2, 1);
+});
+
+// ── PM 6952678159 마감 전파 회귀 ──
+
+test('R8 조합 마감을 publisher까지 전달: 생성700+채널500/총1000 → 조합 반환 뒤에도 업로드 POST 0·조회 0', async () => {
+  const { t, calls } = fakeTransport({ ...OK, channels: { status: 200, text: chOk, delayMs: 500 } });
+  const pub = createYoutubePrivatePublisher(cfg(t, { timeoutMs: 2000 })); // 자체 상한은 2초
+  const started = Date.now();
+  const r = await prepareYoutubeAdPrivateTest(prepInput(), {
+    generateCopy: async (i) => { await new Promise((res) => setTimeout(res, 700)); return fullGen()(i); }, publisher: pub, totalTimeoutMs: 1000,
+  });
+  assert.ok(Date.now() - started < 1150);
+  assert.equal(r.stage, 'UPLOAD_NOT_COMPLETED');
+  assert.ok(['RESULT_UNKNOWN', 'TIMEOUT_BEFORE_UPLOAD', 'CHANNEL_CHECK_FAILED'].includes(r.upload), r.upload);
+  await new Promise((res) => setTimeout(res, 1200)); // 조합 반환 뒤 충분히 대기
+  assert.equal(calls.filter((c) => c.url === YT_UPLOAD_URL).length, 0, '늦은 채널 결과로 새 POST 0');
+  assert.equal(calls.filter((c) => c.url.startsWith(YT_VIDEOS_URL_PREFIX)).length, 0, '조회 0');
+});
+
+test('R9 이벤트 루프가 막혀 타이머가 늦어도 절대 시각으로 판정: 동기 70ms 뒤 응답 → TIMEOUT, 본문 읽기 0·정리', async () => {
+  let pulls = 0;
+  let cancelled = 0;
+  const body = new ReadableStream<Uint8Array>({ pull(c) { pulls++; c.enqueue(enc('{"ok":1}')); c.close(); }, cancel() { cancelled++; } }, { highWaterMark: 0 });
+  const blocking: BodyTransport = async () => {
+    const end = Date.now() + 70;
+    while (Date.now() < end) { /* 동기 차단(가짜) */ }
+    return { status: 200, body };
+  };
+  const r = await boundedRequest(blocking, 'https://example.invalid/', { method: 'GET', headers: {} }, { deadlineAt: Date.now() + 20, maxResponseBytes: 4096 });
+  assert.deepEqual(r, { kind: 'error', code: 'TIMEOUT', sent: true });
+  assert.equal(pulls, 0, 'read 0');
+  assert.equal(cancelled, 1, '소유 body 정리');
+  // 이미 지난 마감 → transport 0
+  let n = 0;
+  const r2 = await boundedRequest(async () => { n++; return { status: 200, body: null }; }, 'https://example.invalid/', { method: 'GET', headers: {} }, { deadlineAt: Date.now() - 1, maxResponseBytes: 4096 });
+  assert.deepEqual(r2, { kind: 'error', code: 'TIMEOUT', sent: false });
+  assert.equal(n, 0);
+});
+
+test('R10 호출자 마감: 이미 지남·불량 값은 요청 0으로 닫힘, 자체 상한보다 이른 마감 적용', async () => {
+  const { t, calls } = fakeTransport(OK);
+  const p = createYoutubePrivatePublisher(cfg(t, { timeoutMs: 5000 }));
+  for (const opts of [{ deadlineAt: Date.now() - 1 }, { deadlineAt: NaN }, { deadlineAt: '9999999999999' }, null, 5]) {
+    assert.deepEqual(await p.uploadPrivate(upInput(), opts as never), { state: 'TIMEOUT_BEFORE_UPLOAD', uploadAttempted: false }, JSON.stringify(opts));
+    assert.deepEqual(await p.getStatus(VID, opts as never), { state: 'QUERY_FAILED', code: 'TIMEOUT' });
+  }
+  assert.equal(calls.length, 0);
+  const { t: t2, calls: c2 } = fakeTransport({ ...OK, channels: { status: 200, text: chOk, delayMs: 400 } });
+  const started = Date.now();
+  const r = await createYoutubePrivatePublisher(cfg(t2, { timeoutMs: 5000 })).uploadPrivate(upInput(), { deadlineAt: Date.now() + 300 });
+  assert.deepEqual(r, { state: 'CHANNEL_CHECK_FAILED', code: 'TIMEOUT', uploadAttempted: false });
+  assert.ok(Date.now() - started < 450);
+  await new Promise((res) => setTimeout(res, 300));
+  assert.equal(c2.filter((c) => c.url === YT_UPLOAD_URL).length, 0);
 });
