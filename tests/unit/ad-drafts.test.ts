@@ -57,5 +57,30 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
   } catch (e) {
     if ((e as { status?: number }).status !== 1) throw e;
   }
-  assert.deepEqual(users.trim().split('\n').filter(Boolean).sort(), ['src/server/advertising/campaignDraft.ts'], 'production 사용처 없음(정의 파일끼리만)');
+  // 사용처는 광고 서버 모듈끼리만(화면·API·라우트 배선 없음). PM 6943345830: 생성 오케스트레이터가 고정 상황 데이터를 읽는다
+  assert.deepEqual(users.trim().split('\n').filter(Boolean).sort(), ['src/server/advertising/adGeneration.ts', 'src/server/advertising/campaignDraft.ts'], 'production 사용처 없음');
+  let adv = '';
+  try {
+    adv = execFileSync('grep', ['-rlE', 'server/advertising|openAiAdGenerator|adGeneration', 'src'], { encoding: 'utf8' });
+  } catch (e) {
+    if ((e as { status?: number }).status !== 1) throw e;
+  }
+  assert.deepEqual(adv.trim().split('\n').filter(Boolean).sort(), ['src/server/advertising/openAiAdGenerator.ts'], '광고 서버 모듈을 import하는 화면·API 없음');
+});
+
+test('AD5 정적: AI 생성 모듈은 env·기본 키·SDK·자동 접속·재시도 없음, 고정 endpoint만', () => {
+  const gen = readFileSync('src/server/advertising/adGeneration.ts', 'utf8');
+  const oa = readFileSync('src/server/advertising/openAiAdGenerator.ts', 'utf8');
+  for (const [f, src] of [['adGeneration', gen], ['openAiAdGenerator', oa]] as const) {
+    const code = src.replace(/\/\/.*$/gm, '');
+    assert.match(src, /^import 'server-only';/, f);
+    assert.ok(!/process\.env|from 'openai'|@ai-sdk|require\(|import\(|console\.|localStorage|setInterval|fetch\(/.test(code), f);
+  }
+  const code = oa.replace(/^\s*\/\/.*$/gm, ''); // 줄 전체 주석만 제거(문자열 속 https:// 보존)
+  assert.equal((code.match(/https:\/\//g) ?? []).length, 1, 'endpoint는 상수 1개');
+  assert.match(code, /export const OPENAI_RESPONSES_URL = 'https:\/\/api\.openai\.com\/v1\/responses';/);
+  assert.match(code, /redirect: 'error'/);
+  assert.match(code, /store: false/);
+  assert.ok(!/retry|while\s*\(|for\s*\(;;\)/i.test(code), '재시도 루프 없음');
+  assert.ok(!/AD_DRAFTS\[[^\]]+\]\.(title|description)/.test(gen.replace(/\/\/.*$/gm, '')), '생성 결과에 고정 초안 제목·설명을 쓰지 않음(fallback 없음)');
 });

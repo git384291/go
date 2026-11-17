@@ -216,6 +216,26 @@
   - route CD1~CD4: 정상이어도 집행 불가, 형식·예산 거부, 허용 목록 DTO·불변
 - 화면·API·광고 계정·네트워크·DB·환경변수·LLM 연결은 없다. production 사용처도 없다.
 
+**AI 생성 어댑터(PM 6943345830, 실모델 미호출·매체 미게재)**
+- `src/server/advertising/adGeneration.ts`(server-only): 생성 오케스트레이터
+  - 입력: 고정 상황 ID + `internet-tv`만. 프롬프트는 서버가 고정 문장으로 구성한다.
+  - 생성기는 필수 주입이다. 없으면 호출 0회, `NOT_CONFIGURED`.
+  - 모델 반환은 불신 데이터로 취급한다.
+    - 정확히 `{title, description}`이어야 하고, 길이(N6)·허용 문자(숫자 불가)·금지 주장(금액·최저·당일·공식·통신사명·연락처·URL 등)을 검사한다.
+    - 실패하면 고정 오류 코드만 돌려준다. 고정 초안 fallback은 없다.
+  - 성공 결과도 `DRAFT_UNPUBLISHED`·`executionAllowed:false`다. 금지 문구 필터는 완전한 사실 검증이 아니다.
+- `src/server/advertising/openAiAdGenerator.ts`(server-only): OpenAI Responses HTTP 어댑터, **비활성**
+  - transport·키·모델·실행 허용은 모두 명시 주입이다. env·SDK·기본 클라이언트는 없다.
+  - 요청: 고정 `https://api.openai.com/v1/responses`, `redirect:'error'`
+    - body: `store:false`, strict `json_schema`, `max_output_tokens`. tools·stream·background는 없다.
+  - 1회 호출에 deadline(AbortSignal)과 응답 크기 상한을 둔다. 재시도는 없다.
+  - 응답은 `output[].message.content[].output_text`를 읽는다. refusal·incomplete·429·非JSON은 고정 코드로 닫는다.
+  - 계약 근거는 PM이 확인한 공식 자료다(Claude 환경에서는 원문 미열람).
+  - `store:false`는 보관 0의 보증이 아니고, `max_output_tokens`는 원화 청구 상한이 아니다. 모델명·가격·지원 여부는 미확인이다.
+- 시험(가짜 생성기·가짜 transport만): route AG1~AG6, OA1~OA6, unit AD4·AD5(정적, 미배선)
+  - 실제 OpenAI 연결이나 품질·사실성을 증명하지 않는다.
+- 실제 키·모델 호출·요금 발생·매체 게시·화면/API 배선은 없다.
+
 ### 3-2. 자동 상담 응대 흐름 (제안, 실행 중 아님)
 1. **상품 문의**
    - 인터넷+TV 문의만 받는다(1단계 활성 상품).
