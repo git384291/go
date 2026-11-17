@@ -79,7 +79,18 @@ export function buildAdPrompt(situationId: AdDraftId): AdPrompt {
 }
 
 /** 모델 반환 검증. 통과하면 정확한 두 문자열만 돌려준다 */
-export function validateAdCopy(data: unknown): { ok: true; title: string; description: string } | { ok: false; reason: 'SHAPE' | 'LENGTH' | 'CHARSET' | 'FORBIDDEN' } {
+type CopyCheck = { ok: true; title: string; description: string } | { ok: false; reason: 'SHAPE' | 'LENGTH' | 'CHARSET' | 'FORBIDDEN' };
+
+/** 모델 반환 검증(공개). 접근자·Proxy 예외도 고정 실패(SHAPE)로 닫는다 */
+export function validateAdCopy(data: unknown): CopyCheck {
+  try {
+    return validateAdCopyUnsafe(data);
+  } catch {
+    return { ok: false, reason: 'SHAPE' };
+  }
+}
+
+function validateAdCopyUnsafe(data: unknown): CopyCheck {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return { ok: false, reason: 'SHAPE' };
   const proto = Object.getPrototypeOf(data);
   if (proto !== Object.prototype && proto !== null) return { ok: false, reason: 'SHAPE' };
@@ -95,7 +106,7 @@ export function validateAdCopy(data: unknown): { ok: true; title: string; descri
     const low = s.toLowerCase();
     if (AD_GENERATION_BANNED.some((b) => low.includes(b))) return { ok: false, reason: 'FORBIDDEN' };
   }
-  return { ok: true, title, description };
+  return { ok: true, title: String(title), description: String(description) };
 }
 
 /**
@@ -116,21 +127,42 @@ export async function generateAdCopy(input: unknown, deps: { readonly generator:
   } catch {
     return fail('INVALID_INPUT', false);
   }
-  if (!deps || deps.generator === null || typeof deps.generator?.generate !== 'function') return fail('NOT_CONFIGURED', false);
-
-  let outcome: GeneratorOutcome;
+  // deps·outcome 접근은 모두 불신 경계 안에서 한다(접근자·Proxy 예외 → 고정 실패, 원문 미반환)
+  let generate: AdCopyGenerator['generate'];
   try {
-    outcome = await deps.generator.generate(buildAdPrompt(situationId));
+    const g = deps ? deps.generator : null;
+    if (g === null || g === undefined || typeof g.generate !== 'function') return fail('NOT_CONFIGURED', false);
+    generate = g.generate.bind(g);
+  } catch {
+    return fail('NOT_CONFIGURED', false);
+  }
+
+  let raw: unknown;
+  try {
+    raw = await generate(buildAdPrompt(situationId));
   } catch {
     return fail('GENERATION_FAILED', true, 'TRANSPORT_ERROR');
   }
-  if (!outcome || typeof outcome !== 'object') return fail('GENERATION_FAILED', true, 'BAD_RESPONSE');
-  if (outcome.kind !== 'ok') {
-    const code: GeneratorErrorCode = outcome.kind === 'error' && (GENERATOR_ERROR_CODES as readonly unknown[]).includes(outcome.code) ? outcome.code : 'BAD_RESPONSE';
-    if (code === 'NOT_CONFIGURED' && outcome.called !== true) return fail('NOT_CONFIGURED', false);
-    return fail('GENERATION_FAILED', outcome.called === true, code);
+  let data: unknown;
+  try {
+    if (raw === null || typeof raw !== 'object') return fail('GENERATION_FAILED', true, 'BAD_RESPONSE');
+    const o = raw as Record<string, unknown>;
+    const kind = o.kind;
+    const called = o.called;
+    if (kind === 'error') {
+      if (typeof called !== 'boolean') return fail('GENERATION_FAILED', true, 'BAD_RESPONSE');
+      const c = o.code;
+      const code: GeneratorErrorCode = (GENERATOR_ERROR_CODES as readonly unknown[]).includes(c) ? (c as GeneratorErrorCode) : 'BAD_RESPONSE';
+      if (code === 'NOT_CONFIGURED' && called === false) return fail('NOT_CONFIGURED', false);
+      return fail('GENERATION_FAILED', called, code);
+    }
+    // 성공은 called === true(boolean true)일 때만. 누락·false·문자열은 호출 증거가 아니므로 거부
+    if (kind !== 'ok' || called !== true) return fail('GENERATION_FAILED', true, 'BAD_RESPONSE');
+    data = o.data;
+  } catch {
+    return fail('GENERATION_FAILED', true, 'BAD_RESPONSE');
   }
-  const v = validateAdCopy(outcome.data);
+  const v = validateAdCopy(data);
   if (!v.ok) return fail('OUTPUT_REJECTED', true, v.reason);
   return Object.freeze({
     ok: true,

@@ -92,3 +92,45 @@ test('AG6 생성 성공이 집행 승인이 되지 않는다(campaignDraft block
   const c = buildCampaignDraft({ draftId: 'moving', product: 'internet-tv', dailyBudgetKrw: 10000, totalBudgetKrw: 30000 });
   assert.ok(c.ok && c.draft.executionAllowed === false && c.draft.blockers.length === 7);
 });
+
+test('AG7 불신 outcome 계약: 성공은 called===true일 때만, 오류 called는 boolean, 접근자·Proxy 예외는 고정 실패', async () => {
+  for (const called of [false, undefined, 'true', 1, null]) {
+    const { g } = fake({ kind: 'ok', data: { ...GOOD }, called } as unknown as GeneratorOutcome);
+    assert.deepEqual(await generateAdCopy(input, { generator: g }), { ok: false, error: 'GENERATION_FAILED', reason: 'BAD_RESPONSE', generatorCalled: true }, String(called));
+  }
+  const { g: gNo } = fake({ kind: 'ok', data: { ...GOOD } } as unknown as GeneratorOutcome);
+  assert.equal((await generateAdCopy(input, { generator: gNo })).ok, false, 'called 누락');
+  for (const called of [undefined, 'false', 0]) {
+    const { g } = fake({ kind: 'error', code: 'TIMEOUT', called } as unknown as GeneratorOutcome);
+    assert.deepEqual(await generateAdCopy(input, { generator: g }), { ok: false, error: 'GENERATION_FAILED', reason: 'BAD_RESPONSE', generatorCalled: true });
+  }
+  // data getter 예외(가짜 내부 표식) → 원래 예외로 reject하지 않고 SHAPE
+  const trap = { get title(): string { throw new Error('INTERNAL-MARK sk-leak'); }, description: GOOD.description };
+  const { g: g1 } = fake({ kind: 'ok', data: trap, called: true });
+  const r1 = await generateAdCopy(input, { generator: g1 });
+  assert.deepEqual(r1, { ok: false, error: 'OUTPUT_REJECTED', reason: 'SHAPE', generatorCalled: true });
+  assert.ok(!JSON.stringify(r1).includes('INTERNAL'));
+  // Proxy data·outcome·deps
+  const px = new Proxy({}, { ownKeys() { throw new Error('INTERNAL px'); }, getPrototypeOf() { throw new Error('INTERNAL proto'); } });
+  const { g: g2 } = fake({ kind: 'ok', data: px, called: true });
+  assert.deepEqual(await generateAdCopy(input, { generator: g2 }), { ok: false, error: 'OUTPUT_REJECTED', reason: 'SHAPE', generatorCalled: true });
+  const badOutcome = new Proxy({}, { get() { throw new Error('INTERNAL outcome'); } });
+  const g3: AdCopyGenerator = { generate: async () => badOutcome as GeneratorOutcome };
+  // Promise 해석 단계에서 then 접근이 예외 → TRANSPORT_ERROR(고정 코드), 원문 미반환
+  const r3 = await generateAdCopy(input, { generator: g3 });
+  assert.deepEqual(r3, { ok: false, error: 'GENERATION_FAILED', reason: 'TRANSPORT_ERROR', generatorCalled: true });
+  assert.ok(!JSON.stringify(r3).includes('INTERNAL'));
+  const g3b: AdCopyGenerator = { generate: async () => ({ get kind(): string { throw new Error('INTERNAL kind'); } }) as unknown as GeneratorOutcome };
+  assert.deepEqual(await generateAdCopy(input, { generator: g3b }), { ok: false, error: 'GENERATION_FAILED', reason: 'BAD_RESPONSE', generatorCalled: true });
+  const badDeps = new Proxy({}, { get() { throw new Error('INTERNAL deps'); } }) as { generator: AdCopyGenerator | null };
+  assert.deepEqual(await generateAdCopy(input, badDeps), { ok: false, error: 'NOT_CONFIGURED', generatorCalled: false });
+  // validateAdCopy 직접 호출도 예외 없이 고정 실패
+  assert.deepEqual(validateAdCopy(trap), { ok: false, reason: 'SHAPE' });
+  assert.deepEqual(validateAdCopy(px), { ok: false, reason: 'SHAPE' });
+  // 원본 불변
+  const data = { ...GOOD };
+  const before = JSON.stringify(data);
+  const { g: g4 } = fake({ kind: 'ok', data, called: true });
+  await generateAdCopy(input, { generator: g4 });
+  assert.equal(JSON.stringify(data), before);
+});

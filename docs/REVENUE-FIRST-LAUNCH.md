@@ -228,11 +228,19 @@
   - transport·키·모델·실행 허용은 모두 명시 주입이다. env·SDK·기본 클라이언트는 없다.
   - 요청: 고정 `https://api.openai.com/v1/responses`, `redirect:'error'`
     - body: `store:false`, strict `json_schema`, `max_output_tokens`. tools·stream·background는 없다.
-  - 1회 호출에 deadline(AbortSignal)과 응답 크기 상한을 둔다. 재시도는 없다.
+  - 1회 호출에 deadline을 두고 재시도는 하지 않는다(PM 6944243176 보완).
+    - 마감 시 AbortSignal을 보내고 진행 중인 reader를 취소한다.
+    - 마감 뒤 도착한 응답은 본문을 읽지 않고 취소만 한다. 취소 완료를 기다리지 않으므로 정리가 막혀도 반환이 지연되지 않는다.
+    - 취소가 전송·청구 취소를 보장하지는 않는다.
+  - 응답 크기 상한은 transport가 fetch Response처럼 `body` 스트림을 주면 어댑터가 chunk마다 실제 바이트를 세는 방식이다. 넘는 순간 읽기를 취소한다.
+    - Content-Length는 믿지 않는다.
+    - 실제 최대 수신량은 상한 + 마지막 chunk 크기다.
+  - 오류 응답(429·非2xx) 본문은 읽지 않는다.
+  - 불신 결과 계약: 생성기 성공은 `called === true`일 때만 인정한다. 오류의 `called`도 boolean인지 검사한다. deps·outcome·data의 접근자·Proxy 예외는 고정 실패로 닫는다.
   - 응답은 `output[].message.content[].output_text`를 읽는다. refusal·incomplete·429·非JSON은 고정 코드로 닫는다.
   - 계약 근거는 PM이 확인한 공식 자료다(Claude 환경에서는 원문 미열람).
   - `store:false`는 보관 0의 보증이 아니고, `max_output_tokens`는 원화 청구 상한이 아니다. 모델명·가격·지원 여부는 미확인이다.
-- 시험(가짜 생성기·가짜 transport만): route AG1~AG6, OA1~OA6, unit AD4·AD5(정적, 미배선)
+- 시험(가짜 생성기·가짜 transport만): route AG1~AG7, OA1~OA6·OA4b, unit AD4·AD5(정적, 미배선)
   - 실제 OpenAI 연결이나 품질·사실성을 증명하지 않는다.
 - 실제 키·모델 호출·요금 발생·매체 게시·화면/API 배선은 없다.
 

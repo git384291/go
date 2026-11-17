@@ -13,14 +13,37 @@ const okBody = (data: unknown = COPY, status = 'completed') => JSON.stringify({
   usage: { input_tokens: 1, output_tokens: 1 },
 });
 type Call = { url: string; init: Parameters<HttpTransport>[1] };
-const transport = (status: number, body: string | (() => Promise<string>), delayMs = 0) => {
+/** 가짜 본문 스트림: pull 횟수·취소 여부를 기록한다 */
+const stream = (chunks: Uint8Array[], opts: { hangAfter?: number; cancelThrows?: boolean; cancelHangs?: boolean } = {}) => {
+  const st = { pulls: 0, cancelled: false };
+  let i = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(c) {
+      st.pulls++;
+      if (opts.hangAfter !== undefined && i >= opts.hangAfter) return new Promise<void>(() => undefined); // 영원히 대기
+      if (i < chunks.length) c.enqueue(chunks[i++]!);
+      else c.close();
+    },
+    cancel() {
+      st.cancelled = true;
+      if (opts.cancelThrows) throw new Error('cancel failed sk-leak');
+      if (opts.cancelHangs) return new Promise<void>(() => undefined);
+    },
+  }, { highWaterMark: 0 });
+  return { body, st };
+};
+const enc = (s: string) => new TextEncoder().encode(s);
+const transport = (status: number, body: string, delayMs = 0) => {
   const calls: Call[] = [];
+  const streams: ReturnType<typeof stream>[] = [];
   const t: HttpTransport = async (url, init) => {
     calls.push({ url, init });
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
-    return { status, text: async () => (typeof body === 'function' ? body() : body) };
+    const s = stream([enc(body)]);
+    streams.push(s);
+    return { status, body: s.body };
   };
-  return { t, calls };
+  return { t, calls, streams };
 };
 const cfg = (t: HttpTransport | null, over: Partial<OpenAiAdGeneratorConfig> = {}): OpenAiAdGeneratorConfig => ({
   transport: t, apiKey: KEY, model: 'fake-model-1', executionAllowed: true, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192, ...over,
@@ -86,26 +109,93 @@ test('OA3 HTTP 오류·429·非JSON·이상 구조·refusal·incomplete → 고�
   }
 });
 
-test('OA4 deadline: 늦은 응답은 TIMEOUT, signal abort, 늦게 온 결과 미사용', async () => {
-  const { t, calls } = transport(200, okBody(), 1500);
+test('OA4 deadline: 늦은 headers는 본문 읽기 0·정리, signal abort, 반환 결과 불변', async () => {
+  const { t, calls, streams } = transport(200, okBody(), 1100); // abort를 무시하고 1100ms 뒤 반환
   const started = Date.now();
   const r = await createOpenAiAdGenerator(cfg(t, { timeoutMs: 1000 })).generate(prompt);
   assert.deepEqual(r, { kind: 'error', code: 'TIMEOUT', called: true });
-  assert.ok(Date.now() - started < 1450);
+  assert.ok(Date.now() - started < 1090);
   assert.equal(calls[0]!.init.signal.aborted, true);
-  await new Promise((res) => setTimeout(res, 600)); // 늦은 응답이 와도 이미 반환된 결과는 바뀌지 않는다
-  assert.equal(calls.length, 1);
+  await new Promise((res) => setTimeout(res, 300));
+  assert.equal(streams.length, 1);
+  assert.equal(streams[0]!.st.pulls, 0, '마감 뒤 도착한 본문은 읽지 않는다');
+  assert.equal(streams[0]!.st.cancelled, true, '본문 정리(cancel)');
+  assert.equal(calls.length, 1, '재시도 0');
 });
 
-test('OA5 응답 크기 상한·transport 예외 → 고정 코드', async () => {
-  const big = okBody({ title: COPY.title, description: COPY.description + ' '.repeat(10) }) + ' '.repeat(9000);
-  const { t } = transport(200, big);
-  assert.deepEqual(await createOpenAiAdGenerator(cfg(t)).generate(prompt), { kind: 'error', code: 'TOO_LARGE', called: true });
+test('OA4b deadline: 읽는 중 멈춘 본문은 취소, 늦은 chunk 뒤 새 읽기 0, 정리 실패·지연이 반환을 막지 않음', async () => {
+  for (const opt of [{}, { cancelThrows: true }, { cancelHangs: true }]) {
+    const s = stream([enc('{"status":')], { hangAfter: 1, ...opt });
+    const t: HttpTransport = async () => ({ status: 200, body: s.body });
+    const started = Date.now();
+    const r = await createOpenAiAdGenerator(cfg(t, { timeoutMs: 1000 })).generate(prompt);
+    assert.deepEqual(r, { kind: 'error', code: 'TIMEOUT', called: true }, JSON.stringify(opt));
+    assert.ok(Date.now() - started < 1200, '정리를 기다리지 않음');
+    assert.equal(s.st.cancelled, true);
+    const pulls = s.st.pulls;
+    await new Promise((res) => setTimeout(res, 100));
+    assert.equal(s.st.pulls, pulls, '취소 뒤 새 읽기 없음');
+  }
+  // 마감 직전에 chunk가 오고 그 뒤 마감 → 다음 read를 시작하지 않는다
+  let pulls = 0;
+  let cancelled = false;
+  const slow = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      pulls++;
+      await new Promise((res) => setTimeout(res, 700));
+      c.enqueue(enc('{'));
+    },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 });
+  const t2: HttpTransport = async () => ({ status: 200, body: slow });
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(t2, { timeoutMs: 1000 })).generate(prompt), { kind: 'error', code: 'TIMEOUT', called: true });
+  await new Promise((res) => setTimeout(res, 800));
+  assert.equal(cancelled, true);
+  assert.ok(pulls <= 2, `마감 뒤 추가 read 없음(pulls=${pulls})`);
+});
+
+test('OA5 실제 바이트 상한: 초과 chunk에서 즉시 취소·추가 읽기 0, 정확 경계 통과, Content-Length 미사용, transport 예외', async () => {
+  // 1KB chunk를 무한히 주는 스트림 → 상한 1024+α에서 중단
+  let pulls = 0;
+  let cancelled = false;
+  const endless = new ReadableStream<Uint8Array>({
+    pull(c) { pulls++; c.enqueue(new Uint8Array(1000).fill(32)); },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 });
+  const tInf: HttpTransport = async () => ({ status: 200, body: endless, headers: { 'content-length': '10' } } as never);
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(tInf, { maxResponseBytes: 2048 })).generate(prompt), { kind: 'error', code: 'TOO_LARGE', called: true });
+  assert.equal(cancelled, true);
+  assert.equal(pulls, 3, '2048 초과 순간(3번째 chunk)에서 중단');
+  // 정확 경계: 본문 바이트 = 상한 → 통과, 상한-1 → TOO_LARGE
+  const exact = JSON.stringify({ ...JSON.parse(okBody()), pad: 'x'.repeat(1200) }); // 설정 하한(1024바이트) 이상으로 맞춘 정상 본문
+  const n = enc(exact).byteLength;
+  const s1 = stream([enc(exact)]);
+  assert.equal((await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: s1.body }), { maxResponseBytes: n })).generate(prompt)).kind, 'ok');
+  const s2 = stream([enc(exact)]);
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: s2.body }), { maxResponseBytes: n - 1 })).generate(prompt), { kind: 'error', code: 'TOO_LARGE', called: true });
+  // 여러 chunk로 나뉘어도 합계로 판정, 멀티바이트 경계도 정상 디코드
+  const bytes = enc(exact);
+  const parts = [bytes.slice(0, 7), bytes.slice(7, 100), bytes.slice(100)];
+  const s3 = stream(parts);
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: s3.body }))).generate(prompt), { kind: 'ok', data: COPY, called: true });
+  // 잘못된 UTF-8·비 Uint8Array chunk·본문 없음
+  const s4 = stream([new Uint8Array([0xff, 0xfe])]);
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: s4.body }))).generate(prompt), { kind: 'error', code: 'BAD_RESPONSE', called: true });
+  const weird = new ReadableStream({ pull(c) { c.enqueue('문자열 chunk' as unknown as Uint8Array); } }) as ReadableStream<Uint8Array>;
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: weird }))).generate(prompt), { kind: 'error', code: 'BAD_RESPONSE', called: true });
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: null }))).generate(prompt), { kind: 'error', code: 'BAD_RESPONSE', called: true });
+  // 오류 응답 본문은 읽지 않고 정리
+  const s5 = stream([enc('{"error":"sk-leak"}')]);
+  assert.deepEqual(await createOpenAiAdGenerator(cfg(async () => ({ status: 500, body: s5.body }))).generate(prompt), { kind: 'error', code: 'HTTP_ERROR', called: true });
+  assert.equal(s5.st.pulls, 0);
+  assert.equal(s5.st.cancelled, true);
   const throwing: HttpTransport = async () => { throw new Error('ECONNRESET sk-leak api.openai.com'); };
   const r = await createOpenAiAdGenerator(cfg(throwing)).generate(prompt);
   assert.deepEqual(r, { kind: 'error', code: 'TRANSPORT_ERROR', called: true });
-  const badText: HttpTransport = async () => ({ status: 200, text: async () => { throw new Error('sk-leak'); } });
-  assert.deepEqual(await createOpenAiAdGenerator(cfg(badText)).generate(prompt), { kind: 'error', code: 'TRANSPORT_ERROR', called: true });
+  const errStream = new ReadableStream<Uint8Array>({ pull() { throw new Error('sk-leak read'); } });
+  const r2 = await createOpenAiAdGenerator(cfg(async () => ({ status: 200, body: errStream }))).generate(prompt);
+  assert.deepEqual(r2, { kind: 'error', code: 'TRANSPORT_ERROR', called: true });
+  assert.ok(!JSON.stringify(r2).includes('sk-leak'));
 });
 
 test('OA6 끝까지: 가짜 transport → 오케스트레이터 검증(금지 주장 거부, 정상은 미게시 초안)', async () => {
