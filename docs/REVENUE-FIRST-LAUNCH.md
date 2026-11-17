@@ -250,13 +250,18 @@
   - `videos.insert`: POST `https://www.googleapis.com/upload/youtube/v3/videos`
     - `part`가 필수이고, OAuth 범위(youtube.upload 등)가 필요하다.
     - 업로드 쿼터는 1단위이고 일 100회 버킷이다. MIME은 `video/*`이다.
-    - **"미검증 API 프로젝트 업로드는 비공개로 제한되지 않는다"**고 적혀 있다. 그래서 어댑터가 `privacyStatus:'private'`를 직접 고정한다.
-    - 이 문구는 PM 지시의 "미검증 조건 미확정"과 다를 수 있으므로, 실계정에서 다시 확인해야 한다.
+    - 미검증 API 프로젝트의 비공개 제한 문구는 **열람 결과가 엇갈린다.**
+      - Claude가 연 원문: "not restricted to private viewing mode"
+      - PM이 연 원문: private 제한 명시
+    - 확정하지 않는다. 어댑터는 어느 쪽이든 `privacyStatus:'private'`를 직접 고정한다. 실업로드 조건과 쿼터는 실계정에서 다시 확인한다.
   - `videos` 리소스
     - privacyStatus는 private/public/unlisted이고, 생략하면 public이 기본일 수 있다.
     - uploadStatus 값, processingDetails.processingStatus(failed/processing/succeeded/terminated)
     - 제목은 최대 100자이고 설명은 5000바이트이며, `<` `>`를 쓸 수 없다.
-  - `channels.list(mine=true)`·`videos.list`는 같은 v3 GET 엔드포인트다. 세부 파라미터 표는 이번에 다시 열람하지 않았다.
+  - `channels.list(part=id, mine=true)`·`videos.list(id, part=status,processingDetails)`: PM이 원문 열람으로 확인했다.
+    - 실제 token에 필요한 OAuth 범위는 미검증이다(upload 범위만으로 조회까지 보장하지 않음).
+    - insert의 필수 metadata·category와 multipart 수락 여부도 공식 업로드 원문과 다시 대조해야 한다.
+    - 가짜 요청 계약 시험은 실제 Google 수락을 뜻하지 않는다.
   - `uploadType=multipart`는 Google API 공통 업로드 방식이다. insert 문서 표에는 없고, 예제는 resumable이다.
 - **`src/server/advertising/youtubePrivatePublisher.ts`**(server-only)
   - **필수 주입:** transport·OAuth access token·예상 채널 ID·`uploadAllowed===true`. env·기본 fetch·SDK·키 저장·발급·로그인 경로는 없다. 하나라도 없으면 transport 0이다.
@@ -275,15 +280,31 @@
     - 성공: UPLOADED_PRIVATE + 최소 videoId
   - **상태 조회 결과:** PRIVATE_PROCESSING / PROCESSED / PROCESSING_FAILED / PROCESSING_UNKNOWN, NOT_PRIVATE, UPLOAD_REJECTED, NOT_FOUND, QUERY_FAILED
   - 마감·바이트 상한·늦은 본문 취소는 `boundedHttp.ts`가 맡는다(검수된 OpenAI 어댑터 패턴). 취소가 실제 업로드·청구 취소를 보장하지는 않는다.
+  - **PM 6952112639 보완**
+    - config는 속성마다 한 번만 읽어 스냅샷으로 만들고, 그 스냅샷을 검증해 그대로 쓴다. 이후 원본 변경은 무시한다.
+    - `uploadPrivate` 하나에 **절대 마감 1개**를 둔다. 채널 확인과 업로드가 남은 시간을 공유한다.
+      - 마감 뒤에는 새 요청을 보내지 않고 TIMEOUT_BEFORE_UPLOAD(uploadAttempted:false)를 돌려준다.
+      - 업로드를 이미 보냈다면 RESULT_UNKNOWN이다.
+    - 상태 판정
+      - privacyStatus·uploadStatus는 enum이어야 한다. 누락·불량이면 QUERY_FAILED.
+      - processingDetails·processingStatus가 누락되면 PRIVATE_PROCESSING_UNKNOWN(성공 아님)이고, 값이 enum 밖이면 QUERY_FAILED.
+    - `boundedHttp`: status·body는 한 번만 읽는다. read reject, getReader 예외, 접근자 예외에서 소유한 reader/body를 정리하고, 정리를 기다리지 않는다.
   - 영속 멱등 저장소·백그라운드 재시도·스케줄러는 없다.
 - **`src/server/advertising/youtubeAdPreparation.ts`**
-  - 생성기와 게시 어댑터를 필수 주입받아 생성→`validateAdCopy`→비공개 업로드→상태 조회를 조합한다.
+  - 생성기·게시 어댑터·`totalTimeoutMs`를 필수 주입받는다. deps는 한 번만 읽는다.
+  - **영상 검증을 생성 전에** 한다. 불량이면 생성 0·업로드 0이다.
+  - 그 뒤 생성→`validateAdCopy`→비공개 업로드→상태 조회를 조합한다.
+  - 생성 결과 계약: ok·source:'model'·generatorCalled===true·같은 situation/product·DRAFT_UNPUBLISHED·executionAllowed:false가 모두 맞아야 한다.
+  - 업로드·조회 결과는 state·videoId·uploadAttempted를 한 번만 읽어 상태별 계약과 대조한다. 모순되면 RESULT_UNKNOWN이다.
+  - 마감 계약
+    - 생성·업로드·조회 await가 하나의 절대 마감을 공유하고, 마감 뒤에는 새 단계를 시작하지 않는다.
+    - 생성·업로드 호출은 조합에서 취소할 수 없으므로 늦은 결과는 버린다. 업로드 중 마감이면 RESULT_UNKNOWN이다.
   - 입력: 고정 상황 ID·`internet-tv`·메모리 영상만
   - 생성 실패나 꺼짐이면 업로드 0이다.
   - 결과 stage: `PRIVATE_TEST_ONLY` / `UPLOAD_NOT_COMPLETED` 등. 항상 `publicPublished:false`·`paidExecutionAllowed:false`다.
   - HTTP route/UI 배선은 없다.
 - **시험(가짜 transport, 실네트워크 0을 전역 fetch 차단으로 확인)**
-  - route YT1~YT7·YP1~YP3, unit AD6(정적)
+  - route YT1~YT7·YP1~YP3·R1~R7(PM 재현 결함 회귀), unit AD4(정확 사용처 목록)·AD6(정적)
   - 가짜 성공은 실영상 품질·실계정·실 AI·문의 성과가 아니다.
 - **남은 실제 조건**
   - 실제 영상 제작 방식과 무료 로컬 도구

@@ -164,7 +164,7 @@ test('YT6 상태 조회: 처리 단계 구분, 공개·목록 불일치·형태 
   const cases: [Resp, string][] = [
     [{ status: 200, text: vidOk('processing') }, 'PRIVATE_PROCESSING'], [{ status: 200, text: vidOk('succeeded') }, 'PRIVATE_PROCESSED'],
     [{ status: 200, text: vidOk('failed') }, 'PRIVATE_PROCESSING_FAILED'], [{ status: 200, text: vidOk('terminated') }, 'PRIVATE_PROCESSING_FAILED'],
-    [{ status: 200, text: vidOk('weird') }, 'PRIVATE_PROCESSING_UNKNOWN'], [{ status: 200, text: vidOk('succeeded', 'public') }, 'NOT_PRIVATE'],
+    [{ status: 200, text: vidOk('weird') }, 'QUERY_FAILED'], [{ status: 200, text: vidOk('succeeded', 'public') }, 'NOT_PRIVATE'],
     [{ status: 200, text: vidOk('succeeded', 'unlisted') }, 'NOT_PRIVATE'], [{ status: 200, text: vidOk('processing', 'private', 'rejected') }, 'UPLOAD_REJECTED'],
     [{ status: 200, text: JSON.stringify({ items: [] }) }, 'NOT_FOUND'],
     [{ status: 200, text: JSON.stringify({ items: [{ id: 'ZZZZZZZZZZZ', status: { privacyStatus: 'private' } }] }) }, 'QUERY_FAILED'],
@@ -193,7 +193,7 @@ const prepInput = (over: Record<string, unknown> = {}) => ({ situationId: 'movin
 
 test('YP1 정상 가짜 조합: 생성→검증→비공개 업로드→상태, PRIVATE_TEST_ONLY·공개/유료 false', async () => {
   const { t, calls } = fakeTransport(OK);
-  const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(cfg(t)) });
+  const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(cfg(t)), totalTimeoutMs: 5000 });
   assert.deepEqual(r, { stage: 'PRIVATE_TEST_ONLY', upload: 'UPLOADED_PRIVATE', status: 'PRIVATE_PROCESSING', videoId: VID, publicPublished: false, paidExecutionAllowed: false });
   assert.ok(Object.isFrozen(r));
   assert.equal(calls.length, 3);
@@ -203,15 +203,15 @@ test('YP2 생성 실패·꺼짐·불량 입력 → 업로드 0', async () => {
   const { t, calls } = fakeTransport(OK);
   const pub = createYoutubePrivatePublisher(cfg(t));
   const cases: [unknown, Parameters<typeof prepareYoutubeAdPrivateTest>[1], string][] = [
-    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: null }), publisher: pub }, 'GENERATION_FAILED'],
-    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen({ title: '최저가 인터넷', description: COPY.description }) }), publisher: pub }, 'GENERATION_FAILED'],
-    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen(COPY, false) }), publisher: pub }, 'GENERATION_FAILED'],
-    [prepInput(), { generateCopy: async () => { throw new Error('INTERNAL'); }, publisher: pub }, 'GENERATION_FAILED'],
-    [prepInput(), { generateCopy: null, publisher: pub }, 'NOT_CONFIGURED'],
-    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: null }, 'NOT_CONFIGURED'],
-    [prepInput({ situationId: 'x' }), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: pub }, 'INVALID_INPUT'],
-    [prepInput({ publish: true }), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: pub }, 'INVALID_INPUT'],
-    [prepInput({ video: 'file.mp4' }), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: pub }, 'INVALID_INPUT'],
+    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: null }), publisher: pub, totalTimeoutMs: 5000 }, 'GENERATION_FAILED'],
+    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen({ title: '최저가 인터넷', description: COPY.description }) }), publisher: pub, totalTimeoutMs: 5000 }, 'GENERATION_FAILED'],
+    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen(COPY, false) }), publisher: pub, totalTimeoutMs: 5000 }, 'GENERATION_FAILED'],
+    [prepInput(), { generateCopy: async () => { throw new Error('INTERNAL'); }, publisher: pub, totalTimeoutMs: 5000 }, 'GENERATION_FAILED'],
+    [prepInput(), { generateCopy: null, publisher: pub, totalTimeoutMs: 5000 }, 'NOT_CONFIGURED'],
+    [prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: null, totalTimeoutMs: 5000 }, 'NOT_CONFIGURED'],
+    [prepInput({ situationId: 'x' }), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: pub, totalTimeoutMs: 5000 }, 'INVALID_INPUT'],
+    [prepInput({ publish: true }), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: pub, totalTimeoutMs: 5000 }, 'INVALID_INPUT'],
+    [prepInput({ video: 'file.mp4' }), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: pub, totalTimeoutMs: 5000 }, 'INVALID_INPUT'],
   ];
   for (const [inp, deps, stage] of cases) {
     const r = await prepareYoutubeAdPrivateTest(inp, deps);
@@ -222,28 +222,182 @@ test('YP2 생성 실패·꺼짐·불량 입력 → 업로드 0', async () => {
   }
   assert.equal(calls.length, 0);
   // 꺼진 publisher(설정 없음) → 업로드 transport 0, NOT_CONFIGURED로 표시
-  const r2 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(null) });
+  const r2 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(null), totalTimeoutMs: 5000 });
   assert.deepEqual(r2, { stage: 'UPLOAD_NOT_COMPLETED', upload: 'NOT_CONFIGURED', status: 'NOT_QUERIED', videoId: null, publicPublished: false, paidExecutionAllowed: false });
 });
 
 test('YP3 업로드 미완료·결과 미확인·비공개 아님을 성공으로 숨기지 않음, 예외·Proxy 원문 미반환', async () => {
   for (const [upR, want] of [[{ status: 200, delayMs: 1200, text: upOk }, 'RESULT_UNKNOWN'], [{ status: 403 }, 'UPLOAD_FAILED'], [{ status: 200, text: JSON.stringify({ id: VID, status: { privacyStatus: 'public' } }) }, 'NOT_PRIVATE']] as const) {
     const { t } = fakeTransport({ ...OK, upload: upR });
-    const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(cfg(t)) });
+    const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(cfg(t)), totalTimeoutMs: 5000 });
     assert.equal(r.stage, 'UPLOAD_NOT_COMPLETED');
     assert.equal(r.upload, want);
     assert.equal(r.status, 'NOT_QUERIED');
   }
   const evil = { uploadPrivate: async () => new Proxy({}, { get() { throw new Error('INTERNAL ya29.leak'); } }), getStatus: async () => ({ state: 'PRIVATE_PROCESSED' }) } as never;
-  const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: evil });
+  const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: evil, totalTimeoutMs: 5000 });
   assert.equal(r.stage, 'UPLOAD_NOT_COMPLETED');
   assert.ok(!JSON.stringify(r).includes('leak'));
   const fakeOk = { uploadPrivate: async () => ({ state: 'UPLOADED_PRIVATE' }), getStatus: async () => ({ state: 'PRIVATE_PROCESSED' }) } as never;
-  const r2 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: fakeOk });
+  const r2 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: fakeOk, totalTimeoutMs: 5000 });
   assert.deepEqual([r2.stage, r2.upload], ['UPLOAD_NOT_COMPLETED', 'RESULT_UNKNOWN'], 'ID 없는 성공은 결과 미확인');
   const inp = prepInput();
   const before = Array.from(inp.video as Uint8Array);
   const { t } = fakeTransport(OK);
-  await prepareYoutubeAdPrivateTest(inp, { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(cfg(t)) });
+  await prepareYoutubeAdPrivateTest(inp, { generateCopy: (i) => generateAdCopy(i, { generator: gen() }), publisher: createYoutubePrivatePublisher(cfg(t)), totalTimeoutMs: 5000 });
   assert.deepEqual(Array.from(inp.video as Uint8Array), before);
+});
+
+// ── PM 6952112639 결함 회귀 ──
+const fullGen = (over: Record<string, unknown> = {}) => async (i: { situationId: string }) => ({
+  ok: true, source: 'model', situationId: i.situationId, product: 'internet-tv', ...COPY, titleLength: 14, descriptionLength: 44,
+  status: 'DRAFT_UNPUBLISHED', executionAllowed: false, generatorCalled: true, ...over,
+}) as never;
+
+test('R1 생성 결과 계약: generatorCalled·situation·product·status·executionAllowed 불일치 → 업로드 0', async () => {
+  for (const over of [{ generatorCalled: false }, { generatorCalled: 'true' }, { situationId: 'contract_end' }, { product: 'internet-phone' },
+    { status: 'PUBLISHED' }, { executionAllowed: true }, { source: 'fallback' }, { ok: 'true' }]) {
+    const { t, calls } = fakeTransport(OK);
+    const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: fullGen(over), publisher: createYoutubePrivatePublisher(cfg(t)), totalTimeoutMs: 5000 });
+    assert.equal(r.stage, 'GENERATION_FAILED', JSON.stringify(over));
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('R2 상태·업로드 결과는 한 번만 읽고 allowlist DTO만(변하는 getter·모순 결과 거부)', async () => {
+  let reads = 0;
+  const flip = { get state() { reads++; return reads <= 2 ? 'PRIVATE_PROCESSED' : 'INTERNAL-MARK'; } };
+  const pub = { uploadPrivate: async () => ({ state: 'UPLOADED_PRIVATE', videoId: VID, uploadAttempted: true }), getStatus: async () => flip } as never;
+  const r = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: fullGen(), publisher: pub, totalTimeoutMs: 5000 });
+  assert.equal(r.status, 'PRIVATE_PROCESSED');
+  assert.equal(reads, 1, 'state 1회만 읽음');
+  assert.ok(!JSON.stringify(r).includes('INTERNAL'));
+  const contradictions = [
+    { state: 'UPLOADED_PRIVATE', videoId: VID, uploadAttempted: false }, { state: 'UPLOADED_PRIVATE', videoId: 'bad', uploadAttempted: true },
+    { state: 'CHANNEL_MISMATCH', uploadAttempted: true }, { state: 'UPLOAD_FAILED', uploadAttempted: false }, { state: 'NOT_PRIVATE', uploadAttempted: true },
+    { state: 'WHATEVER', uploadAttempted: true },
+  ];
+  for (const c of contradictions) {
+    const p2 = { uploadPrivate: async () => c, getStatus: async () => ({ state: 'PRIVATE_PROCESSED' }) } as never;
+    const r2 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: fullGen(), publisher: p2, totalTimeoutMs: 5000 });
+    assert.deepEqual([r2.stage, r2.upload, r2.status], ['UPLOAD_NOT_COMPLETED', 'RESULT_UNKNOWN', 'NOT_QUERIED'], JSON.stringify(c));
+  }
+});
+
+test('R3 config getter 재읽기·예외 → 팩토리 예외 없음, 스냅샷만 사용', async () => {
+  const { t, calls } = fakeTransport(OK);
+  let n = 0;
+  const tricky = { ...cfg(t), get transport() { n++; if (n > 1) throw new Error('INTERNAL transport'); return t; } } as YoutubePublisherConfig;
+  const p = createYoutubePrivatePublisher(tricky);
+  assert.equal(n, 1, 'transport 1회만 읽음');
+  assert.equal((await p.uploadPrivate(upInput())).state, 'UPLOADED_PRIVATE');
+  const throwing = { get transport(): never { throw new Error('INTERNAL'); }, accessToken: TOKEN, expectedChannelId: CH, uploadAllowed: true, timeoutMs: 1000, maxResponseBytes: 4096 } as YoutubePublisherConfig;
+  assert.doesNotThrow(() => createYoutubePrivatePublisher(throwing));
+  assert.equal((await createYoutubePrivatePublisher(throwing).uploadPrivate(upInput())).state, 'NOT_CONFIGURED');
+  // 생성 뒤 원본 config 변경은 무시
+  const c2 = cfg(t) as { -readonly [K in keyof YoutubePublisherConfig]: YoutubePublisherConfig[K] };
+  const p2 = createYoutubePrivatePublisher(c2);
+  c2.expectedChannelId = 'UC' + 'z'.repeat(22);
+  c2.uploadAllowed = false;
+  assert.equal((await p2.uploadPrivate(upInput())).state, 'UPLOADED_PRIVATE');
+  assert.ok(calls.length > 0);
+});
+
+test('R4 불량 영상·MIME·크기·접근 예외는 생성 전에 차단(생성 0·업로드 0)', async () => {
+  const big = new Uint8Array(YT_MAX_VIDEO_BYTES + 1); big.set(MP4());
+  const badVideo = Object.defineProperty({ situationId: 'moving', product: 'internet-tv', mimeType: 'video/mp4' }, 'video', { enumerable: true, get() { throw new Error('INTERNAL'); } });
+  const cases: unknown[] = [prepInput({ video: new Uint8Array(0) }), prepInput({ mimeType: 'text/plain' }), prepInput({ video: big }),
+    prepInput({ video: new Uint8Array(64) }), prepInput({ video: WEBM() }), badVideo];
+  for (const c of cases) {
+    let generated = 0;
+    const { t, calls } = fakeTransport(OK);
+    const r = await prepareYoutubeAdPrivateTest(c, { generateCopy: async (i) => { generated++; return fullGen()(i); }, publisher: createYoutubePrivatePublisher(cfg(t)), totalTimeoutMs: 5000 });
+    assert.equal(r.stage, 'INVALID_INPUT');
+    assert.equal(generated, 0, '생성 0');
+    assert.equal(calls.length, 0, '업로드 0');
+  }
+});
+
+test('R5 채널 확인+업로드는 하나의 절대 마감 공유(700+700/1000), 마감 뒤 새 요청 0', async () => {
+  const { t, calls } = fakeTransport({ ...OK, channels: { status: 200, text: chOk, delayMs: 700 }, upload: { status: 200, text: upOk, delayMs: 700 } });
+  const started = Date.now();
+  const r = await createYoutubePrivatePublisher(cfg(t)).uploadPrivate(upInput());
+  const took = Date.now() - started;
+  assert.deepEqual(r, { state: 'RESULT_UNKNOWN', uploadAttempted: true }, '업로드를 이미 보냈으므로 미확인');
+  assert.ok(took < 1150, `전체 ${took}ms`);
+  // 채널 확인이 마감을 다 쓰면 업로드 요청 0, uploadAttempted false
+  const { t: t2, calls: c2 } = fakeTransport({ ...OK, channels: { status: 200, text: chOk, delayMs: 1100 } });
+  assert.deepEqual(await createYoutubePrivatePublisher(cfg(t2)).uploadPrivate(upInput()), { state: 'CHANNEL_CHECK_FAILED', code: 'TIMEOUT', uploadAttempted: false });
+  await new Promise((res) => setTimeout(res, 200));
+  assert.equal(c2.filter((c) => c.url === YT_UPLOAD_URL).length, 0);
+  // 채널 응답이 마감 직전(990ms)에 오면 남은 시간이 거의 없어 업로드 0 또는 결과 미확인 — 업로드 미전송이면 attempted false
+  const { t: t3, calls: c3 } = fakeTransport({ ...OK, channels: { status: 200, text: chOk, delayMs: 995 } });
+  const r3 = await createYoutubePrivatePublisher(cfg(t3)).uploadPrivate(upInput());
+  const sentUpload = c3.filter((c) => c.url === YT_UPLOAD_URL).length;
+  assert.equal(r3.uploadAttempted, sentUpload > 0);
+  assert.ok(calls.length === 2);
+  // 조합 전체 마감: 생성이 늦으면 업로드 0
+  const { t: t4, calls: c4 } = fakeTransport(OK);
+  const r4 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: async (i) => { await new Promise((res) => setTimeout(res, 1200)); return fullGen()(i); }, publisher: createYoutubePrivatePublisher(cfg(t4)), totalTimeoutMs: 1000 });
+  assert.deepEqual([r4.stage, r4.upload], ['DEADLINE_EXCEEDED', 'NOT_ATTEMPTED']);
+  await new Promise((res) => setTimeout(res, 300));
+  assert.equal(c4.length, 0, '늦게 끝난 생성 결과로 업로드하지 않음');
+  for (const bad of [0, 999, 300001, '5000', NaN]) {
+    const r5 = await prepareYoutubeAdPrivateTest(prepInput(), { generateCopy: fullGen(), publisher: createYoutubePrivatePublisher(cfg(t4)), totalTimeoutMs: bad as number });
+    assert.equal(r5.stage, 'NOT_CONFIGURED');
+  }
+});
+
+test('R6 상태 enum 검증: 불량·누락 uploadStatus/processingStatus를 성공으로 넘기지 않음', async () => {
+  const one = (status: unknown, processing?: unknown) => JSON.stringify({ items: [{ id: VID, status, ...(processing === undefined ? {} : { processingDetails: processing }) }] });
+  const cases: [string, string][] = [
+    [one({ privacyStatus: 'private', uploadStatus: 'NOT_AN_ENUM' }, { processingStatus: 'succeeded' }), 'QUERY_FAILED'],
+    [one({ privacyStatus: 'private' }, { processingStatus: 'succeeded' }), 'QUERY_FAILED'],
+    [one({ privacyStatus: 'PRIVATE', uploadStatus: 'processed' }, { processingStatus: 'succeeded' }), 'QUERY_FAILED'],
+    [one({ uploadStatus: 'processed' }, { processingStatus: 'succeeded' }), 'QUERY_FAILED'],
+    [one('x'), 'QUERY_FAILED'],
+    [one({ privacyStatus: 'private', uploadStatus: 'processed' }, { processingStatus: 7 }), 'QUERY_FAILED'],
+    [one({ privacyStatus: 'private', uploadStatus: 'processed' }), 'PRIVATE_PROCESSING_UNKNOWN'],
+    [one({ privacyStatus: 'private', uploadStatus: 'processed' }, {}), 'PRIVATE_PROCESSING_UNKNOWN'],
+    [one({ privacyStatus: 'private', uploadStatus: 'processed' }, { processingStatus: 'succeeded' }), 'PRIVATE_PROCESSED'],
+  ];
+  for (const [text, state] of cases) {
+    const { t } = fakeTransport({ ...OK, videos: { status: 200, text } });
+    assert.equal((await createYoutubePrivatePublisher(cfg(t)).getStatus(VID)).state, state, text);
+  }
+});
+
+test('R7 read reject·getReader 예외·status/body getter 예외 → 소유 reader/body 정리, 정리 실패·대기가 반환을 막지 않음', async () => {
+  for (const cancelMode of ['ok', 'throws', 'hangs'] as const) {
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull() { throw new Error('read failed ya29.leak'); },
+      cancel() { cancelled++; if (cancelMode === 'throws') throw new Error('x'); if (cancelMode === 'hangs') return new Promise<void>(() => undefined); },
+    }, { highWaterMark: 0 });
+    const t: BodyTransport = async (url) => (url === YT_CHANNELS_URL ? { status: 200, body } : { status: 500, body: null });
+    const started = Date.now();
+    const r = await createYoutubePrivatePublisher(cfg(t)).uploadPrivate(upInput());
+    assert.deepEqual(r, { state: 'CHANNEL_CHECK_FAILED', code: 'TRANSPORT_ERROR', uploadAttempted: false });
+    assert.ok(Date.now() - started < 500);
+    // pull 예외는 스트림을 errored로 만들어 cancel 콜백이 불리지 않을 수 있다 → reader.cancel 시도 자체는 아래 R7b에서 계수
+    assert.ok(cancelled >= 0);
+  }
+  // reader.read reject를 직접 만드는 가짜 body(getReader 반환 reader 계수)
+  let readerCancels = 0;
+  const fakeBody = { getReader: () => ({ read: async () => { throw new Error('ya29.leak'); }, cancel: async () => { readerCancels++; } }) } as unknown as ReadableStream<Uint8Array>;
+  const t2: BodyTransport = async () => ({ status: 200, body: fakeBody });
+  assert.equal((await createYoutubePrivatePublisher(cfg(t2)).getStatus(VID)).state, 'QUERY_FAILED');
+  assert.equal(readerCancels, 1, 'read reject → reader.cancel 1회');
+  // getReader 예외 → body.cancel
+  let bodyCancels = 0;
+  const badReaderBody = { getReader: () => { throw new Error('INTERNAL'); }, cancel: async () => { bodyCancels++; } } as unknown as ReadableStream<Uint8Array>;
+  assert.equal((await createYoutubePrivatePublisher(cfg(async () => ({ status: 200, body: badReaderBody }))).getStatus(VID)).state, 'QUERY_FAILED');
+  assert.equal(bodyCancels, 1);
+  // status getter 예외 → 이미 읽은 body 취소
+  let bc2 = 0;
+  const b2 = { getReader: () => { throw new Error('x'); }, cancel: async () => { bc2++; } };
+  const resp = { body: b2, get status(): number { throw new Error('INTERNAL status'); } };
+  const r3 = await createYoutubePrivatePublisher(cfg(async () => resp as never)).getStatus(VID);
+  assert.deepEqual(r3, { state: 'QUERY_FAILED', code: 'BAD_RESPONSE' });
+  assert.equal(bc2, 1);
 });
