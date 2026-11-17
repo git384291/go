@@ -1,0 +1,61 @@
+// 광고 소재 초안(PM 6943038907) — 고정 데이터 구조·길이·금지 주장. 매체 실제 집계·심사 통과를 증명하지 않는다.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { AD_DRAFTS, AD_DRAFT_IDS, AD_TITLE_MAX, AD_DESC_MIN, AD_DESC_MAX, AD_FORBIDDEN_CLAIMS, codePointLength } from '../../src/content/adDrafts';
+
+test('AD1 세 초안: 고정 ID·필수 구조·N6 길이(코드포인트)', () => {
+  assert.deepEqual([...AD_DRAFT_IDS], ['moving', 'contract_end', 'general_compare']);
+  assert.deepEqual(Object.keys(AD_DRAFTS).sort(), [...AD_DRAFT_IDS].sort());
+  for (const id of AD_DRAFT_IDS) {
+    const d = AD_DRAFTS[id];
+    assert.deepEqual(Object.keys(d).sort(), ['cta', 'description', 'evidence', 'id', 'situation', 'title']);
+    assert.equal(d.id, id);
+    assert.equal(d.cta, 'UNSET');
+    assert.equal(d.evidence, 'HYPOTHESIS_UNVERIFIED');
+    assert.ok(codePointLength(d.title) >= 1 && codePointLength(d.title) <= AD_TITLE_MAX, `${id} 제목 ${codePointLength(d.title)}`);
+    const dl = codePointLength(d.description);
+    assert.ok(dl >= AD_DESC_MIN && dl <= AD_DESC_MAX, `${id} 설명 ${dl}`);
+    assert.ok(d.situation.length > 0);
+  }
+  assert.equal(codePointLength('이사 전 인터넷·TV 확인'), 14);
+  assert.equal(codePointLength('😀a'), 2, '서로게이트 쌍도 1자');
+});
+
+test('AD2 미확인 주장·URL·연락처 없음', () => {
+  for (const id of AD_DRAFT_IDS) {
+    const d = AD_DRAFTS[id];
+    const text = [d.title, d.description, d.situation].join(' ');
+    for (const f of AD_FORBIDDEN_CLAIMS) assert.ok(!text.includes(f), `${id}: '${f}'`);
+    assert.ok(!/[0-9]/.test(d.title + d.description), `${id}: 숫자(금액·속도 수치) 없음`);
+    assert.ok(!/https?:|www\.|\.com|@|010/.test(text));
+  }
+});
+
+test('AD3 동결: 목록·초안 외부 변경 불가', () => {
+  assert.ok(Object.isFrozen(AD_DRAFTS) && Object.isFrozen(AD_DRAFT_IDS) && Object.isFrozen(AD_FORBIDDEN_CLAIMS));
+  const before = JSON.stringify(AD_DRAFTS);
+  assert.throws(() => { (AD_DRAFTS as unknown as Record<string, unknown>).extra = {}; });
+  assert.throws(() => { (AD_DRAFTS.moving as unknown as { title: string }).title = '최저가 보장'; });
+  assert.throws(() => { (AD_DRAFT_IDS as unknown as string[]).push('x'); });
+  assert.equal(JSON.stringify(AD_DRAFTS), before);
+});
+
+test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로그·타이머·SDK가 없고 화면·API에 미배선', () => {
+  for (const f of ['src/content/adDrafts.ts', 'src/server/advertising/campaignDraft.ts']) {
+    const src = readFileSync(f, 'utf8').replace(/\/\/.*$/gm, '');
+    assert.ok(!/process\.env|fetch\(|console\.|setTimeout|setInterval|localStorage|postgres|supabase|openai|anthropic|naver|import\(|require\(|node:/i.test(src), f);
+  }
+  const camp = readFileSync('src/server/advertising/campaignDraft.ts', 'utf8');
+  assert.match(camp, /^import 'server-only';/);
+  assert.match(camp, /executionAllowed: false,\n/);
+  assert.ok(!/\b(approve|schedule|publish|charge|submit|execute)\w*\s*\(/i.test(camp.replace(/\/\/.*$/gm, '')), '승인·예약·게시·과금 함수 없음');
+  let users = '';
+  try {
+    users = execFileSync('grep', ['-rlE', 'adDrafts|campaignDraft', 'src'], { encoding: 'utf8' });
+  } catch (e) {
+    if ((e as { status?: number }).status !== 1) throw e;
+  }
+  assert.deepEqual(users.trim().split('\n').filter(Boolean).sort(), ['src/server/advertising/campaignDraft.ts'], 'production 사용처 없음(정의 파일끼리만)');
+});
