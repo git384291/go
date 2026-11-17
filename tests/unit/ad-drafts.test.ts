@@ -58,14 +58,16 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
     if ((e as { status?: number }).status !== 1) throw e;
   }
   // 사용처는 광고 서버 모듈끼리만(화면·API·라우트 배선 없음). PM 6943345830: 생성 오케스트레이터가 고정 상황 데이터를 읽는다
-  assert.deepEqual(users.trim().split('\n').filter(Boolean).sort(), ['src/server/advertising/adGeneration.ts', 'src/server/advertising/campaignDraft.ts'], 'production 사용처 없음');
+  const u1 = users.trim().split('\n').filter(Boolean);
+  assert.ok(u1.length > 0 && u1.every((f) => f.startsWith('src/server/advertising/')), `광고 데이터 사용처는 광고 서버 모듈뿐: ${u1.join(',')}`);
   let adv = '';
   try {
     adv = execFileSync('grep', ['-rlE', 'server/advertising|openAiAdGenerator|adGeneration', 'src'], { encoding: 'utf8' });
   } catch (e) {
     if ((e as { status?: number }).status !== 1) throw e;
   }
-  assert.deepEqual(adv.trim().split('\n').filter(Boolean).sort(), ['src/server/advertising/openAiAdGenerator.ts'], '광고 서버 모듈을 import하는 화면·API 없음');
+  const u2 = adv.trim().split('\n').filter(Boolean);
+  assert.ok(u2.every((f) => f.startsWith('src/server/advertising/')), `광고 서버 모듈을 import하는 화면·API·route 없음: ${u2.join(',')}`);
 });
 
 test('AD5 정적: AI 생성 모듈은 env·기본 키·SDK·자동 접속·재시도 없음, 고정 endpoint만', () => {
@@ -83,4 +85,24 @@ test('AD5 정적: AI 생성 모듈은 env·기본 키·SDK·자동 접속·재�
   assert.match(code, /store: false/);
   assert.ok(!/retry|while\s*\(|for\s*\(;;\)/i.test(code), '재시도 루프 없음');
   assert.ok(!/AD_DRAFTS\[[^\]]+\]\.(title|description)/.test(gen.replace(/\/\/.*$/gm, '')), '생성 결과에 고정 초안 제목·설명을 쓰지 않음(fallback 없음)');
+});
+
+test('AD6 정적: 유튜브 비공개 어댑터는 env·SDK·기본 fetch·OAuth 발급·공개/예약/삭제가 없고 고정 endpoint만', () => {
+  const files = ['src/server/advertising/youtubePrivatePublisher.ts', 'src/server/advertising/youtubeAdPreparation.ts', 'src/server/advertising/boundedHttp.ts'];
+  for (const f of files) {
+    const src = readFileSync(f, 'utf8');
+    const code = src.replace(/^\s*\/\/.*$/gm, '');
+    assert.match(src, /^import 'server-only';/, f);
+    assert.ok(!/process\.env|googleapis'|from 'google|fetch\(|console\.|localStorage|setInterval|require\(|import\(|oauth2|refresh_token|client_secret/i.test(code), f);
+  }
+  const pub = readFileSync(files[0]!, 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  assert.deepEqual((pub.match(/https:\/\/[^'`]+/g) ?? []).sort(), [
+    'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status',
+    'https://www.googleapis.com/youtube/v3/channels?part=id&mine=true',
+    'https://www.googleapis.com/youtube/v3/videos?part=status,processingDetails&id=',
+  ]);
+  assert.match(pub, /status: \{ privacyStatus: 'private' \}/);
+  assert.ok(!/publishAt|'public'|'unlisted'|selfDeclaredMadeForKids|containsSyntheticMedia|videos\/delete|method: 'DELETE'|method: 'PUT'/.test(pub), '공개·예약·삭제·아동/합성 자동 판정 없음');
+  const prep = readFileSync(files[1]!, 'utf8');
+  assert.match(prep, /publicPublished: false, paidExecutionAllowed: false/);
 });

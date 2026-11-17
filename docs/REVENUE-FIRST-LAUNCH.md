@@ -244,6 +244,53 @@
   - 실제 OpenAI 연결이나 품질·사실성을 증명하지 않는다.
 - 실제 키·모델 호출·요금 발생·매체 게시·화면/API 배선은 없다.
 
+**유튜브 한 채널 비공개 게시·상태 조회 어댑터(PM 6951004870, 비활성·실접속 0)**
+- 사용자 지시는 "AI 자동광고 / 이번 달 접수 100개 시작"이다. 이 묶음은 그 첫 구현 단계이며, 실제 자동광고 운영 완료가 아니다.
+- **공식 근거(2026-11-17 Claude가 developers.google.com 원문 대조)**
+  - `videos.insert`: POST `https://www.googleapis.com/upload/youtube/v3/videos`
+    - `part`가 필수이고, OAuth 범위(youtube.upload 등)가 필요하다.
+    - 업로드 쿼터는 1단위이고 일 100회 버킷이다. MIME은 `video/*`이다.
+    - **"미검증 API 프로젝트 업로드는 비공개로 제한되지 않는다"**고 적혀 있다. 그래서 어댑터가 `privacyStatus:'private'`를 직접 고정한다.
+    - 이 문구는 PM 지시의 "미검증 조건 미확정"과 다를 수 있으므로, 실계정에서 다시 확인해야 한다.
+  - `videos` 리소스
+    - privacyStatus는 private/public/unlisted이고, 생략하면 public이 기본일 수 있다.
+    - uploadStatus 값, processingDetails.processingStatus(failed/processing/succeeded/terminated)
+    - 제목은 최대 100자이고 설명은 5000바이트이며, `<` `>`를 쓸 수 없다.
+  - `channels.list(mine=true)`·`videos.list`는 같은 v3 GET 엔드포인트다. 세부 파라미터 표는 이번에 다시 열람하지 않았다.
+  - `uploadType=multipart`는 Google API 공통 업로드 방식이다. insert 문서 표에는 없고, 예제는 resumable이다.
+- **`src/server/advertising/youtubePrivatePublisher.ts`**(server-only)
+  - **필수 주입:** transport·OAuth access token·예상 채널 ID·`uploadAllowed===true`. env·기본 fetch·SDK·키 저장·발급·로그인 경로는 없다. 하나라도 없으면 transport 0이다.
+  - **고정 endpoint 3개:** `channels?part=id&mine=true`, `upload/.../videos?uploadType=multipart&part=snippet,status`, `videos?part=status,processingDetails&id=<검증된 11자 ID>`
+  - **채널 확인:** 정확히 1건이고 예상 ID와 같을 때만 업로드한다.
+  - **multipart:** 경계·Content-Type은 서버가 통제한다. 경계가 영상 바이트에 들어 있으면 거부한다.
+    - 메타데이터는 `{snippet:{title,description}, status:{privacyStatus:'private'}}`만 보낸다.
+    - 아동 대상(selfDeclaredMadeForKids)·합성물(containsSyntheticMedia)·category·publishAt은 **보내지 않는다.** 이 코드는 그 사실을 판정하지 않으므로 실업로드 전에 사람이 정해야 한다.
+  - **영상:** 메모리 `Uint8Array` 1바이트~5MiB, mp4(ftyp)·webm(EBML) 서명만 받는다. 방어 복사를 하고 원본은 불변이다.
+    - 서명 검사는 형식 확인일 뿐, 내용 안전성 확인이 아니다.
+  - **문구:** `validateAdCopy` 통과값만 쓴다.
+  - **업로드 결과**
+    - HTTP 오류: UPLOAD_FAILED(401/403/429/기타)
+    - 마감·전송 오류·2xx 판독 불가: **RESULT_UNKNOWN**. 재업로드 판단 금지, 재시도 0.
+    - 비공개가 아님: NOT_PRIVATE(숨기지 않음)
+    - 성공: UPLOADED_PRIVATE + 최소 videoId
+  - **상태 조회 결과:** PRIVATE_PROCESSING / PROCESSED / PROCESSING_FAILED / PROCESSING_UNKNOWN, NOT_PRIVATE, UPLOAD_REJECTED, NOT_FOUND, QUERY_FAILED
+  - 마감·바이트 상한·늦은 본문 취소는 `boundedHttp.ts`가 맡는다(검수된 OpenAI 어댑터 패턴). 취소가 실제 업로드·청구 취소를 보장하지는 않는다.
+  - 영속 멱등 저장소·백그라운드 재시도·스케줄러는 없다.
+- **`src/server/advertising/youtubeAdPreparation.ts`**
+  - 생성기와 게시 어댑터를 필수 주입받아 생성→`validateAdCopy`→비공개 업로드→상태 조회를 조합한다.
+  - 입력: 고정 상황 ID·`internet-tv`·메모리 영상만
+  - 생성 실패나 꺼짐이면 업로드 0이다.
+  - 결과 stage: `PRIVATE_TEST_ONLY` / `UPLOAD_NOT_COMPLETED` 등. 항상 `publicPublished:false`·`paidExecutionAllowed:false`다.
+  - HTTP route/UI 배선은 없다.
+- **시험(가짜 transport, 실네트워크 0을 전역 fetch 차단으로 확인)**
+  - route YT1~YT7·YP1~YP3, unit AD6(정적)
+  - 가짜 성공은 실영상 품질·실계정·실 AI·문의 성과가 아니다.
+- **남은 실제 조건**
+  - 실제 영상 제작 방식과 무료 로컬 도구
+  - 사용자 YouTube 채널과 OAuth 동의(토큰 보관 방식 별도 검수)
+  - 아동 대상·합성물 판단
+  - 공개 전환·중단·성과 연결(별도 승인)
+
 ### 3-2. 자동 상담 응대 흐름 (제안, 실행 중 아님)
 1. **상품 문의**
    - 인터넷+TV 문의만 받는다(1단계 활성 상품).
