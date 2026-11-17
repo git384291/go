@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { ACTIVE_PRODUCTS, KAKAO_CHANNEL_URL } from '@/content/products';
-import { EXTERNAL_CONSULT_ENABLED, ONLINE_CONSULT_NOTICE } from '@/content/channels';
+import { ACTIVE_PRODUCTS } from '@/content/products';
+import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
 
 export function SiteHeader() {
   return (
@@ -37,8 +37,7 @@ export function SiteFooter() {
 export function StickyCta() {
   return (
     <div className="sticky-cta" role="region" aria-label="상담 바로가기">
-      {/* PHASE 1 보완: 외부 상담 채널은 고객정보 수집 승인 전까지 표시하지 않는다 */}
-      {EXTERNAL_CONSULT_ENABLED && <a className="btn btn-kakao" href={KAKAO_CHANNEL_URL}>카카오톡 상담</a>}
+      {/* 카카오톡 상품 문의는 공통 버튼에 두지 않는다(PM 6938169689). 상담·인터넷TV 페이지에서만 서버 판정으로 표시 */}
       <a className="btn btn-primary" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
     </div>
   );

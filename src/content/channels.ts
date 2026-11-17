@@ -15,3 +15,11 @@ export const ONLINE_CONSULT_NOTICE = '온라인 상담 서비스 준비 중';
 // - 코드 상수다. 환경변수로 켜지지 않는다. 켜려면 문구 PM 검수 → 별도 커밋으로 true → 배포 결정(별도).
 // - 켜도 인터넷TV 상세에만 표시하며, 입력칸·폼·클라이언트 JS·요청·저장이 없다.
 export const PRODUCT_GUIDE_ENABLED: boolean = false;
+
+// 카카오톡 상품 문의 표시 문구(PM 6938169689). 카카오톡은 상품 문의 창구이며 가입 접수가 아니다.
+// 링크 판정은 src/content/kakaoInquiry.ts·src/server/inquiry/kakaoInquiryConfig.ts(기본 꺼짐)가 맡는다.
+export const KAKAO_INQUIRY_LABEL = '카카오톡 상품 문의';
+export const KAKAO_INQUIRY_NOTES: readonly string[] = Object.freeze([
+  '상품 문의만 받습니다. 가입 접수는 총판 확인 뒤 별도로 진행됩니다.',
+  '주민등록번호·신분증·계좌번호·정확한 주소는 카카오톡으로 보내지 마세요.',
+]);

@@ -5,11 +5,14 @@ import { ONLINE_CONSULT_NOTICE, PRODUCT_GUIDE_ENABLED } from '@/content/channels
 import { ProductGuidePanel } from '@/components/ProductGuidePanel';
 import { OfficialIntakeCta } from '@/components/OfficialIntakeCta';
 import type { OfficialIntakeResult } from '@/content/officialIntake';
+import type { KakaoInquiryResult } from '@/content/kakaoInquiry';
+import { KakaoInquiryLink } from '@/components/KakaoInquiryLink';
 
 const GUIDE_INTAKE_OFF: OfficialIntakeResult = Object.freeze({ state: 'off', reason: 'DISABLED' });
 
 // intake: 페이지(서버)가 서버 상수 등록부로 판정해 넘긴 결과. 넘기지 않으면 표시하지 않는다(화면 컴포넌트는 서버 모듈을 import하지 않음).
-export function ProductPage({ slug, intake }: { slug: ProductSlug; intake?: OfficialIntakeResult }) {
+// inquiry: 페이지(서버)가 판정한 카카오톡 상품 문의 결과(인터넷TV만 전달). 넘기지 않거나 off면 표시하지 않는다.
+export function ProductPage({ slug, intake, inquiry }: { slug: ProductSlug; intake?: OfficialIntakeResult; inquiry?: KakaoInquiryResult }) {
   // PHASE 1: 예약 상품 상세는 주소로 직접 들어와도 404. 화면 코드는 보존한다.
   if (!isActiveSlug(slug)) notFound();
   const p = productBySlug(slug);
@@ -21,6 +24,7 @@ export function ProductPage({ slug, intake }: { slug: ProductSlug; intake?: Offi
         <p className="hero-lead">{p.lead}</p>
         <a className="btn btn-primary btn-lg" href="/consult">{ONLINE_CONSULT_NOTICE}</a>
         {intake && <OfficialIntakeCta intake={intake} />}
+        <KakaoInquiryLink inquiry={inquiry} />
       </section>
 
       <section className="section">

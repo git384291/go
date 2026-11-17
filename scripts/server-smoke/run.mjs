@@ -226,6 +226,17 @@ try {
     report(`H9 /products/internet-tv ${label}: 안내 패널·공식 접수 표식 0·준비 중 안내${label === 'HTML' ? '·noindex' : ''}`,
       r.status === 200 && leaks(t, GUIDE_MARKS) === 0 && t.includes('온라인 상담 서비스 준비 중') && robots, `표식 ${leaks(t, GUIDE_MARKS)}개`);
   }
+  // H10 카카오톡 상품 문의(기본 꺼짐, PM 6938169689): 상담·인터넷TV HTML·RSC에 카톡 링크·버튼·안내 표식 0, 준비 중·잠금 유지
+  const KAKAO_MARKS = ['data-kakao-inquiry', 'btn-kakao', 'kakao.com', '카카오톡', 'kakao-inquiry-note', '#kakao-channel'];
+  for (const [path, lockText] of [['/consult', '지금은 상담 신청을 받지 않습니다'], ['/products/internet-tv', '온라인 상담 서비스 준비 중']]) {
+    for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
+      r = await get(path, h);
+      t = await r.text();
+      const robots = label === 'HTML' ? /<meta name="robots" content="noindex, nofollow"/.test(t) : true;
+      report(`H10 ${path} ${label}: 카톡 문의 표식 0·준비 중/잠금 안내${label === 'HTML' ? '·noindex' : ''}`,
+        r.status === 200 && leaks(t, KAKAO_MARKS) === 0 && t.includes(lockText) && robots, `표식 ${leaks(t, KAKAO_MARKS)}개`);
+    }
+  }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
   report('H8 서버의 외부 접속 시도 0건', blocked === 0, `차단 ${blocked}건`);

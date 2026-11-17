@@ -86,4 +86,3 @@ export const productBySlug = (slug: ProductSlug) => {
   return p;
 };
 
-export const KAKAO_CHANNEL_URL = process.env.NEXT_PUBLIC_KAKAO_CHANNEL_URL ?? '#kakao-channel';

@@ -21,6 +21,10 @@ import { resolveOfficialIntake, type OfficialIntakeResult } from '../../src/cont
 import { ProductGuidePanel } from '../../src/components/ProductGuidePanel';
 import { GUIDE_TOPICS } from '../../src/content/productGuide';
 import type { Page } from 'playwright';
+import { ProductPage } from '../../src/components/ProductPage';
+import { ConsultForm } from '../../src/components/ConsultForm';
+import { resolveKakaoInquiry } from '../../src/content/kakaoInquiry';
+import { KAKAO_INQUIRY_NOTES } from '../../src/content/channels';
 
 // 진행판 미리보기는 실제 서버 스냅샷이 아닌 화면 확인용 고정 예시를 쓴다(가로 넘침·표시 확인)
 const PROGRESS_FIXTURE = {
@@ -69,6 +73,11 @@ const FAKE_INTAKE = resolveOfficialIntake({
   ],
 });
 const FAKE_HREFS = ['https://intake-a.example.com/apply', 'https://very-long-subdomain-for-wrap-check.intake-b.example.com/internet-tv/apply'];
+
+// 카카오톡 상품 문의 가상 켜짐(실제 설정은 전역 gate·문의 스위치 모두 false). 가짜 링크는 열지 않는다
+const FAKE_KAKAO_HREF = 'https://pf.kakao.com/_fixture0000/chat';
+const FAKE_KAKAO = resolveKakaoInquiry({ globalGate: true, enabled: true, url: FAKE_KAKAO_HREF, reviewRef: 'PM-000000' });
+let consultInputBaseline = -1;
 
 const INTAKE_OFF: OfficialIntakeResult = { state: 'off', reason: 'DISABLED' };
 const GUARANTEE = /최저|무료|당일|보장|100%|AI 상담 중|상담원 연결됨/;
@@ -151,6 +160,9 @@ async function main() {
     // 선택형 상품 안내 패널(실제 코드 상수는 false). 가상 켜짐 화면: 접수 꺼짐(12)과 가상 접수 켜짐(13). 공개 화면 아님
     ['12-product-guide-intake-off', <PageShell key="guide-off"><ProductGuidePanel intake={INTAKE_OFF} /></PageShell>],
     ['13-product-guide-intake-fake-on', <PageShell key="guide-on"><ProductGuidePanel intake={FAKE_INTAKE} /></PageShell>],
+    // 카카오톡 상품 문의 가상 켜짐: 상담 폼 안내(14)와 인터넷TV 상세(15). 공개 화면 아님
+    ['14-kakao-inquiry-consult-fake-on', <PageShell key="kakao-consult"><section className="section"><ConsultForm options={[{ value: 'internet_tv', label: '인터넷+TV' }]} kakaoUrl={FAKE_KAKAO.state === 'on' ? FAKE_KAKAO.href : null} /></section></PageShell>],
+    ['15-kakao-inquiry-internet-tv-fake-on', <ProductPage key="kakao-tv" slug="internet-tv" inquiry={FAKE_KAKAO} />],
   ];
   const routeChecks = [
     expect404('03-internet-phone', () => <InternetPhone />),
@@ -184,7 +196,9 @@ async function main() {
       // 검사는 <body>만 본다(인라인 CSS의 클래스 이름은 화면에 나오지 않으므로 제외)
       const body = html.slice(html.indexOf('<body'));
       const leaked = PUBLIC_PAGES.has(name) ? FORBIDDEN.filter((f) => body.includes(f)) : [];
-      const ext = EXTERNAL_CHANNEL.filter((f) => body.includes(f));
+      const kakaoFake = name.startsWith('14') || name.startsWith('15');
+      // 가상 켜짐 화면(14·15)만 카카오 링크를 가진다. 나머지 화면은 기존대로 외부 상담 표식이 하나도 없어야 한다
+      const ext = kakaoFake ? [] : EXTERNAL_CHANNEL.filter((f) => body.includes(f));
       const intake = PUBLIC_PAGES.has(name) ? INTAKE_PHRASES.filter((f) => body.includes(f)) : [];
       const notice = PUBLIC_PAGES.has(name) ? `\t준비 중 안내=${body.includes(NOTICE)}` : '';
       const fixed = name.startsWith('05')
@@ -200,6 +214,21 @@ async function main() {
         intakeCheck = `\t공식접수 가상 링크=${okLinks}\t공식접수 입력·외부요소=${inputs}`;
       } else if (!name.startsWith('13')) {
         intakeCheck = `\t공식접수 표식 없음=${!body.includes('data-official-intake')}`;
+      }
+      const inputCount = await page.evaluate(() => document.querySelectorAll('input, textarea, select').length);
+      if (name.startsWith('05')) consultInputBaseline = inputCount;
+      if (kakaoFake) {
+        const links = await page.evaluate(() => Array.from(document.querySelectorAll('a[href*="kakao"]')).map((a) => ({
+          href: a.getAttribute('href'), rel: a.getAttribute('rel'), rp: a.getAttribute('referrerpolicy'), target: a.getAttribute('target') })));
+        const okLink = FAKE_KAKAO.state === 'on' && links.length === 1 && links[0]!.href === FAKE_KAKAO_HREF && !/[?#]/.test(links[0]!.href ?? '')
+          && /\bnoopener\b/.test(links[0]!.rel ?? '') && /\bnoreferrer\b/.test(links[0]!.rel ?? '') && links[0]!.rp === 'no-referrer' && links[0]!.target === '_blank';
+        const notes = KAKAO_INQUIRY_NOTES.every((n) => body.includes(n));
+        const inputsOk = name.startsWith('14') ? consultInputBaseline >= 0 && inputCount === consultInputBaseline : inputCount === 0;
+        const frames = await page.evaluate(() => document.querySelectorAll('iframe, script[src]').length);
+        intakeCheck += `\t카톡문의 가상 링크=${okLink}\t카톡문의 안내=${notes}\t카톡문의 입력칸 추가 없음=${inputsOk}\t카톡문의 외부요소=${frames}\t카톡문의 요청=${requestCount}`;
+      } else {
+        // 관리자 가상 목록의 유입 출처 값('kakao' 글자)은 링크가 아니므로 링크·버튼·주소 표식만 본다
+        intakeCheck += `\t카톡문의 표식 없음=${!['data-kakao-inquiry', 'btn-kakao', 'kakao.com', 'kakao-inquiry-note'].some((f) => body.includes(f))}`;
       }
       if (name.startsWith('12') || name.startsWith('13')) {
         intakeCheck += await guideInteraction(page, name.startsWith('13'), () => requestCount);
@@ -218,7 +247,8 @@ async function main() {
   const bad = report.filter((r) =>
     r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
     || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
-    || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r));
+    || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r)
+    || /카톡문의 [^=\t]+=false/.test(r) || /카톡문의 (외부요소|요청)=[1-9]/.test(r));
   if (bad.length) {
     console.error('PREVIEW FAIL\n' + bad.join('\n'));
     process.exit(1);

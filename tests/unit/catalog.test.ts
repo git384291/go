@@ -127,11 +127,14 @@ test('G11 외부 상담 채널(카카오톡)은 코드 상수로 꺼져 있고 �
   const { EXTERNAL_CONSULT_ENABLED } = await import('../../src/content/channels');
   assert.equal(EXTERNAL_CONSULT_ENABLED, false);
   assert.ok(!/process\.env/.test(readFileSync('src/content/channels.ts', 'utf8')));
-  // 버튼·링크를 그리는 곳은 모두 이 상수를 거친다
+  // PM 6938169689: 카카오톡 링크는 서버 판정(kakaoInquiryLink: 전역 gate + 문의 스위치 + 고정 URL + 검수 근거)으로만 그린다
   const site = readFileSync('src/components/Site.tsx', 'utf8');
-  assert.match(site, /\{EXTERNAL_CONSULT_ENABLED && <a className="btn btn-kakao"/);
+  assert.ok(!/kakao|KAKAO|카카오톡 상담/.test(site.replace(/\{\/\*.*?\*\/\}/g, '')), '공통 하단 버튼에는 카카오톡 분기가 없다');
   const consult = readFileSync('src/app/consult/page.tsx', 'utf8');
-  assert.match(consult, /kakaoUrl=\{EXTERNAL_CONSULT_ENABLED \? KAKAO_CHANNEL_URL : null\}/);
-  // 채널 주소 상수는 보존
-  assert.match(readFileSync('src/content/products.ts', 'utf8'), /export const KAKAO_CHANNEL_URL/);
+  assert.match(consult, /const inquiry = kakaoInquiryLink\(\);/);
+  assert.match(consult, /kakaoUrl=\{inquiry\.state === 'on' \? inquiry\.href : null\}/);
+  // 환경변수 기반 채널 주소·placeholder는 제거됐다
+  const products = readFileSync('src/content/products.ts', 'utf8');
+  assert.ok(!/KAKAO_CHANNEL_URL|NEXT_PUBLIC_KAKAO|#kakao-channel/.test(products));
+  assert.ok(!/KAKAO_CHANNEL_URL|NEXT_PUBLIC_KAKAO_CHANNEL_URL/.test(readFileSync('src/components/ConsultForm.tsx', 'utf8')));
 });

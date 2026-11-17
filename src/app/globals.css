@@ -266,3 +266,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .guide-answer { padding: 0 14px 14px; color: var(--ink-2); font-size: 15px; }
 .guide-answer p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .guide-answer .official-intake { margin-top: 8px; }
+
+/* 카카오톡 상품 문의(기본 꺼짐) */
+.kakao-inquiry { margin-top: 12px; display: grid; gap: 6px; }
+.kakao-inquiry .btn { white-space: normal; text-align: center; }
+.kakao-inquiry-note { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.form-banner .kakao-inquiry-note { display: block; }
+.hero .kakao-inquiry-note { color: rgba(255, 255, 255, 0.82); }

@@ -17,6 +17,7 @@ import {
   type SubmitOutcome,
 } from './consultSubmit';
 import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './TurnstileWidget';
+import { KAKAO_INQUIRY_LABEL, KAKAO_INQUIRY_NOTES } from '../content/channels';
 
 // REV-004: 실제 고객정보 수집은 재검수 통과 전까지 비활성. 화면만 제공한다.
 const FORM_ENABLED = process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED === 'true';
@@ -38,7 +39,8 @@ const newKey = (): string => {
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 };
 
-// kakaoUrl: 외부 상담 채널 주소. 서버가 채널을 열지 않으면 null을 넘긴다(PHASE 1 보완: 현재 null).
+// kakaoUrl: 카카오톡 상품 문의 주소. 서버가 kakaoInquiryLink()로 판정해 on일 때만 넘기고, 그 밖에는 null(현재 null).
+// 카카오톡은 상품 문의 창구이며 가입 접수가 아니다(PM 6938169689).
 export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string | null }) {
   const hasOption = options.length > 0;
   // 공개 준비값(사이트 키·처리방침 버전)이 하나라도 비면 위젯 외부 요청과 접수 요청을 모두 만들지 않는다
@@ -96,7 +98,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       setMessage(OUTCOME_MESSAGES.input);
       focusField(result.field);
     } else {
-      setMessage(kakaoUrl && result.kind === 'not_ready' ? `${result.message} 카카오톡으로 문의해 주세요.` : result.message);
+      setMessage(kakaoUrl && result.kind === 'not_ready' ? `${result.message} 상품 문의는 카카오톡으로 해 주세요.` : result.message);
     }
   }
 
@@ -206,8 +208,11 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
           <strong>온라인 상담 서비스 준비 중</strong>
           {kakaoUrl ? (
             <>
-              <span>지금은 카카오톡으로 상담을 도와드려요. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
-              <a className="btn btn-kakao" href={kakaoUrl}>카카오톡으로 상담하기</a>
+              <span>상품 문의는 카카오톡으로 받습니다. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
+              <a className="btn btn-kakao" href={kakaoUrl} rel="noopener noreferrer nofollow" referrerPolicy="no-referrer" target="_blank">{KAKAO_INQUIRY_LABEL}</a>
+              {KAKAO_INQUIRY_NOTES.map((n) => (
+                <span key={n} className="kakao-inquiry-note">{n}</span>
+              ))}
             </>
           ) : (
             <span>지금은 상담 신청을 받지 않습니다. 아래 양식은 미리보기이며 입력 내용은 전송되지 않습니다.</span>
