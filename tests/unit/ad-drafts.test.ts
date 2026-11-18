@@ -60,7 +60,8 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
   // 사용처는 광고 서버 모듈끼리만(화면·API·라우트 배선 없음). PM 6943345830: 생성 오케스트레이터가 고정 상황 데이터를 읽는다
   const u1 = users.trim().split('\n').filter(Boolean);
   // 정확한 allowlist(PM 6952112639: 디렉터리 전체 허용 금지). 새 사용처는 별도 검수 후 이 목록을 갱신한다
-  assert.deepEqual(u1.sort(), ['src/server/advertising/adGeneration.ts', 'src/server/advertising/campaignDraft.ts', 'src/server/advertising/youtubeAdPreparation.ts']);
+  // PM 6954300094: 영상 storyboard가 고정 상황 ID를 읽는다(새 사용처 1개)
+  assert.deepEqual(u1.sort(), ['src/server/advertising/adGeneration.ts', 'src/server/advertising/campaignDraft.ts', 'src/server/advertising/video/storyboard.ts', 'src/server/advertising/youtubeAdPreparation.ts']);
   let adv = '';
   try {
     adv = execFileSync('grep', ['-rlE', 'server/advertising|openAiAdGenerator|adGeneration', 'src'], { encoding: 'utf8' });
@@ -70,6 +71,7 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
   const u2 = adv.trim().split('\n').filter(Boolean);
   assert.deepEqual(u2.sort(), [
     'src/server/advertising/boundedHttp.ts', 'src/server/advertising/openAiAdGenerator.ts',
+    'src/server/advertising/video/storyboard.ts',
     'src/server/advertising/youtubeAdPreparation.ts', 'src/server/advertising/youtubePrivatePublisher.ts',
   ], '광고 서버 모듈을 import하는 화면·API·route 없음(정확 목록)');
 });

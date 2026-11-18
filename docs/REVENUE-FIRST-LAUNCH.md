@@ -319,6 +319,40 @@
   - 아동 대상·합성물 판단
   - 공개 전환·중단·성과 연결(별도 승인)
 
+### 3-1-b. 로컬 세로 자막 영상 제작 (PM 6954300094, 제작·검사까지만)
+- **범위:** 검증된 문구 1쌍 → storyboard → 실제 mp4 → 판독. 생성 호출·업로드·외부 접속·지출 0.
+  `prepareYoutubeAdPrivateTest` 연결과 `videoAdPipeline`은 만들지 않았다(같은 copy·출처·영상 결합 연결안은 별도 검수).
+- **파일**
+  - `src/server/advertising/video/storyboard.ts`: 순수 계약. 입력 `{situationId(고정 3종), copy:{title,description}, copySource:'model'|'fixed_draft'}`만. copy는 `validateAdCopy`를 다시 통과하고 한 번만 읽는다. 고정 3장면(제목 0~5초 64px / 설명 5~13초 48px / 확인 필요 안내 13~18초 40px), 고정 색·좌표. 줄바꿈은 추정 em 폭으로 최소 줄 수 안에서 균형 분할한 **후보**다.
+  - `src/server/advertising/video/ffmpegRenderer.ts`: 준비 확인 → 실제 폰트 측정 → 렌더 → 파일·디코딩·probe·faststart 검사 → (선택) 프레임 → 정리.
+  - `src/server/advertising/video/videoProbe.ts`: ffprobe JSON 불신 판정, faststart(moov가 mdat 앞) 확인.
+  - `src/server/advertising/video/boundedProcess.ts`(내부 helper): 위 두 모듈의 유일한 프로세스 실행 경로. 소유권·절대 마감·출력 한도·종료 확인을 한 곳에 둔다.
+  - `tests/route/video-renderer.test.ts`: 가짜 process VR1~VR17(CI 포함, ffmpeg 없어도 skip 없음).
+  - `scripts/video/render-sample.mjs`: 실제 1편 렌더 + 증거(수동, CI 미연결).
+- **영상 형식:** 720×1280, 30fps, 18초(540프레임), H.264 High, yuv420p, +faststart, 오디오 없음, 최종 5MiB 이하(실측 stat·probe로 판정).
+- **실행 계약**
+  - 모든 도구는 `/usr/bin/unshare -n -- /usr/bin/prlimit --as=1GiB --cpu=60 --fsize=16MiB --nproc=64 -- <고정 실행 파일>`로만 실행한다. `spawn(고정 경로, 인자 배열, {shell:false, detached:true, stdin ignore, env {LC_ALL}만, cwd 자기 임시 디렉터리})`.
+  - 렌더마다 격리 안에서 `/proc/net/dev`가 lo 하나뿐인지, `/proc/self/limits`에 한도가 실제 적용됐는지 확인한다. 아니면 `NETWORK_ISOLATION_UNAVAILABLE`/`LIMITS_UNAVAILABLE`이고 일반 네트워크 실행 fallback은 없다.
+  - 문구는 인자에 넣지 않고 자기 임시 디렉터리의 `t<i>.txt`로만 넘긴다(`drawtext textfile=…:expansion=none:reload=0`). 입력은 고정 `lavfi color` 1개, `-protocol_whitelist file`, `-nostdin`, 출력 `file:out.mp4` 고정.
+  - 마감은 전체 절대 마감 하나(1~120초)를 모든 단계가 공유한다. 마감 뒤 새 process 0. 중단은 자기 프로세스 그룹에만 SIGKILL 1회, 종료 확인 실패면 `CLEANUP_FAILED`이고 새 기동을 거부하며 그 자식이 쓰는 디렉터리를 지우지 않는다.
+  - 정리 실패는 `RENDERED`와 함께 숨기지 않는다(`CLEANUP_FAILED`, 원래 실패는 `primary`로 보존).
+  - 한계: 실행 사용자가 root면 `nproc` 한도는 효과가 없다. `-threads 2`·`-filter_threads 1`로 스레드를 제한한다.
+- **폰트(읽기 전용 대조)**
+  - `/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc`(Debian `fonts-noto-cjk` 1:20230817+repack1-3). 패키지 copyright의 License 항목은 `SIL-1.1`, 폰트 name 테이블 라이선스 URL은 OFL이다.
+  - 크기 20,050,760바이트와 SHA-256 `faa5f365…5056ceb`가 같을 때만 렌더한다(다르면 `FONT_UNAVAILABLE`).
+  - ffmpeg 6.1 `drawtext`는 ttc face index를 고를 수 없어 **face 0 = Noto Sans CJK JP Bold**가 쓰인다. 한글 음절 11172자 전부가 있고 한글 글리프는 KR face와 같은 디자인이지만, `·` 등 일부 문장부호 모양·폭은 KR face와 다를 수 있다.
+  - fontconfig 이름(`font=Noto Sans CJK KR:style=Bold`)은 쓰지 않는다. `fc-match`는 KR Bold로 해석했지만 같은 지정으로 ffmpeg가 그린 프레임에는 한글이 "NO GLYPH" 상자로 나왔다(첫 실렌더 육안 검사에서 발견).
+- **실행 명령(실렌더, 수동)**
+
+  ```bash
+  TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server \
+    --require ./tests/route/fallback.cjs --import tsx scripts/video/render-sample.mjs --out /저장소-밖/빈-폴더
+  ```
+
+  - 기존 설치 tsx만 쓴다(npx 자동 다운로드 없음). 도구 경로가 다른 환경(macOS 등)에서는 `NOT_AVAILABLE`로 끝난다.
+  - 결과(영상·프레임·evidence.json)는 저장소·PR에 올리지 않는다.
+- **가독성 근거:** 320px 폭에서 0.444배로 보여 64/48/40px가 약 28/21/18px다. 실제 측정 최대 줄 폭은 600px 이하여야 하고(좌우 여백 각 60px), 줄 높이를 넘으면 렌더 0.
+
 ### 3-2. 자동 상담 응대 흐름 (제안, 실행 중 아님)
 1. **상품 문의**
    - 인터넷+TV 문의만 받는다(1단계 활성 상품).
