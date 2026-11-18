@@ -202,23 +202,126 @@ type Fail = Extract<ExplainerResult, { ok: false }>;
 const fail = (code: Fail['code'], spawned: number, cleanup: Fail['cleanup'], reason?: ProbeReject): ExplainerResult =>
   Object.freeze(reason ? { ok: false, code, reason, cleanup, spawned } : { ok: false, code, cleanup, spawned });
 
+type Race<T> = { readonly k: 'ok'; readonly v: T } | { readonly k: 'err' } | { readonly k: 'timeout' };
+
+/**
+ * 파일시스템 작업 보호(PM 6984125979 1·2절).
+ * - 모든 FS 작업은 절대 시각(limitAt) 안에서만 결과를 받는다. 시각을 넘기면 TIMEOUT으로 닫고 결과를 버린다.
+ * - 동기 throw·reject는 원문 없이 고정 코드로 바꾼다.
+ * - Node 비동기 FS는 취소할 수 없다. 그래서 늦게 끝나는 작업을 pending에 남겨 두고, 정리 단계에서 별도 한도(killWaitMs) 안에
+ *   끝나는지 기다린다. 끝나지 않으면 정리 완료로 주장하지 않는다(CLEANUP_FAILED, 디렉터리 삭제 보류).
+ * - mkdtemp가 마감 뒤에 늦게 끝나 디렉터리를 만들면 그 경로를 기록해 두고 정리 단계에서 같은 규칙으로 지운다.
+ */
+class FsGuard {
+  private readonly pending = new Set<Promise<void>>();
+  constructor(private readonly d: ProcessDeps) {}
+
+  get pendingCount(): number {
+    return this.pending.size;
+  }
+
+  private race<T>(p: Promise<T>, limitAt: number): Promise<Race<T>> {
+    return new Promise((resolve) => {
+      let done = false;
+      const h = this.d.setTimer(() => {
+        if (done) return;
+        done = true;
+        resolve({ k: 'timeout' });
+      }, Math.max(0, limitAt - this.d.now()));
+      p.then(
+        (v) => {
+          if (done) return;
+          done = true;
+          this.d.clearTimer(h);
+          resolve({ k: 'ok', v });
+        },
+        () => {
+          if (done) return;
+          done = true;
+          this.d.clearTimer(h);
+          resolve({ k: 'err' });
+        },
+      );
+    });
+  }
+
+  /** limitAt 안의 FS 작업 1건. 실패는 onErr 고정 코드, 마감은 TIMEOUT. onLate는 마감 뒤 늦은 성공 값을 받는다 */
+  async op<T>(f: () => Promise<T>, limitAt: number, onErr: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'>, onLate?: (v: T) => void): Promise<T> {
+    if (!(this.d.now() < limitAt)) throw new Stop('TIMEOUT');
+    let p: Promise<T>;
+    try {
+      p = Promise.resolve(f());
+    } catch {
+      throw new Stop(onErr);
+    }
+    let settled = false;
+    let timedOut = false;
+    const tracked: Promise<void> = p.then(
+      (v) => {
+        settled = true;
+        if (timedOut && onLate) onLate(v);
+      },
+      () => {
+        settled = true;
+      },
+    ).finally(() => this.pending.delete(tracked));
+    if (!settled) this.pending.add(tracked);
+    const r = await this.race(p, limitAt);
+    if (r.k === 'timeout') {
+      timedOut = true;
+      throw new Stop('TIMEOUT');
+    }
+    if (r.k === 'err') throw new Stop(onErr);
+    if (!(this.d.now() < limitAt)) throw new Stop('TIMEOUT'); // 끝났지만 마감 뒤 → 결과 버림
+    return r.v;
+  }
+
+  /** 남은 FS 작업이 limitAt 안에 모두 끝나면 true */
+  async settle(limitAt: number): Promise<boolean> {
+    while (this.pending.size > 0) {
+      const r = await this.race(Promise.all([...this.pending]), limitAt);
+      if (r.k === 'timeout') return false;
+    }
+    return true;
+  }
+}
+
+const validDir = (base: string, d: unknown): d is string =>
+  typeof d === 'string' && SAFE_DIR.test(d) && !d.includes('..') && path.dirname(d) === base && path.basename(d).startsWith(TMP_PREFIX);
+
+/** 공개 진입점. 어떤 불신 입력·deps·FS 예외도 원문 없이 고정 결과로 닫는다 */
 export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps): Promise<ExplainerResult> {
+  try {
+    return await renderInner(input, deps);
+  } catch {
+    // 여기까지 오는 경우는 spawn 전 단계뿐이다(spawn 뒤 단계는 renderInner 안에서 정리까지 마친다)
+    return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+  }
+}
+
+async function renderInner(input: unknown, deps: ExplainerDeps): Promise<ExplainerResult> {
   let total: number;
   let wantFrames: boolean;
   let fs: RendererFs;
   let pdeps: ProcessDeps;
+  let deadlineAt: number;
   try {
     total = deps.totalTimeoutMs;
     wantFrames = deps.frames === true;
-    fs = { ...realFs, ...(deps.fs ?? {}) };
+    const over = deps.fs ?? {};
+    fs = { ...realFs, ...over };
     pdeps = { spawn: deps.spawn, killGroup: deps.killGroup, now: deps.now, setTimer: deps.setTimer, clearTimer: deps.clearTimer, killWaitMs: deps.killWaitMs };
     if (typeof total !== 'number' || !Number.isFinite(total) || total < MIN_TOTAL_MS || total > MAX_TOTAL_MS) return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
-    if (typeof pdeps.spawn !== 'function' || typeof pdeps.killGroup !== 'function' || typeof pdeps.now !== 'function') return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    for (const f of [pdeps.spawn, pdeps.killGroup, pdeps.now, pdeps.setTimer, pdeps.clearTimer, fs.mkdtemp, fs.checkExecutable, fs.removeDir, fs.exists, fs.fontDigest]) {
+      if (typeof f !== 'function') return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    }
     if (typeof pdeps.killWaitMs !== 'number' || !(pdeps.killWaitMs > 0 && pdeps.killWaitMs <= 10_000)) return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    const t0 = pdeps.now();
+    if (typeof t0 !== 'number' || !Number.isFinite(t0)) return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    deadlineAt = t0 + total;
   } catch {
     return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
   }
-  const deadlineAt = pdeps.now() + total;
 
   const sb = buildExplainerStoryboard(input);
   if (!sb.ok) return fail(sb.error, 0, 'NOT_NEEDED');
@@ -232,29 +335,37 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
     return fail('INVALID_PLAN', 0, 'NOT_NEEDED');
   }
 
-  for (const t of Object.values(TOOLS)) {
-    if (!(await fs.checkExecutable(t))) return fail('NOT_AVAILABLE', 0, 'NOT_NEEDED');
-  }
-  if (!(pdeps.now() < deadlineAt)) return fail('TIMEOUT', 0, 'NOT_NEEDED');
-
   const owner = new ProcessOwner(pdeps);
+  const guard = new FsGuard(pdeps);
+  const base = tmpdir();
   let dir: string | null = null;
+  let lateDir: string | null = null;
   let primary: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'> | null = null;
   let reason: ProbeReject | undefined;
   let success: Omit<Extract<ExplainerResult, { ok: true }>, 'cleanup' | 'spawned'> | null = null;
   let cleanupStopped = false;
+  const live = () => {
+    if (!(pdeps.now() < deadlineAt)) throw new Stop('TIMEOUT');
+  };
 
   try {
-    const base = tmpdir();
-    if (!SAFE_DIR.test(base)) throw new Stop('RENDER_FAILED');
-    const created = await fs.mkdtemp(path.join(base, TMP_PREFIX));
-    if (typeof created !== 'string' || !SAFE_DIR.test(created) || created.includes('..') || path.dirname(created) !== base || !path.basename(created).startsWith(TMP_PREFIX)) {
-      throw new Stop('RENDER_FAILED');
+    // 실행 파일 확인(마감 안, reject는 NOT_AVAILABLE)
+    for (const t of Object.values(TOOLS)) {
+      const okExec = await guard.op(() => fs.checkExecutable(t), deadlineAt, 'NOT_AVAILABLE');
+      if (okExec !== true) throw new Stop('NOT_AVAILABLE');
     }
+    if (!SAFE_DIR.test(base)) throw new Stop('RENDER_FAILED');
+    const created = await guard.op(() => fs.mkdtemp(path.join(base, TMP_PREFIX)), deadlineAt, 'RENDER_FAILED', (late) => {
+      lateDir = validDir(base, late) ? late : null;
+    });
+    if (!validDir(base, created)) throw new Stop('RENDER_FAILED');
     dir = created;
     const cwd = created;
     const run = (tool: string, args: readonly string[], maxStdout: number, maxStderr: number) =>
       owner.run({ file: TOOLS.unshare, args: [...EX_WRAP_ARGS, tool, ...args], cwd, deadlineAt, maxStdout, maxStderr });
+    const write = (name: string, text: string) => guard.op(() => writeOwnFile(cwd, name, text), deadlineAt, 'RENDER_FAILED');
+    const statFile = (p: string) => guard.op(() => lstat(p), deadlineAt, 'RENDER_FAILED');
+    const readFile = (p: string, size: number, max: number) => guard.op(() => readOwnFile(p, size, max), deadlineAt, 'RENDER_FAILED');
 
     // 준비 확인(18초 renderer와 같은 순서·기준)
     const iso = await run(TOOLS.cat, ['/proc/self/limits', '/proc/net/dev'], 16 * 1024, 2048);
@@ -262,8 +373,7 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
     const isoOut = new TextDecoder().decode(need(iso, 'NETWORK_ISOLATION_UNAVAILABLE').stdout);
     if (!onlyLoopback(isoOut)) throw new Stop('NETWORK_ISOLATION_UNAVAILABLE');
     if (!exLimitsApplied(isoOut)) throw new Stop('LIMITS_UNAVAILABLE');
-    if ((await fs.fontDigest(FONT_FILE, FONT_BYTES)) !== FONT_SHA256) throw new Stop('FONT_UNAVAILABLE');
-    if (!(pdeps.now() < deadlineAt)) throw new Stop('TIMEOUT');
+    if ((await guard.op(() => fs.fontDigest(FONT_FILE, FONT_BYTES), deadlineAt, 'FONT_UNAVAILABLE')) !== FONT_SHA256) throw new Stop('FONT_UNAVAILABLE');
     const filt = need(await run(TOOLS.ffmpeg, ['-hide_banner', '-nostdin', '-filters'], 256 * 1024, 4096), 'UNSUPPORTED');
     const enc = need(await run(TOOLS.ffmpeg, ['-hide_banner', '-nostdin', '-encoders'], 256 * 1024, 4096), 'UNSUPPORTED');
     const ft = new TextDecoder().decode(filt.stdout);
@@ -274,7 +384,7 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
     }
 
     // 실제 폰트 측정: 각 문구 폭 ≤ maxW, 높이 ≤ 글자 크기 × 1.4
-    for (const f of measure.files) await writeOwnFile(cwd, f.name, f.text);
+    for (const f of measure.files) await write(f.name, f.text);
     const n = plan.texts.length;
     const mr = need(
       await run(TOOLS.ffmpeg, [
@@ -291,7 +401,7 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
     if (texts.some((m, i) => m.width > m.maxW || m.height > Math.round(plan.texts[i]!.size * 1.4))) throw new Stop('LAYOUT_OVERFLOW');
 
     // 렌더
-    for (const f of graph.files) await writeOwnFile(cwd, f.name, f.text);
+    for (const f of graph.files) await write(f.name, f.text);
     const rr = need(
       await run(TOOLS.ffmpeg, [
         '-hide_banner', '-nostdin', '-nostats', '-loglevel', 'error', '-threads', '2', '-filter_threads', '1', '-filter_complex_threads', '1',
@@ -307,7 +417,7 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
 
     // 실제 파일 검사
     const outPath = path.join(cwd, 'out.mp4');
-    const st = await lstat(outPath);
+    const st = await statFile(outPath);
     if (!st.isFile()) throw new Stop('RENDER_FAILED');
     if (st.size > MAX_VIDEO_BYTES) throw new Stop('TOO_LARGE');
     const dec = need(await run(TOOLS.ffmpeg, ['-hide_banner', '-nostdin', '-nostats', '-v', 'error', '-protocol_whitelist', 'file', '-i', 'file:out.mp4', '-map', '0', '-f', 'null', '-'], 4096, 2048), 'DECODE_FAILED');
@@ -317,7 +427,7 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
       if (pr.code === 'CLEANUP_FAILED') throw new CleanupStop();
       throw new Stop(pr.code, pr.reason);
     }
-    const video = await readOwnFile(outPath, st.size, MAX_VIDEO_BYTES);
+    const video = await readFile(outPath, st.size, MAX_VIDEO_BYTES);
     if (!video) throw new Stop('RENDER_FAILED');
     if (!isFastStart(video)) throw new Stop('PROBE_REJECTED', 'FORMAT');
 
@@ -333,14 +443,15 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
         if (fr.code !== 0 || fr.stderr.length > 0) throw new Stop('RENDER_FAILED');
         for (const o of outs) {
           const p = path.join(cwd, o.name);
-          const fst = await lstat(p);
+          const fst = await statFile(p);
           if (!fst.isFile()) throw new Stop('RENDER_FAILED');
-          const png = await readOwnFile(p, fst.size, MAX_FRAME_BYTES);
+          const png = await readFile(p, fst.size, MAX_FRAME_BYTES);
           if (!png) throw new Stop('RENDER_FAILED');
           frames.push(Object.freeze({ atSec: at, width: o.w, png }));
         }
       }
     }
+    live(); // 마지막 요청·파일 읽기 뒤 마감 대조: 지난 결과를 성공으로 받지 않는다
     success = { ok: true, code: 'RENDERED', kind: 'silent_visual_draft', video, probe: pr.report, faststart: true, texts: Object.freeze(texts), frames: Object.freeze(frames) };
   } catch (e) {
     if (e instanceof Stop) {
@@ -353,24 +464,32 @@ export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps):
     }
   }
 
-  // 정리(18초 renderer와 같은 규칙)
-  let cleanOk = await owner.settleAll();
-  if (cleanupStopped) cleanOk = false;
-  if (dir !== null && owner.liveCount === 0) {
-    try {
-      await fs.removeDir(dir);
-      if (await fs.exists(dir)) cleanOk = false;
-    } catch {
+  // 정리(멱등): 자식 종료 확인 → 남은 FS 작업 완료 확인(별도 한도) → 자기 디렉터리만 삭제 → 삭제 확인
+  let cleanOk = false;
+  try {
+    cleanOk = await owner.settleAll();
+    if (cleanupStopped) cleanOk = false;
+    const cleanupAt = pdeps.now() + pdeps.killWaitMs;
+    if (!(await guard.settle(cleanupAt))) cleanOk = false;
+    const target = dir ?? lateDir;
+    if (target !== null && owner.liveCount === 0 && guard.pendingCount === 0) {
+      try {
+        await guard.op(() => fs.removeDir(target), cleanupAt, 'RENDER_FAILED');
+        if ((await guard.op(() => fs.exists(target), cleanupAt, 'RENDER_FAILED')) !== false) cleanOk = false;
+      } catch {
+        cleanOk = false;
+      }
+    } else if (target !== null) {
       cleanOk = false;
     }
-  } else if (dir !== null) {
+  } catch {
     cleanOk = false;
   }
   const spawned = owner.spawnCount;
   if (!cleanOk) {
     return Object.freeze(primary ? { ok: false, code: 'CLEANUP_FAILED', primary, cleanup: 'FAILED', spawned } : { ok: false, code: 'CLEANUP_FAILED', cleanup: 'FAILED', spawned });
   }
-  if (primary) return fail(primary, spawned, 'OK', reason);
+  if (primary) return fail(primary, spawned, dir === null && lateDir === null && spawned === 0 ? 'NOT_NEEDED' : 'OK', reason);
   if (!success) return fail('RENDER_FAILED', spawned, 'OK');
   return Object.freeze({ ...success, cleanup: 'OK', spawned });
 }

@@ -272,7 +272,16 @@ const b2 = badge('s2', '체크 2', S2);
 const b3 = badge('s3', '체크 3', S3);
 
 
-export const EXPLAINER_PLAN: ExplainerPlan = {
+/** 깊은 동결: 승인 대본·도형·좌표 원본을 같은 프로세스 안에서도 바꿀 수 없게 한다(PM 6984125979 4절) */
+function deepFreeze<T>(v: T): T {
+  if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
+    for (const k of Object.keys(v)) deepFreeze((v as Record<string, unknown>)[k]);
+    Object.freeze(v);
+  }
+  return v;
+}
+
+export const EXPLAINER_PLAN: ExplainerPlan = deepFreeze({
   variant: EX_VARIANT,
   sprites: [
     gift, tag,
@@ -312,7 +321,7 @@ export const EXPLAINER_PLAN: ExplainerPlan = {
     { id: 's4_l2', text: '나에게 맞는 조건부터', size: 44, c: P.ink, x: -1, y: 786, maxW: 600, tin: S4[0] + 1.15, tout: 30, dy: 16 },
     { id: 's4_l3', text: '꼼꼼하게', size: 44, c: P.teal, x: -1, y: 848, maxW: 600, tin: S4[0] + 1.3, tout: 30, dy: 16 },
   ],
-};
+});
 
 // ── 검증 (불신 입력 취급) ──
 const COLOR_RE = /^0x[0-9a-f]{6}$/;
@@ -442,7 +451,12 @@ export function validateExplainerPlan(v: unknown): PlanCheck {
 
 /** 공개 입력: 정확히 { variant: 'general_internet_v1' } */
 export function buildExplainerStoryboard(input: unknown): PlanCheck | { readonly ok: false; readonly error: 'INVALID_INPUT' } {
-  const s = snap(input, ['variant']);
-  if (!s || s.variant !== EX_VARIANT) return { ok: false, error: 'INVALID_INPUT' };
+  try {
+    const s = snap(input, ['variant']);
+    if (!s || s.variant !== EX_VARIANT) return { ok: false, error: 'INVALID_INPUT' };
+  } catch {
+    // Proxy 트랩·접근자 예외 등은 원문 없이 고정 오류
+    return { ok: false, error: 'INVALID_INPUT' };
+  }
   return validateExplainerPlan(EXPLAINER_PLAN);
 }

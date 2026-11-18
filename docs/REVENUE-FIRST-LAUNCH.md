@@ -367,6 +367,12 @@
   - CPU 60초 한도와 여유가 크지 않다. 느린 환경에서는 `TIMEOUT`이나 CPU 한도로 실패할 수 있다.
 - **실행(수동):** `TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx scripts/video/render-explainer-sample.mjs --out /저장소-밖/빈-폴더`
 - **대표 프레임:** 3.2·9.6·16.4·23.6·28.6초 × 720·390·320 폭. 결과는 저장소·PR에 올리지 않는다.
+- **결함 수정(PM 6984125979):**
+  - 공개 진입점 예외 경계: Proxy·접근자·deps·FS 예외를 원문 없이 고정 결과로 닫는다.
+  - FS 작업(실행 파일 확인·mkdtemp·폰트 해시·파일 쓰기/stat/읽기·정리)도 전체 절대 마감 안에서만 결과를 받는다. Node 비동기 FS는 취소할 수 없어서, 늦게 끝나는 작업은 별도 정리 한도(killWaitMs) 안에 완료를 확인한다. 확인하지 못하면 `CLEANUP_FAILED`이고 디렉터리를 지우지 않는다. 마감 뒤 늦게 생긴 자기 mkdtemp 디렉터리도 같은 규칙으로 지운다.
+  - 공유 `ProcessOwner`: spawn 직후와 결과 반환 직전에 마감을 대조한다(동기 차단 뒤 결과도 TIMEOUT). 18초·30초 renderer 모두 마지막 파일 읽기 뒤 마감을 대조한다.
+  - `EXPLAINER_PLAN` 깊은 동결.
+  - **18초 renderer의 FS 작업 마감은 이번 범위에서 바꾸지 않았다(같은 한계가 남아 있다).**
 
 ### 3-2. 자동 상담 응대 흐름 (제안, 실행 중 아님)
 1. **상품 문의**

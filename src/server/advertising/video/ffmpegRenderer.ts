@@ -356,6 +356,7 @@ export async function renderAdVideo(input: unknown, deps: RendererDeps): Promise
         }
       }
     }
+    if (!(pdeps.now() < deadlineAt)) throw new Stop('TIMEOUT'); // 마지막 요청·파일 읽기 뒤 마감 대조(PM 6984125979 3절)
     success = {
       ok: true, code: 'RENDERED', copySource: sb.copySource, situationId: sb.situationId, video, probe: pr.report, faststart: true,
       lines: Object.freeze(lines), frames: Object.freeze(frames),

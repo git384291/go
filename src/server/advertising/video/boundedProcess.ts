@@ -7,6 +7,7 @@ import 'server-only';
 // - 실행: spawn(고정 실행 파일, 인자 배열, {shell:false, detached:true, stdin ignore, 최소 고정 env, 자기 cwd}).
 // - 소유권: spawn 직후 이 Owner에 등록한다. 종료(exit/close)를 확인하기 전에는 등록을 지우지 않는다.
 // - 마감: 호출자의 **절대 마감**(deadlineAt)만 쓴다. 단계마다 새 시간을 주지 않는다. 마감이 지났으면 spawn 0.
+//   spawn 직후(동기 차단 대비)와 결과 반환 직전에도 마감을 대조한다. 마감 뒤 결과는 TIMEOUT이다.
 // - 중단(시간 초과·출력 한도 초과·정리): 자기 프로세스 그룹에만 SIGKILL을 1회 보낸다(PID 전체 검색 kill 없음).
 //   그 뒤 killWaitMs 안에 종료가 확인되지 않으면 CLEANUP_FAILED이고, 이 Owner는 **새 기동을 거부**한다.
 //   늦게 도착한 종료는 등록에서 지워 정리에 반영하지만, 이미 정한 실패 결과를 성공으로 바꾸지 않는다.
@@ -156,6 +157,14 @@ export class ProcessOwner {
       this.terminate(rec, 'SPAWN_FAILED');
     }
 
+    // spawn이 동기로 오래 막혔으면 이미 마감이 지났을 수 있다(PM 6984125979 3절): 아직 종료를 확인하지 못한 자식만 중단한다
+    let late = false;
+    try {
+      late = !(d.now() < spec.deadlineAt);
+    } catch {
+      late = true;
+    }
+    if (late) this.terminate(rec, 'TIMEOUT');
     const timer = d.setTimer(() => this.terminate(rec, 'TIMEOUT'), Math.max(0, spec.deadlineAt - d.now()));
     try {
       await this.waitExitOrKillWindow(rec);
@@ -170,6 +179,8 @@ export class ProcessOwner {
     }
     if (rec.reason) return { kind: 'fail', reason: rec.reason };
     if (spawnError) return { kind: 'fail', reason: 'SPAWN_FAILED' };
+    // 결과를 돌려주기 직전에도 마감을 대조한다. 마감 뒤에 끝난 결과는 성공으로 받지 않는다(자식은 이미 종료 확인됨, 추가 kill 없음)
+    if (!(d.now() < spec.deadlineAt)) return { kind: 'fail', reason: 'TIMEOUT' };
     return {
       kind: 'exit',
       code: exitCode,

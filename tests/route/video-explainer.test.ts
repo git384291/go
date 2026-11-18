@@ -329,3 +329,129 @@ test('EX9 정적: env·shell·fetch·설치·음성·업로드 연결 없음', (
     assert.ok(!/upload|publish|youtube|openai|tts|speech|flite|generateAdCopy|prepareYoutube/i.test(code), `${f}: 음성·생성·업로드 연결 없음`);
   }
 });
+
+// ── PM 6984125979 결함 수정 회귀 ──
+import { mkdtemp as realMkdtemp } from 'node:fs/promises';
+import { ProcessOwner } from '../../src/server/advertising/video/boundedProcess';
+
+test('EX10 예외 경계: Proxy·getter·deps·FS 예외는 원문 없이 고정 결과, spawn 0', async () => {
+  const marker = 'MARKER_SECRET_RAW';
+  const trap = new Proxy({}, { getPrototypeOf() { throw new Error(marker); }, ownKeys() { throw new Error(marker); } });
+  assert.deepEqual(buildExplainerStoryboard(trap), { ok: false, error: 'INVALID_INPUT' });
+  const h1 = harness();
+  const r1 = await renderExplainerVideo(trap, h1.deps);
+  assert.equal(r1.code, 'INVALID_INPUT');
+  assert.equal(h1.spawned.length, 0);
+  // fs.checkExecutable reject → NOT_AVAILABLE, 원문 없음
+  const h2 = harness();
+  const r2 = await renderExplainerVideo(INPUT, { ...h2.deps, fs: { checkExecutable: async () => { throw new Error(marker); }, fontDigest: async () => FONT_SHA256 } });
+  assert.equal(r2.code, 'NOT_AVAILABLE');
+  assert.ok(!JSON.stringify(r2).includes(marker));
+  assert.equal(h2.spawned.length, 0);
+  // checkExecutable 동기 throw
+  const h3 = harness();
+  const r3 = await renderExplainerVideo(INPUT, { ...h3.deps, fs: { checkExecutable: (() => { throw new Error(marker); }) as unknown as () => Promise<boolean>, fontDigest: async () => FONT_SHA256 } });
+  assert.equal(r3.code, 'NOT_AVAILABLE');
+  // deps.now throw, deps getter throw, deps Proxy
+  const h4 = harness();
+  assert.equal((await renderExplainerVideo(INPUT, { ...h4.deps, now: () => { throw new Error(marker); } })).code, 'INVALID_INPUT');
+  const badDeps = Object.defineProperty({ ...h4.deps }, 'totalTimeoutMs', { get() { throw new Error(marker); } });
+  assert.equal((await renderExplainerVideo(INPUT, badDeps)).code, 'INVALID_INPUT');
+  const proxyDeps = new Proxy(h4.deps, { get() { throw new Error(marker); } });
+  const r5 = await renderExplainerVideo(INPUT, proxyDeps);
+  assert.equal(r5.code, 'INVALID_INPUT');
+  assert.ok(!JSON.stringify(r5).includes(marker));
+  assert.equal(h4.spawned.length, 0);
+});
+
+test('EX11 FS 작업도 전체 마감 안: 무한 대기 준비·늦은 mkdtemp 정리', async () => {
+  // 1) checkExecutable이 마감 뒤까지 안 끝남 → 마감 시각에 TIMEOUT, 늦은 완료를 별도 한도 안에 확인 못 하면 CLEANUP_FAILED
+  let release: (v: boolean) => void = () => {};
+  const h = harness();
+  const t0 = Date.now();
+  const r = await renderExplainerVideo(INPUT, { ...h.deps, totalTimeoutMs: 1_000, fs: { checkExecutable: () => new Promise<boolean>((res) => { release = res; }), fontDigest: async () => FONT_SHA256 } });
+  const took = Date.now() - t0;
+  assert.ok(took < 1_200, `마감 근처에서 닫힘: ${took}ms`);
+  assert.deepEqual([r.code, r.ok ? null : r.primary], ['CLEANUP_FAILED', 'TIMEOUT'], '늦은 FS 완료 미확인은 정리 완료로 주장하지 않음');
+  assert.equal(h.spawned.length, 0, '마감 뒤 새 process 0');
+  release(false);
+
+  // 2) 별도 한도 안에 늦게 끝나면 TIMEOUT·정리 OK(결과는 버림)
+  const h2 = harness();
+  const r2 = await renderExplainerVideo(INPUT, { ...h2.deps, totalTimeoutMs: 1_000, killWaitMs: 500, fs: { checkExecutable: () => new Promise<boolean>((res) => setTimeout(() => res(true), 1_150)), fontDigest: async () => FONT_SHA256 } });
+  assert.equal(r2.code, 'TIMEOUT');
+  assert.notEqual(r2.cleanup, 'FAILED');
+  assert.equal(h2.spawned.length, 0);
+
+  // 3) mkdtemp가 마감 뒤에 실제 디렉터리를 만들면 그 디렉터리를 소유하고 지운다
+  let made = '';
+  const h3 = harness();
+  const r3 = await renderExplainerVideo(INPUT, {
+    ...h3.deps, totalTimeoutMs: 1_000, killWaitMs: 800,
+    fs: { checkExecutable: async () => true, fontDigest: async () => FONT_SHA256, mkdtemp: (prefix: string) => new Promise<string>((res, rej) => setTimeout(() => realMkdtemp(prefix).then((d) => { made = d; res(d); }, rej), 1_150)) },
+  });
+  assert.equal(r3.code, 'TIMEOUT', JSON.stringify(r3));
+  assert.equal(r3.cleanup, 'OK');
+  assert.ok(made.length > 0 && !existsSync(made), '늦게 생긴 자기 디렉터리 삭제');
+  assert.equal(h3.spawned.length, 0);
+
+  // 4) 정리 removeDir가 끝나지 않으면 CLEANUP_FAILED(원래 실패 보존)
+  const h4 = harness({ render: { code: 1 } });
+  const r4 = await renderExplainerVideo(INPUT, { ...h4.deps, fs: { checkExecutable: async () => true, fontDigest: async () => FONT_SHA256, removeDir: () => new Promise<void>(() => {}) } });
+  assert.deepEqual([r4.code, r4.ok ? null : r4.primary], ['CLEANUP_FAILED', 'RENDER_FAILED']);
+  rmSync(h4.spawned[0]!.opts.cwd, { recursive: true, force: true });
+});
+
+test('EX12 공유 ProcessOwner: 동기 spawn 차단·반환 직전 마감 초과는 성공으로 받지 않음', async () => {
+  const kills: number[] = [];
+  const mk = (block: number) => ({
+    spawn: () => {
+      const until = Date.now() + block;
+      while (Date.now() < until) { /* 동기 차단 */ }
+      const c = new FakeChild(9100);
+      queueMicrotask(() => c.finish(0));
+      return c as unknown as ChildLike;
+    },
+    killGroup: (p: number) => { kills.push(p); },
+    now: () => Date.now(),
+    setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
+    clearTimer: (x: unknown) => clearTimeout(x as NodeJS.Timeout),
+    killWaitMs: 50,
+  });
+  const o = new ProcessOwner(mk(70));
+  const r = await o.run({ file: TOOLS.unshare, args: [...EX_WRAP_ARGS, TOOLS.cat], cwd: tmpdir(), deadlineAt: Date.now() + 20, maxStdout: 10, maxStderr: 10 });
+  assert.deepEqual(r, { kind: 'fail', reason: 'TIMEOUT' }, '동기 70ms 차단 뒤 exit 0도 TIMEOUT');
+  assert.equal(o.liveCount, 0, '종료 확인 후 소유 해제');
+  // 반환 직전 시각이 마감을 넘으면 TIMEOUT(이미 종료된 자식에 추가 kill 없음)
+  let fakeNow = 1_000;
+  const deps2 = { ...mk(0), now: () => fakeNow, spawn: () => { const c = new FakeChild(9200); queueMicrotask(() => { fakeNow = 5_000; c.finish(0); }); return c as unknown as ChildLike; } };
+  const before = kills.length;
+  const o2 = new ProcessOwner(deps2);
+  const r2 = await o2.run({ file: TOOLS.unshare, args: [...EX_WRAP_ARGS, TOOLS.cat], cwd: tmpdir(), deadlineAt: 2_000, maxStdout: 10, maxStderr: 10 });
+  assert.deepEqual(r2, { kind: 'fail', reason: 'TIMEOUT' });
+  assert.equal(kills.length, before, '이미 종료된 자식에는 kill 없음');
+  // 마감 안 정상 결과는 그대로 성공
+  const o3 = new ProcessOwner(mk(0));
+  const r3 = await o3.run({ file: TOOLS.unshare, args: [...EX_WRAP_ARGS, TOOLS.cat], cwd: tmpdir(), deadlineAt: Date.now() + 1_000, maxStdout: 10, maxStderr: 10 });
+  assert.equal(r3.kind, 'exit');
+});
+
+test('EX13 승인 대본 원본 깊은 동결: 같은 프로세스 수정 불가·연속 호출 불변', () => {
+  const isDeepFrozen = (v: unknown): boolean => v === null || typeof v !== 'object' || (Object.isFrozen(v) && Object.values(v as object).every(isDeepFrozen));
+  assert.ok(isDeepFrozen(EXPLAINER_PLAN));
+  const original = JSON.stringify(EXPLAINER_PLAN);
+  const tries: (() => void)[] = [
+    () => { (EXPLAINER_PLAN.texts[0] as { text: string }).text = 'MARKER 문구'; },
+    () => { (EXPLAINER_PLAN.texts as unknown as TextLike[]).push({}); },
+    () => { (EXPLAINER_PLAN.sprites[0]!.prims[0] as { c: string }).c = '0x000000'; },
+    () => { (EXPLAINER_PLAN.sprites[0] as { x: number }).x = 1; },
+    () => { (EXPLAINER_PLAN as { variant: string }).variant = 'x'; },
+  ];
+  for (const t of tries) assert.throws(t, TypeError);
+  assert.equal(JSON.stringify(EXPLAINER_PLAN), original);
+  const a = buildExplainerStoryboard(INPUT);
+  const b = buildExplainerStoryboard(INPUT);
+  assert.deepEqual(a, b);
+  if (a.ok) assert.ok(a.plan.texts.every((t) => !t.text.includes('MARKER')));
+});
+type TextLike = Record<string, unknown>;
