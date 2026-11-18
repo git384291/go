@@ -63,12 +63,12 @@ export const FONT_SHA256 = 'faa5f3656a78b2e2d450d27fe8382c778bc2b6bb5ea29c986664
 const FONT_FILTER_VALUE = `fontfile=${FONT_FILE}`;
 
 export const MAX_TOTAL_MS = 120_000;
-const MIN_TOTAL_MS = 1_000;
+export const MIN_TOTAL_MS = 1_000;
 const FRAME_TIMES = Object.freeze([2.5, 9, 15.5]);
 const FRAME_WIDTHS = Object.freeze([720, 390, 320]);
-const MAX_FRAME_BYTES = 2 * 1024 * 1024;
-const TMP_PREFIX = 'fideon-video-';
-const SAFE_DIR = /^\/[A-Za-z0-9/_.-]+$/;
+export const MAX_FRAME_BYTES = 2 * 1024 * 1024;
+export const TMP_PREFIX = 'fideon-video-';
+export const SAFE_DIR = /^\/[A-Za-z0-9/_.-]+$/;
 
 export type RenderCode =
   | 'RENDERED'
@@ -121,7 +121,7 @@ export type RendererDeps = ProcessDeps & {
   readonly frames?: boolean;
 };
 
-const realFs: RendererFs = {
+export const realFs: RendererFs = {
   mkdtemp: (prefix) => mkdtemp(prefix),
   checkExecutable: async (file) => {
     try {
@@ -206,21 +206,21 @@ export function buildMeasureFilter(sb: Storyboard): { filter: string; files: { n
 const fail = (code: Exclude<RenderCode, 'RENDERED'>, spawned: number, cleanup: 'OK' | 'FAILED' | 'NOT_NEEDED', reason?: ProbeReject): RenderResult =>
   Object.freeze(reason ? { ok: false, code, reason, cleanup, spawned } : { ok: false, code, cleanup, spawned });
 
-class Stop extends Error {
+export class Stop extends Error {
   constructor(readonly code: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'>, readonly reason?: ProbeReject) {
     super(code);
   }
 }
 
 /** 실행 실패를 고정 코드로. exit 결과는 그대로 돌려준다 */
-function need(r: RunOutcome, onFail: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'>): Extract<RunOutcome, { kind: 'exit' }> {
+export function need(r: RunOutcome, onFail: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'>): Extract<RunOutcome, { kind: 'exit' }> {
   if (r.kind === 'exit') return r;
   if (r.reason === 'TIMEOUT') throw new Stop('TIMEOUT');
   if (r.reason === 'CLEANUP_FAILED' || r.reason === 'BLOCKED') throw new CleanupStop();
   if (r.reason === 'STDIO_TOO_LARGE') throw new Stop('OUTPUT_TOO_LARGE');
   throw new Stop(onFail);
 }
-class CleanupStop extends Error {}
+export class CleanupStop extends Error {}
 
 export async function renderAdVideo(input: unknown, deps: RendererDeps): Promise<RenderResult> {
   // deps는 한 번만 읽는다
@@ -424,13 +424,13 @@ export function parseBbox(stderr: string, n: number): { w: number; h: number }[]
 }
 
 /** 자기 디렉터리에 고정 이름 파일을 새로 만든다(이미 있거나 symlink면 실패: wx) */
-async function writeOwnFile(dir: string, name: string, text: string): Promise<void> {
+export async function writeOwnFile(dir: string, name: string, text: string): Promise<void> {
   if (!/^[a-z][0-9_a-z]*\.txt$/.test(name)) throw new Stop('RENDER_FAILED');
   await writeFile(path.join(dir, name), text, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
 }
 
 /** 일반 파일을 크기 한도 안에서 읽고, 연 뒤의 크기가 stat과 같은지 확인한다 */
-async function readOwnFile(p: string, expected: number, max: number): Promise<Uint8Array | null> {
+export async function readOwnFile(p: string, expected: number, max: number): Promise<Uint8Array | null> {
   if (!(expected > 0 && expected <= max)) return null;
   const fh = await open(p, fsc.O_RDONLY | fsc.O_NOFOLLOW);
   try {

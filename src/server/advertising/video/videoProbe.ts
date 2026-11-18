@@ -47,13 +47,28 @@ const integer = (v: unknown): number | null => (typeof v === 'string' && INT.tes
 /** ffprobe JSON 판정(순수). actualBytes는 호출자가 stat으로 잰 실제 크기 */
 export function checkProbeJson(text: unknown, actualBytes: unknown): ProbeCheck {
   try {
-    return checkUnsafe(text, actualBytes);
+    return checkUnsafe(text, actualBytes, PROFILE_18S);
   } catch {
     return { ok: false, reason: 'SHAPE' };
   }
 }
 
-function checkUnsafe(text: unknown, actualBytes: unknown): ProbeCheck {
+/** 판정 기준(내부 고정값). 외부 입력으로 받지 않는다 */
+type Profile = { readonly width: number; readonly height: number; readonly fps: number; readonly durationSec: number; readonly frames: number };
+const PROFILE_18S: Profile = Object.freeze({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, fps: VIDEO_FPS, durationSec: VIDEO_DURATION_SEC, frames: EXPECTED_FRAMES });
+/** 30초 무음 화면 시안(PM 6983216833). 오디오 없음·5MiB 상한은 18초와 같다 */
+const PROFILE_30S: Profile = Object.freeze({ width: 720, height: 1280, fps: 30, durationSec: 30, frames: 900 });
+
+/** 30초 화면 시안 판정(순수). 18초 판정과 별도 함수 */
+export function checkExplainerProbeJson(text: unknown, actualBytes: unknown): ProbeCheck {
+  try {
+    return checkUnsafe(text, actualBytes, PROFILE_30S);
+  } catch {
+    return { ok: false, reason: 'SHAPE' };
+  }
+}
+
+function checkUnsafe(text: unknown, actualBytes: unknown, pf: Profile): ProbeCheck {
   const no = (reason: ProbeReject): ProbeCheck => ({ ok: false, reason });
   if (typeof actualBytes !== 'number' || !Number.isSafeInteger(actualBytes) || actualBytes <= 0) return no('BYTES');
   if (actualBytes > MAX_VIDEO_BYTES) return no('TOO_LARGE');
@@ -73,21 +88,21 @@ function checkUnsafe(text: unknown, actualBytes: unknown): ProbeCheck {
   if (!plain(s) || s.codec_type !== 'video') return no('STREAM_COUNT');
   if (s.codec_name !== 'h264') return no('CODEC');
   if (s.profile !== 'High') return no('PROFILE');
-  if (s.width !== VIDEO_WIDTH || s.height !== VIDEO_HEIGHT) return no('SIZE_DIMENSIONS');
+  if (s.width !== pf.width || s.height !== pf.height) return no('SIZE_DIMENSIONS');
   if (s.pix_fmt !== 'yuv420p') return no('PIX_FMT');
-  const fpsText = `${VIDEO_FPS}/1`;
+  const fpsText = `${pf.fps}/1`;
   if (s.r_frame_rate !== fpsText || s.avg_frame_rate !== fpsText) return no('FPS');
   const frames = integer(s.nb_read_frames);
-  if (frames === null || frames !== EXPECTED_FRAMES) return no('FRAMES');
+  if (frames === null || frames !== pf.frames) return no('FRAMES');
   if (typeof format.format_name !== 'string' || !format.format_name.split(',').includes('mp4')) return no('FORMAT');
   const duration = decimal(format.duration);
-  if (duration === null || Math.abs(duration - VIDEO_DURATION_SEC) > DURATION_TOLERANCE) return no('DURATION');
+  if (duration === null || Math.abs(duration - pf.durationSec) > DURATION_TOLERANCE) return no('DURATION');
   const size = integer(format.size);
   if (size === null || size !== actualBytes) return no('BYTES');
   return {
     ok: true,
     report: Object.freeze({
-      codec: 'h264', profile: 'High', width: VIDEO_WIDTH, height: VIDEO_HEIGHT, pixFmt: 'yuv420p', fps: VIDEO_FPS,
+      codec: 'h264', profile: 'High', width: pf.width, height: pf.height, pixFmt: 'yuv420p', fps: pf.fps,
       durationSec: duration, frames, bytes: actualBytes, videoStreams: 1, otherStreams: 0,
     }),
   };
@@ -126,7 +141,18 @@ export const FFPROBE_ARGS: readonly string[] = Object.freeze([
 export type ProbeRun = { readonly ok: true; readonly report: ProbeReport } | { readonly ok: false; readonly code: 'PROBE_REJECTED' | 'TIMEOUT' | 'CLEANUP_FAILED' | 'PROBE_FAILED'; readonly reason?: ProbeReject };
 
 /** ffprobe 실행 + 판정. wrap은 renderer의 고정 격리·자원 제한 접두 인자 */
-export async function probeVideo(owner: ProcessOwner, p: { readonly wrapFile: string; readonly wrapArgs: readonly string[]; readonly cwd: string; readonly deadlineAt: number; readonly actualBytes: number }): Promise<ProbeRun> {
+export async function probeVideo(owner: ProcessOwner, p: ProbeParams): Promise<ProbeRun> {
+  return runProbe(owner, p, checkProbeJson);
+}
+
+/** 30초 화면 시안용 실행 + 판정(18초 probeVideo와 같은 실행 규칙, 판정만 30초 기준) */
+export async function probeExplainerVideo(owner: ProcessOwner, p: ProbeParams): Promise<ProbeRun> {
+  return runProbe(owner, p, checkExplainerProbeJson);
+}
+
+type ProbeParams = { readonly wrapFile: string; readonly wrapArgs: readonly string[]; readonly cwd: string; readonly deadlineAt: number; readonly actualBytes: number };
+
+async function runProbe(owner: ProcessOwner, p: ProbeParams, check: (text: unknown, bytes: unknown) => ProbeCheck): Promise<ProbeRun> {
   const r = await owner.run({ file: p.wrapFile, args: [...p.wrapArgs, ...FFPROBE_ARGS], cwd: p.cwd, deadlineAt: p.deadlineAt, maxStdout: PROBE_MAX_STDOUT, maxStderr: 2048 });
   if (r.kind === 'fail') {
     if (r.reason === 'TIMEOUT') return { ok: false, code: 'TIMEOUT' };
@@ -142,6 +168,6 @@ export async function probeVideo(owner: ProcessOwner, p: { readonly wrapFile: st
   } catch {
     return { ok: false, code: 'PROBE_REJECTED', reason: 'JSON' };
   }
-  const c = checkProbeJson(text, p.actualBytes);
+  const c = check(text, p.actualBytes);
   return c.ok ? { ok: true, report: c.report } : { ok: false, code: 'PROBE_REJECTED', reason: c.reason };
 }

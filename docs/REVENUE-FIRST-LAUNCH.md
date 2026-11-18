@@ -353,6 +353,21 @@
   - 결과(영상·프레임·evidence.json)는 저장소·PR에 올리지 않는다.
 - **가독성 근거:** 320px 폭에서 0.444배로 보여 64/48/40px가 약 28/21/18px다. 실제 측정 최대 줄 폭은 600px 이하여야 하고(좌우 여백 각 60px), 줄 높이를 넘으면 렌더 0.
 
+### 3-1-c. 30초 설명형 무음 화면 시안 (PM 6983216833, 내부 검토용)
+- **성격:** 내부 검토용 **무음 화면 시안**이다. 음성·음성 동기·판매용 완성·광고 집행 승인이 아니다. 화면 품질은 자동 판정이 아니라 사용자·PM 육안 검수다.
+- **대본:** PM 일반 인터넷 선택안 5문장. 결합 할인 유도·혜택·금액·상품 판정·실적·URL·전화·QR·CTA 없음.
+- **파일**
+  - `src/server/advertising/video/explainerStoryboard.ts`: 고정 계획(그림 25개·문구 33줄)과 순수 검증. 입력은 정확히 `{ variant: 'general_internet_v1' }`. 정수 좌표·고정 색·0~30초·허용 문자·데이터 속성만(접근자 거부)·중복 id 거부.
+  - `src/server/advertising/video/explainerRenderer.ts`: 그림은 고정 도형(둥근 사각형·원·고리·선·호)을 `geq`로 1프레임 그린 뒤 `loop`·`fade`·`overlay`로 움직인다. 외부 이미지·폰트·음원 입력 0. 문구는 `e<i>.txt` + `drawtext expansion=none:reload=0`.
+  - `src/server/advertising/video/videoProbe.ts`: 30초 전용 `checkExplainerProbeJson`·`probeExplainerVideo`를 **별도 추가**했다(30.0±0.5초·900프레임·오디오 0·5MiB 이하). 18초 `checkProbeJson`·`probeVideo` 판정은 같다(내부 기준값 상수화만).
+  - `src/server/advertising/video/ffmpegRenderer.ts`: 내부 helper에 `export`만 추가했다(동작 변경 0).
+  - `tests/route/video-explainer.test.ts` EX1~EX9, `scripts/video/render-explainer-sample.mjs`(수동, CI 미연결).
+- **자원 제한(30초 시안 전용):** 주소 공간만 2GiB(`EX_LIMITS`)이고, CPU 60초·파일 16MiB·프로세스 64는 18초와 같다. 18초 renderer의 1GiB는 그대로다.
+  - 근거(Claude 세션 실측): 문구 33줄의 drawtext가 각자 폰트를 열어 1GiB에서는 측정 단계에서 할당 실패. `-filter_complex_threads 1`일 때 가상 메모리 최대 약 1.5GiB, 실제 상주 약 0.6GiB, 렌더 CPU 약 42초.
+  - CPU 60초 한도와 여유가 크지 않다. 느린 환경에서는 `TIMEOUT`이나 CPU 한도로 실패할 수 있다.
+- **실행(수동):** `TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx scripts/video/render-explainer-sample.mjs --out /저장소-밖/빈-폴더`
+- **대표 프레임:** 3.2·9.6·16.4·23.6·28.6초 × 720·390·320 폭. 결과는 저장소·PR에 올리지 않는다.
+
 ### 3-2. 자동 상담 응대 흐름 (제안, 실행 중 아님)
 1. **상품 문의**
    - 인터넷+TV 문의만 받는다(1단계 활성 상품).
