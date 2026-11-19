@@ -242,10 +242,11 @@ try {
   for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
     r = await get('/preview/consult-chat', h);
     t = await r.text();
-    // HTML은 404 상태. RSC 스트림은 Next가 not-found 표식을 담아 200으로 줄 수 있어(CI 실측), 이 경우 not-found 표식 확인 + 상담 문구 0으로 본다
-    const notFoundMark = /NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND|404/.test(t);
-    const hidden = label === 'HTML' ? r.status === 404 : r.status === 404 || notFoundMark;
-    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, hidden && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, not-found 표식 ${notFoundMark}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
+    // HTML은 404 상태. RSC 스트림은 Next가 200으로 줄 수 있어(CI 실측), 이 경우 스트림 안의 실제 Next not-found 신호
+    // (NEXT_HTTP_ERROR_FALLBACK;404 또는 NEXT_NOT_FOUND)만 인정한다. 임의의 '404' 숫자·오류 응답만으로는 통과하지 않는다.
+    const sig = (t.match(/NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND/) ?? [null])[0];
+    const hidden = label === 'HTML' ? r.status === 404 : r.status === 404 || sig !== null;
+    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, hidden && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, not-found 신호 ${sig ?? '없음'}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
   }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
@@ -296,39 +297,57 @@ try {
     r = await vs.get('/preview/consult-chat', { RSC: '1' });
     t = await r.text();
     report('S3 /preview/consult-chat RSC: 200·text/x-component', r.status === 200 && (r.headers.get('content-type') ?? '').includes('text/x-component'));
-    // 실제 브라우저(CI가 설치한 Chromium): 하이드레이션 후 가정용 끝까지 → 요약 → 이전 답 고치기, 외부 요청 0
-    let browserOk = false; let browserNote = '';
-    let browser = null;
-    try {
-      const { chromium } = await import('playwright');
-      browser = await chromium.launch();
+    // 실제 브라우저(CI가 설치한 Chromium, 390폭 하나만). 320/390 전 경로 시험은 scripts/preview/consult-preview.mjs(가상 주소 fixture)가 맡는다.
+    // 두 흐름 모두 하이드레이션 후 끝까지 → 요약 → 이전 답 고치기 → 낡은 요약 제거 → 다시 골라 새 요약까지, 입력칸·저장소·외부 요청·오류 0
+    const runFlow = async (browser, flow) => {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, timezoneId: 'Asia/Seoul' });
       const external = [];
       await ctx.route('**/*', (route) => { const u = route.request().url(); if (u.startsWith(base + '/') || u === base) return route.continue(); external.push(u); return route.abort(); });
       const page = await ctx.newPage();
       const errs = [];
       page.on('pageerror', (e) => errs.push(String(e)));
-      await page.goto(base + '/preview/consult-chat', { waitUntil: 'networkidle', timeout: 20_000 });
-      const pick = (text) => page.locator('.cp-choice', { hasText: text }).first().click({ timeout: 10_000 });
-      await pick('가정용');
-      await pick('이사해서 새로 알아봐요');
-      await pick('3~4개');
-      await pick('매일 봐요');
-      const sum1 = await page.locator('.cp-summary').innerText({ timeout: 10_000 });
-      await page.locator('details.cp-history > summary').click();
-      await page.locator('.cp-history-list li', { hasText: '어떤 이유로' }).locator('.cp-edit').click();
-      const gone = (await page.locator('.cp-summary').count()) === 0;
-      const noInput = (await page.locator('input, textarea').count()) === 0;
-      const stor = await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length);
-      browserOk = sum1.includes('가장 먼저 비교할 점') && sum1.includes('동시 사용과 셋톱박스 임대료') && gone && noInput && stor === 0 && external.length === 0 && errs.length === 0;
-      browserNote = `요약 ${sum1.includes('가장 먼저 비교할 점')}, 고치기 후 요약 제거 ${gone}, 외부 요청 ${external.length}, 오류 ${errs.length}`;
-      await ctx.close();
+      try {
+        await page.goto(base + '/preview/consult-chat', { waitUntil: 'networkidle', timeout: 20_000 });
+        const pick = (text) => page.locator('.cp-choice', { hasText: text }).first().click({ timeout: 10_000 });
+        const summary = () => page.locator('.cp-summary').innerText({ timeout: 10_000 });
+        for (const x of flow.first) await pick(x);
+        const sum1 = await summary();
+        await page.locator('details.cp-history > summary').click();
+        await page.locator('.cp-history-list li', { hasText: flow.editQuestion }).locator('.cp-edit').click();
+        const gone = (await page.locator('.cp-summary').count()) === 0;
+        for (const x of flow.again) await pick(x);
+        const sum2 = await summary();
+        const noInput = (await page.locator('input, textarea').count()) === 0;
+        const stor = await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length);
+        const c1 = flow.sum1.every((k) => sum1.includes(k));
+        const c2 = flow.sum2.every((k) => sum2.includes(k)) && flow.gone.every((k) => !sum2.includes(k));
+        return { ok: c1 && gone && c2 && noInput && stor === 0 && external.length === 0 && errs.length === 0, note: `첫 요약 ${c1}, 고친 직후 요약 제거 ${gone}, 새 요약 ${c2}, 외부 요청 ${external.length}, 오류 ${errs.length}` };
+      } finally {
+        await ctx.close().catch(() => {});
+      }
+    };
+    const flows = [
+      { name: '가정용(이사·3~4개·매일 → 이유 고치기 → 약정 종료 비교·거의 안 봐요)', first: ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요'], editQuestion: '어떤 이유로',
+        again: ['쓰던 약정이 끝나서 비교해요', '3~4개', '거의 안 봐요'], sum1: ['가장 먼저 비교할 점', '동시 사용과 셋톱박스 임대료'],
+        sum2: ['쓰던 약정이 끝나서 비교해요', '해지 비용'], gone: ['이사해서 새로 알아봐요', '매일 봐요', '동시 사용과 셋톱박스 임대료'] },
+      { name: '사업장(결제 중단·TV 미정 → TV 장소 고치기 → 홀 재선택)', first: ['매장·사무실용', '카드 결제·배달 주문이 멈추는 거예요', '아직 정하지 못했어요'], editQuestion: 'TV는 어디에서',
+        again: ['손님이 보는 홀·객실에 둬요'], sum1: ['가장 먼저 비교할 점', '아직 정하지 못했어요', '직원 휴게실인지'],
+        sum2: ['손님이 보는 홀·객실에 둬요', '해당 장소에서 이용 가능한 상품인지'], gone: ['아직 정하지 못했어요', '직원 휴게실인지'] },
+    ];
+    let browser = null;
+    try {
+      const { chromium } = await import('playwright');
+      browser = await chromium.launch();
+      for (const f of flows) {
+        let res;
+        try { res = await runFlow(browser, f); } catch (e) { res = { ok: false, note: `브라우저 단계 실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})` }; }
+        report(`S3 실제 서버 390폭 ${f.name}: 요약·고치기·낡은 요약 제거·새 요약`, res.ok, res.note);
+      }
     } catch (e) {
-      browserNote = `브라우저 단계 실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})`;
+      report('S3 실제 서버 브라우저 시작', false, `실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})`);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
-    report('S3 실제 브라우저: 하이드레이션 후 가정용 끝까지·요약·이전 답 고치기·낡은 요약 제거·외부 요청 0', browserOk, browserNote);
     const n = netAttempts();
     report('S3 서버의 외부 접속 시도 0건', n === 0, `차단 ${n}건`);
     await stopOrThrow('S3 서버 정리(종료 이벤트 확인)');
