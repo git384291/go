@@ -266,7 +266,7 @@ for (const width of [320, 390]) {
       for (const x of picks) await click(page, x);
       const sum = await summaryText(page);
       const costs = await page.$eval('.cp-costs', (e) => e.textContent).catch(() => '');
-      const summaryOk = !!sum && sum.includes('설치 관련 비용') && !sum.includes('처음 낼 비용') && costs.includes('설치비 금액과 청구 시점은 확인이 필요해요') && costs.includes('확인된 금액 없음') && sum.includes('설치비와 설치 가능 여부, 희망 일정') && sum.includes('설치비 금액과 청구 시점') && !/나눠 내|분할/.test(sum) && !/\d[\d,]*\s*원/.test(sum);
+      const summaryOk = !!sum && sum.includes('설치 관련 비용') && !sum.includes('처음 낼 비용') && costs.includes('설치비 금액과 청구 시점은 확인이 필요해요') && costs.includes('확인된 금액 없음') && sum.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점') && !/나눠 내|분할/.test(sum) && !/\d[\d,]*\s*원/.test(sum);
       check(`${tag} 요약: 설치 관련 비용(금액·청구 시점 확인 필요)·확인할 항목에 설치 가능 여부·희망 일정·청구 시점, 분할 납부 안내·금액 숫자 없음`, summaryOk);
       await page.locator('details[data-aux="faq"] > summary').click();
       const perScene = [];
@@ -297,7 +297,7 @@ for (const width of [320, 390]) {
   const first = await summaryFirstLine(page);
   const all = await summaryText(page);
   check(`[${width}px] 이사 대표 경로 첫 줄: 설치 가능 여부와 설치비 + "설치비 금액과 청구 시점도 확인해 보세요"`, first.includes('설치 가능 여부와 설치비') && first.includes('새 주소의 건물 조건에 따라 설치 가능 여부가 달라져요') && first.includes('설치비 금액과 청구 시점도 확인해 보세요'), first.replace(/\s+/g, ' ').slice(0, 90));
-  check(`[${width}px] 이사 대표 경로 요약: 설치 관련 비용·확인 항목에 금액과 청구 시점, "처음 내는/낼 비용" 단정 없음`, all.includes('설치 관련 비용') && all.includes('설치비 금액과 청구 시점은 확인이 필요해요') && all.includes('설치비 금액과 청구 시점') && !/처음 (낼|내는|내요|내나)|나눠 내|분할/.test(all));
+  check(`[${width}px] 이사 대표 경로 요약: 설치 관련 비용·확인 항목에 금액과 청구 시점, "처음 내는/낼 비용" 단정 없음`, all.includes('설치 관련 비용') && all.includes('설치비 금액과 청구 시점은 확인이 필요해요') && all.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점') && !/처음 (낼|내는|내요|내나)|나눠 내|분할/.test(all));
   check(`[${width}px] 이사 대표 경로 가로 넘침·외부 요청·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0);
   await context.close();
 }
@@ -344,6 +344,69 @@ for (const width of [320, 390]) {
   }
 }
 writeFileSync(path.join(OUT, 'ad-criteria.json'), JSON.stringify(critResults, null, 2));
+
+// ── G4. 확인할 항목 순서·중복·줄바꿈(PM 7024149005): 320/390 × 가정용(이사·갱신)·사업장, 선택 변경 후 이전 조건 제거 ──
+const toCheckLines = (page) => page.$$eval('.cp-summary h3', (hs) => {
+  const h = hs.find((x) => x.textContent === '확인할 항목');
+  return [...h.nextElementSibling.querySelectorAll('li')].map((li) => li.textContent.trim());
+});
+const INSTALL_LINE = '설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점';
+const PRICE_LINE = '월 요금과 약정 기간(VAT 포함 여부 구분)';
+const GIFT_LINE = '장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)';
+for (const width of [320, 390]) {
+  for (const [name, picks] of [
+    ['가정용 이사', ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요']],
+    ['가정용 약정 갱신', ['가정용', '쓰던 약정이 끝나서 비교해요', '5개 이상', '가끔 봐요']],
+    ['사업장 결제', ['매장·사무실용', '카드 결제·배달 주문이 멈추는 거예요', '손님이 보는 홀·객실에 둬요']],
+  ]) {
+    const tag = `[${width}px ${name}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    for (const x of picks) await click(page, x);
+    const lines = await toCheckLines(page);
+    const isHome = name.startsWith('가정용');
+    const installN = lines.filter((t) => /설치 가능 여부|희망 일정|희망하는 설치 일정|설치비/.test(t)).length;
+    check(`${tag} 확인할 항목: 설치 질문은 한 줄 한 번(${INSTALL_LINE}), 중복 줄 없음`, installN === 1 && lines.includes(INSTALL_LINE) && new Set(lines).size === lines.length, `${lines.length}줄`);
+    check(`${tag} 확인할 항목: ${isHome ? '월 요금·약정(VAT)이 첫 줄' : '결제·장애 대응 선택 항목이 월 요금 줄보다 앞'}`, isHome ? lines[0] === PRICE_LINE : lines.indexOf('결제·주문 장비 종류와 개수') === 0 && lines.indexOf(PRICE_LINE) > lines.indexOf('장애가 났을 때 대응 조건'), lines.slice(0, 2).join(' | ').slice(0, 70));
+    check(`${tag} 확인할 항목: 마지막 두 줄은 설치(한 줄)·장비·사은품`, lines.slice(-2).join('|') === `${INSTALL_LINE}|${GIFT_LINE}`);
+    if (name === '가정용 이사') check(`${tag} 선택에 따른 기기·이용 방식·TV 조건 보존(동시 사용·공유기, TV 이용료)`, ['동시에 겹치는 사용(영상 시청·화상회의·게임)', '공유기 위치와 성능', 'TV 이용료와 셋톱박스 비용'].every((t) => lines.includes(t)) && lines.indexOf(PRICE_LINE) === 0);
+    const wrap = await page.$eval('.cp-summary li', (e) => { const c = getComputedStyle(e); return { wb: c.wordBreak, ow: c.overflowWrap }; });
+    check(`${tag} 요약 목록 줄바꿈: 단어 단위(keep-all)·비상 줄바꿈(anywhere)`, wrap.wb === 'keep-all' && wrap.ow === 'anywhere', JSON.stringify(wrap));
+    // 한글 단어 중간 줄바꿈 점검: 각 li의 모든 줄 시작이 단어(공백 뒤)이거나 첫 글자인지, Range로 줄 단위 텍스트를 읽어 확인
+    const mid = await page.$$eval('.cp-summary li', (lis) => {
+      let bad = 0;
+      for (const li of lis) {
+        const node = li.firstChild;
+        if (!node || node.nodeType !== 3) continue;
+        const text = node.textContent;
+        const r = document.createRange();
+        let prevTop = null;
+        for (let i = 0; i < text.length; i++) {
+          r.setStart(node, i); r.setEnd(node, i + 1);
+          const rect = r.getClientRects()[0];
+          if (!rect) continue;
+          if (prevTop !== null && rect.top > prevTop + 4 && i > 0 && text[i - 1] !== ' ' && /[가-힣]/.test(text[i - 1]) && /[가-힣]/.test(text[i])) bad++;
+          prevTop = rect.top;
+        }
+      }
+      return bad;
+    });
+    check(`${tag} 요약 목록에 한글 단어 중간 줄바꿈 0`, mid === 0, `${mid}곳`);
+    check(`${tag} 첫 비교 항목 유지(가장 먼저 비교할 점)·비용 표 유지(확인된 금액 없음 2칸)`, (await summaryFirstLine(page)).includes('가장 먼저 비교할 점') && (await page.locator('.cp-costs li').count()) === 2 && (await page.locator('.cp-costs .cp-cost-status', { hasText: '확인된 금액 없음' }).count()) === 2);
+    check(`${tag} 가로 넘침·외부 요청·저장소·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    if (width === 390) await page.screenshot({ path: path.join(OUT, `09-tocheck-${name.replace(/ /g, '-')}-390.png`), fullPage: true });
+    // 선택 변경: 기기 수 → 이전 조건 제거(가정용만)
+    if (isHome) {
+      await page.locator('details.cp-history > summary').click();
+      await page.locator('.cp-history-list li', { hasText: '동시에 쓰는 기기' }).locator('.cp-edit').click();
+      check(`${tag} 선택 변경 직후 낡은 요약 제거`, (await summaryText(page)) === null);
+      await click(page, '1~2개');
+      await click(page, '거의 안 봐요');
+      const l2 = await toCheckLines(page);
+      check(`${tag} 변경 후 새 요약: 이전 조건(공유기 위치·TV 이용료 등) 제거, 새 조건(와이파이 약한 방) 반영, 월 요금 첫 줄·설치 한 줄 유지`, !l2.includes('공유기 위치와 성능') && !l2.includes('TV 이용료와 셋톱박스 비용') && l2.includes('집에서 와이파이가 약한 방이 있는지') && l2[0] === PRICE_LINE && l2.filter((t) => /설치 가능 여부|희망 일정|설치비/.test(t)).length === 1);
+    }
+    await context.close();
+  }
+}
 
 // ── D. 보조 FAQ는 접어서 읽는다(펼치면 보임) ──
 {

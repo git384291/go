@@ -55,7 +55,7 @@ const HOME_FLOW: Flow = {
           label: '이사해서 새로 알아봐요',
           reply: '이사를 앞두고 계시군요. 설치 가능 여부와 설치비, 원하는 날짜는 주소와 건물 조건을 확인해야 알 수 있어요. 지금은 금액이나 일정을 확정해 드릴 수 없어요.',
           general: '이사라면 설치 가능 여부·설치비·희망 일정은 건물과 설치 조건에 따라 달라져요.',
-          toCheck: ['설치 가능 여부와 설치비', '희망하는 설치 일정'],
+          toCheck: [], // 설치 가능 여부·희망 일정·설치비 금액과 청구 시점은 공통 설치 항목(INSTALL_TO_CHECK) 한 줄로 한 번만 묻는다
         },
         {
           id: 'renewal',
@@ -200,13 +200,11 @@ const BUSINESS_FLOW: Flow = {
 
 export const FLOWS: Readonly<Record<Segment, Flow>> = { home: HOME_FLOW, business: BUSINESS_FLOW };
 
-/** 어떤 선택에서도 마지막 요약에 들어가는 확인 항목(가격·혜택을 말하지 않는다) */
-export const COMMON_TO_CHECK: readonly string[] = [
-  '월 요금과 약정 기간(VAT 포함 여부 구분)',
-  '설치비와 설치 가능 여부, 희망 일정',
-  '설치비 금액과 청구 시점',
-  '장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)',
-];
+// 어떤 선택에서도 마지막 요약에 들어가는 확인 항목(가격·혜택을 말하지 않는다). 설치 관련 질문은 한 줄로 한 번만 묻는다
+export const PRICE_TERM_TO_CHECK = '월 요금과 약정 기간(VAT 포함 여부 구분)';
+export const INSTALL_TO_CHECK = '설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점';
+export const GIFT_TO_CHECK = '장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)';
+export const COMMON_TO_CHECK: readonly string[] = [PRICE_TERM_TO_CHECK, INSTALL_TO_CHECK, GIFT_TO_CHECK];
 
 export type KeyPoint = { readonly point: string; readonly reason: string };
 
@@ -274,7 +272,13 @@ export function buildSummary(segment: Segment, picks: readonly string[]): Summar
     general.push(choice.general);
     for (const t of choice.toCheck) if (!toCheck.includes(t)) toCheck.push(t);
   });
-  for (const t of COMMON_TO_CHECK) if (!toCheck.includes(t)) toCheck.push(t);
+  // 순서: 가정용은 월 요금·약정(VAT)을 먼저 → 선택에 따른 기기·이용 방식·TV 조건 → 설치(한 줄) → 장비·사은품.
+  //       사업장은 결제 중단·장애 대응 등 선택 항목을 먼저 유지한 뒤 같은 공통 항목을 붙인다.
+  const selected = toCheck.splice(0, toCheck.length);
+  const tail = [INSTALL_TO_CHECK, GIFT_TO_CHECK];
+  const head = segment === 'home' ? [PRICE_TERM_TO_CHECK] : [];
+  const rest = segment === 'home' ? [] : [PRICE_TERM_TO_CHECK];
+  for (const t of [...head, ...selected, ...rest, ...tail]) if (!toCheck.includes(t)) toCheck.push(t);
   return { keyPoint: keyPoint(segment, picks), conditions, general, toCheck, costs: COST_ROWS };
 }
 

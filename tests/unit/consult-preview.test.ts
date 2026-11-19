@@ -17,6 +17,9 @@ import {
   MOCK_SATURDAY_HOURS_TEXT,
   phoneState,
   PHONE_VS_VISIT_NOTE,
+  PRICE_TERM_TO_CHECK,
+  INSTALL_TO_CHECK,
+  GIFT_TO_CHECK,
   PRIVACY_FAQ,
   SEGMENTS,
   VIRTUAL_NOTICE,
@@ -76,7 +79,7 @@ test('CP6 흐름 구조: 두 선택, 한 질문씩, 선택지 id 중복 없음',
       const ids = step.choices.map((c) => c.id);
       assert.equal(new Set(ids).size, ids.length, `${step.id} id 중복`);
       for (const c of step.choices) {
-        assert.ok(c.label && c.reply && c.general && c.toCheck.length > 0, `${step.id}/${c.id} 빈 값`);
+        assert.ok(c.label && c.reply && c.general && (c.toCheck.length > 0 || c.id === 'moving'), `${step.id}/${c.id} 빈 값`);
       }
     }
   }
@@ -90,7 +93,7 @@ test('CP7 요약: 선택 조건·일반 안내·확인 항목이 선택에 맞�
   assert.ok(!a.conditions.includes('쓰던 약정이 끝나서 비교해요'));
   assert.ok(b.conditions.includes('쓰던 약정이 끝나서 비교해요'));
   assert.notDeepEqual(a.toCheck, b.toCheck);
-  assert.ok(a.toCheck.includes('설치 가능 여부와 설치비'));
+  assert.ok(a.toCheck.includes(INSTALL_TO_CHECK) && !a.toCheck.includes('지금 쓰는 약정이 끝나는 시기와 해지 비용'));
   assert.ok(b.toCheck.includes('지금 쓰는 약정이 끝나는 시기와 해지 비용'));
   for (const t of COMMON_TO_CHECK) assert.ok(a.toCheck.includes(t) && b.toCheck.includes(t));
   assert.equal(new Set(a.toCheck).size, a.toCheck.length, '확인 항목 중복 없음');
@@ -338,7 +341,7 @@ test('CP21 광고 설치 장면 질문의 답이 도움말에 있고, 금액·�
   for (const seg of ['home', 'business'] as const) {
     const picks = FLOWS[seg].steps.map((st) => st.choices[0].id);
     const sum = buildSummary(seg, picks);
-    assert.ok(sum.toCheck.includes('설치비와 설치 가능 여부, 희망 일정') && sum.toCheck.includes('설치비 금액과 청구 시점'));
+    assert.ok(sum.toCheck.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점'));
     assert.ok(sum.costs.some((c) => c.title === '설치 관련 비용' && c.items === '설치비 금액과 청구 시점은 확인이 필요해요' && c.status === '확인된 금액 없음'));
   }
 });
@@ -351,7 +354,7 @@ test('CP22 설치비 안내가 요약·FAQ·확인 항목에서 일관되고 분
   assert.ok(costRow && costRow.items.includes('금액과 청구 시점'));
   const fee = FAQ.find((f) => f.q === '설치비는 처음에 내나요?');
   assert.ok(fee && fee.a.includes('금액과 청구 시점') && !/처음에 낸다|처음에 내요|처음 내요/.test(fee.a));
-  assert.ok(COMMON_TO_CHECK.includes('설치비 금액과 청구 시점'));
+  assert.ok(COMMON_TO_CHECK.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점'));
   // 토요일 설치 질문의 답은 "아니요"로 시작하지 않고 전화 상담 가능일과 설치 일정을 분리한다
   for (const q of ['이번 토요일 설치가 확정되나요?', '전화 상담이 되는 토요일이면 그날 설치도 되나요?']) {
     const f = FAQ.find((x) => x.q === q);
@@ -381,7 +384,7 @@ test('CP23 모든 최종 선택 조합의 요약(첫 줄 포함)에 "처음 내�
   assert.equal(rep.keyPoint.point, '설치 가능 여부와 설치비');
   assert.ok(rep.keyPoint.reason.includes('설치비 금액과 청구 시점도 확인해 보세요'));
   assert.ok(rep.costs.some((c) => c.title === '설치 관련 비용' && c.items.includes('금액과 청구 시점')));
-  assert.ok(rep.toCheck.includes('설치비 금액과 청구 시점'));
+  assert.ok(rep.toCheck.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점'));
 });
 
 // PM 7021402686: 광고 나머지 비교 기준(사은품만 보고 고름 / 월 요금·약정 / 속도 모름)의 답이 상담 시안에 있고, 다음 확인 사항을 알려 주며, 사업장에 가정용 조건을 적용하지 않는다
@@ -403,4 +406,44 @@ test('CP24 광고 비교 기준 세 가지: 답 위치·다음 확인 사항, �
   // 속도를 모르는 가정용: 속도 추천이 아니라 겹침 확인이 다음 행동
   const u = buildSummary('home', ['moving', 'unsure', 'rare']);
   assert.equal(u.keyPoint.point, '저녁에 영상회의와 TV 시청이 겹치는지');
+});
+
+// PM 7024149005: 확인할 항목의 순서·중복·의미 보존
+test('CP25 확인할 항목: 가정용은 월 요금·약정이 먼저, 설치 질문은 한 줄 한 번, 선택 조건·사업장 우선순위 보존, 중복 없음', () => {
+  const INSTALL_WORDS = /설치 가능 여부|희망 일정|희망하는 설치 일정|설치비/;
+  let n = 0;
+  for (const seg of ['home', 'business'] as const) {
+    const steps = FLOWS[seg].steps;
+    for (const picks of combos(seg)) {
+      n++;
+      const { toCheck } = buildSummary(seg, picks);
+      const tag = `${seg} ${picks.join('>')}`;
+      assert.equal(new Set(toCheck).size, toCheck.length, `${tag}: 중복 줄`);
+      // 설치 관련 질문은 정확히 한 줄(TV 설치 대수처럼 설치 가능 여부·희망 일정·설치비가 아닌 항목은 해당 없음)
+      assert.equal(toCheck.filter((t) => INSTALL_WORDS.test(t)).length, 1, `${tag}: 설치 줄 수`);
+      assert.ok(toCheck.includes(INSTALL_TO_CHECK) && toCheck.includes(GIFT_TO_CHECK) && toCheck.includes(PRICE_TERM_TO_CHECK));
+      // 선택 항목(원래 의미) 보존: 각 선택의 toCheck가 순서대로 그대로 들어 있다
+      const selected = steps.flatMap((st, i) => st.choices.find((c) => c.id === picks[i])!.toCheck).filter((t, i, a) => a.indexOf(t) === i);
+      for (const t of selected) assert.ok(toCheck.includes(t), `${tag}: 선택 항목 누락 ${t}`);
+      const idx = selected.map((t) => toCheck.indexOf(t));
+      assert.deepEqual(idx, [...idx].sort((a, b) => a - b), `${tag}: 선택 항목 순서`);
+      // 꼬리: 설치(한 줄) → 장비·사은품이 항상 마지막 두 줄
+      assert.deepEqual(toCheck.slice(-2), [INSTALL_TO_CHECK, GIFT_TO_CHECK], tag);
+      if (seg === 'home') {
+        assert.equal(toCheck[0], PRICE_TERM_TO_CHECK, `${tag}: 월 요금·약정이 첫 줄`);
+        assert.ok(idx.every((i) => i > 0));
+      } else {
+        // 사업장: 결제 중단·장애 대응 등 선택 항목이 월 요금 줄보다 앞
+        assert.ok(idx.every((i) => i < toCheck.indexOf(PRICE_TERM_TO_CHECK)), `${tag}: 사업장 선택 항목 우선`);
+      }
+    }
+  }
+  assert.equal(n, 36);
+  // 가정 이사 선택은 설치 항목을 따로 더하지 않는다(공통 한 줄이 맡는다)
+  assert.deepEqual(FLOWS.home.steps[0].choices.find((c) => c.id === 'moving')!.toCheck, []);
+  // 선택을 바꾸면 이전 조건이 사라진다: 1~2개 → 5개 이상
+  const a = buildSummary('home', ['renewal', 'few', 'rare']).toCheck;
+  const b = buildSummary('home', ['renewal', 'many', 'rare']).toCheck;
+  assert.ok(a.includes('집에서 와이파이가 약한 방이 있는지') && !b.includes('집에서 와이파이가 약한 방이 있는지'));
+  assert.ok(b.includes('공유기 구성(추가 장비 필요 여부)') && !a.includes('공유기 구성(추가 장비 필요 여부)'));
 });

@@ -314,6 +314,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .cp-summary h2, .cp-phone h2 { margin: 0 0 10px; font-size: 18px; font-weight: 800; color: var(--ink); }
 .cp-summary h3 { margin: 16px 0 6px; font-size: 14px; color: #9a3412; }
 .cp-summary ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+/* 요약 목록은 한글 단어 중간에서 줄이 바뀌지 않게 하고, 띄어쓰기 없이 긴 값만 비상 줄바꿈한다 */
+.cp-summary li { word-break: keep-all; overflow-wrap: anywhere; }
 .cp-keypoint { margin: 0 0 14px; padding: 14px; border-radius: 12px; background: var(--signal-soft); border: 1px solid #f3c9b8; display: grid; gap: 4px; color: var(--ink); }
 .cp-keypoint-label { font-size: 13px; font-weight: 700; color: #9a3412; }
 .cp-keypoint strong { font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; word-break: keep-all; }
