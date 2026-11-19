@@ -383,3 +383,24 @@ test('CP23 모든 최종 선택 조합의 요약(첫 줄 포함)에 "처음 내�
   assert.ok(rep.costs.some((c) => c.title === '설치 관련 비용' && c.items.includes('금액과 청구 시점')));
   assert.ok(rep.toCheck.includes('설치비 금액과 청구 시점'));
 });
+
+// PM 7021402686: 광고 나머지 비교 기준(사은품만 보고 고름 / 월 요금·약정 / 속도 모름)의 답이 상담 시안에 있고, 다음 확인 사항을 알려 주며, 사업장에 가정용 조건을 적용하지 않는다
+test('CP24 광고 비교 기준 세 가지: 답 위치·다음 확인 사항, 가격·혜택 확정과 사업장 가정용 조건 적용 없음', () => {
+  const gift = FAQ.find((f) => f.q === '사은품은 어디가 더 많아요?');
+  assert.ok(gift && ['같은 약정 기간', '월 요금', '장비 비용', '설치비', '지급 조건'].every((k) => gift.a.includes(k)));
+  const speed = FAQ.find((f) => f.q === '500메가면 충분해요?');
+  assert.ok(speed);
+  assert.ok(speed!.a.includes('저녁에 영상회의와 TV 시청이 겹치는지') && speed!.a.includes('바쁜 시간에 겹치는 작업과 장애 대응 조건'));
+  assert.ok(!speed!.a.includes('위에서 고른'), '선택 전에도 읽히는 도움말에서 "위에서 고른 조건"을 가리키지 않는다');
+  assert.ok(COMMON_TO_CHECK.includes('월 요금과 약정 기간(VAT 포함 여부 구분)'));
+  assert.ok(COMMON_TO_CHECK.includes('장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)'));
+  // 사업장 요약에는 가정용 조건(집·가정·우리 집)이 들어가지 않는다
+  for (const picks of combos('business')) {
+    const sum = buildSummary('business', picks);
+    const whole = [sum.keyPoint.point, sum.keyPoint.reason, ...sum.conditions, ...sum.general, ...sum.toCheck].join('\n');
+    assert.ok(!/가정|우리 집|집에서|저녁에 영상회의/.test(whole), `business ${picks.join('>')}: ${/가정|우리 집|집에서|저녁에 영상회의/.exec(whole)?.[0]}`);
+  }
+  // 속도를 모르는 가정용: 속도 추천이 아니라 겹침 확인이 다음 행동
+  const u = buildSummary('home', ['moving', 'unsure', 'rare']);
+  assert.equal(u.keyPoint.point, '저녁에 영상회의와 TV 시청이 겹치는지');
+});

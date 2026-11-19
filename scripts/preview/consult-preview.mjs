@@ -302,6 +302,49 @@ for (const width of [320, 390]) {
   await context.close();
 }
 
+// ── G3. 광고 나머지 비교 기준(PM 7021402686): 사은품만 보고 고름 / 월 요금·약정 함께 / 속도 모름. 답을 찾은 위치와 화면에 실제 표시된 다음 확인 사항을 기록한다 ──
+const critResults = [];
+const MONEY = /\d[\d,]*\s*원|무료|할인|혜택|지원금|최저가|추천/;
+for (const width of [320, 390]) {
+  for (const [segName, picks, forbidden] of [
+    ['가정용', ['가정용', '쓰던 약정이 끝나서 비교해요', '아직 잘 모르겠어요', '거의 안 봐요'], null],
+    ['사업장', ['매장·사무실용', '업무와 화상회의가 멈추는 거예요', '손님이 보는 홀·객실에 둬요'], /가정|우리 집|집에서|저녁에 영상회의/],
+  ]) {
+    const tag = `[${width}px 광고 비교기준→${segName}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    const faq = async (q) => {
+      const det = page.locator('details[data-aux="faq"]');
+      if (!(await det.evaluate((e) => e.open))) await det.locator('> summary').click();
+      const item = det.locator('.guide-item', { hasText: q }).first();
+      if (!(await item.evaluate((e) => e.open))) await item.locator('summary').click();
+      return item.locator('.guide-answer').innerText();
+    };
+    // 선택 전(첫 화면)에서 도움말로 찾는 경우
+    const gift = await faq('사은품은 어디가 더 많아요?');
+    const giftOk = ['같은 약정 기간', '월 요금', '장비 비용', '설치비', '지급 조건'].every((k) => gift.includes(k)) && !MONEY.test(gift);
+    check(`${tag} (1)사은품만 보고 고름 → 도움말(선택 전): 같은 약정 기간으로 월 요금·장비 비용·설치비·지급 조건 확인`, giftOk, gift.replace(/\s+/g, ' ').slice(0, 60));
+    const speed = await faq('500메가면 충분해요?');
+    const speedOk = speed.includes('속도를 아직 모르면 속도부터 고르지 말고') && speed.includes('저녁에 영상회의와 TV 시청이 겹치는지') && speed.includes('바쁜 시간에 겹치는 작업과 장애 대응 조건') && !speed.includes('위에서 고른') && !MONEY.test(speed);
+    check(`${tag} (3)속도 모름 → 도움말(선택 전): 속도부터 고르지 않고 겹침·장애 대응 조건 확인, "위에서 고른 조건" 참조 없음`, speedOk, speed.replace(/\s+/g, ' ').slice(0, 60));
+    // 선택 경로 끝까지 → 요약
+    for (const x of picks) await click(page, x);
+    const sum = await summaryText(page);
+    const first = await summaryFirstLine(page);
+    const toCheckOk = sum.includes('월 요금과 약정 기간(VAT 포함 여부 구분)') && sum.includes('장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)');
+    check(`${tag} (1)(2)요약 확인할 항목: 월 요금과 약정 기간·장비 비용과 사은품 지급 조건`, toCheckOk);
+    const costs = await page.$eval('.cp-costs', (e) => e.textContent);
+    check(`${tag} (2)비용 표: 매달 낼 비용에 월 요금, 금액 숫자 없음`, costs.includes('매달 낼 비용') && costs.includes('월 요금') && !/\d/.test(costs));
+    const speedPoint = segName === '가정용' ? first.includes('저녁에 영상회의와 TV 시청이 겹치는지') : first.includes('바쁜 시간에 겹치는 작업과 장애 대응 조건');
+    check(`${tag} (3)속도 모름 → 요약 첫 줄이 다음 확인 사항(속도 추천 아님)`, speedPoint && !MONEY.test(first), first.replace(/\s+/g, ' ').slice(0, 70));
+    if (forbidden) check(`${tag} 사업장 요약·질문 화면에 가정용 조건 문구 없음`, !forbidden.test(sum) && !forbidden.test(first));
+    check(`${tag} 가격·혜택 확정 문구 없음(요약)`, !MONEY.test(sum.replace('견적이나 접수가 아니에요', '')), (MONEY.exec(sum) ?? [''])[0]);
+    check(`${tag} 가로 넘침·외부 요청·저장소·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    critResults.push({ width, segment: segName, gift: { where: 'FAQ 사은품은 어디가 더 많아요?(선택 전) + 요약 확인할 항목', ok: giftOk && toCheckOk }, monthlyAndTerm: { where: '요약 비용 표(매달 낼 비용)·확인할 항목(월 요금과 약정 기간)', ok: toCheckOk }, speedUnknown: { where: 'FAQ 500메가면 충분해요?(선택 전) + 요약 첫 줄', ok: speedOk && speedPoint } });
+    await context.close();
+  }
+}
+writeFileSync(path.join(OUT, 'ad-criteria.json'), JSON.stringify(critResults, null, 2));
+
 // ── D. 보조 FAQ는 접어서 읽는다(펼치면 보임) ──
 {
   const { page, context } = await openPage(390, NOW_THU);
