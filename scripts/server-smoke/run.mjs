@@ -242,7 +242,10 @@ try {
   for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
     r = await get('/preview/consult-chat', h);
     t = await r.text();
-    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 404·상담 시안 문구 0`, r.status === 404 && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
+    // HTML은 404 상태. RSC 스트림은 Next가 not-found 표식을 담아 200으로 줄 수 있어(CI 실측), 이 경우 not-found 표식 확인 + 상담 문구 0으로 본다
+    const notFoundMark = /NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND|404/.test(t);
+    const hidden = label === 'HTML' ? r.status === 404 : r.status === 404 || notFoundMark;
+    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, hidden && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, not-found 표식 ${notFoundMark}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
   }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
