@@ -206,11 +206,11 @@ test('CP14 가정용 "아직 잘 모르겠어요": 더 비싼 속도를 권하�
   assert.ok(isComplete('home', ['moving', 'unsure', 'sometimes']));
 });
 
-test('CP15 요약은 매달 낼 비용과 처음 낼 비용을 나누고, 확인된 금액이 없으면 숫자를 채우지 않는다', () => {
-  assert.deepEqual(COST_ROWS.map((c) => c.title), ['매달 낼 비용', '처음 낼 비용']);
+test('CP15 요약은 매달 낼 비용과 설치 관련 비용을 나누고, 확인된 금액이 없으면 숫자를 채우지 않는다', () => {
+  assert.deepEqual(COST_ROWS.map((c) => c.title), ['매달 낼 비용', '설치 관련 비용']);
   assert.match(COST_ROWS[0].items, /월 요금/);
   assert.match(COST_ROWS[0].items, /장비 임대료/);
-  assert.equal(COST_ROWS[1].items, '설치비');
+  assert.equal(COST_ROWS[1].items, '설치비 금액과 청구 시점은 확인이 필요해요');
   for (const c of COST_ROWS) {
     assert.equal(c.status, '확인된 금액 없음');
     assert.ok(!/\d/.test(c.items + c.status), '숫자 없음');
@@ -329,16 +329,32 @@ test('CP21 광고 설치 장면 질문의 답이 도움말에 있고, 금액·�
   const ok = find('우리 집이나 매장에 설치가 되는지 어떻게 알 수 있어요?');
   const visit = find('전화 상담이 되는 토요일이면 그날 설치도 되나요?');
   for (const f of [fee, sat, ok, visit]) assert.ok(f, '도움말 항목 누락');
-  assert.ok(fee!.a.includes('나눠 내는지') && fee!.a.includes('말씀드릴 수 없어요'));
+  assert.ok(fee!.a.startsWith('설치비 금액과 청구 시점은 확인이 필요해요.') && fee!.a.includes('처음에 내는지는 지금 말씀드릴 수 없어요'));
   assert.ok(sat!.a.includes('아직 확정된 일정이 없어요') && sat!.a.includes('확정해 드릴 수 없어요'));
   assert.ok(ok!.a.includes('주소와 건물 조건') && ok!.a.includes('주소를 받지 않아서'));
-  assert.ok(visit!.a.includes('전화로 상담할 수 있는 요일과 기사가 방문할 수 있는 날은 별개'));
+  assert.ok(visit!.a.startsWith('전화 상담이 가능해도 설치 일정은 별도로 확인해야 해요.') && visit!.a.includes('전화로 상담할 수 있는 요일과 기사가 방문할 수 있는 날은 별개') && !visit!.a.startsWith('아니요'));
   assert.ok(PHONE_VS_VISIT_NOTE.includes('전화 상담이 가능한 시간과 기사가 방문할 수 있는 날은 달라요'));
-  // 모든 요약에 설치비(처음)와 설치 가능 여부·일정·납부 방식 확인 항목, 숫자 금액 없음
+  // 모든 요약에 설치 관련 비용(금액·청구 시점 확인 필요)과 설치 가능 여부·일정 확인 항목, 숫자 금액 없음
   for (const seg of ['home', 'business'] as const) {
     const picks = FLOWS[seg].steps.map((st) => st.choices[0].id);
     const sum = buildSummary(seg, picks);
-    assert.ok(sum.toCheck.includes('설치비와 설치 가능 여부, 희망 일정') && sum.toCheck.includes('설치비를 처음에 한 번에 내는지, 나눠 내는지'));
-    assert.ok(sum.costs.some((c) => c.title === '처음 낼 비용' && c.items === '설치비' && c.status === '확인된 금액 없음'));
+    assert.ok(sum.toCheck.includes('설치비와 설치 가능 여부, 희망 일정') && sum.toCheck.includes('설치비 금액과 청구 시점'));
+    assert.ok(sum.costs.some((c) => c.title === '설치 관련 비용' && c.items === '설치비 금액과 청구 시점은 확인이 필요해요' && c.status === '확인된 금액 없음'));
+  }
+});
+
+// PM 7020185486: 설치비 안내 일관성 — 요약·FAQ·확인 항목이 같은 말(금액·청구 시점 확인 필요)을 하고, 분할 납부를 확인된 선택지처럼 쓰지 않는다
+test('CP22 설치비 안내가 요약·FAQ·확인 항목에서 일관되고 분할 납부·"처음 낼 비용" 단정이 없다', () => {
+  const text = ALL_TEXT;
+  assert.ok(!/처음 낼 비용|설치비\(처음\)|한 번에 내는지|나눠 내|분할|할부/.test(text), '단정·분할 납부 표현 없음');
+  const costRow = COST_ROWS.find((c) => c.title === '설치 관련 비용');
+  assert.ok(costRow && costRow.items.includes('금액과 청구 시점'));
+  const fee = FAQ.find((f) => f.q === '설치비는 처음에 내나요?');
+  assert.ok(fee && fee.a.includes('금액과 청구 시점') && !/처음에 낸다|처음에 내요|처음 내요/.test(fee.a));
+  assert.ok(COMMON_TO_CHECK.includes('설치비 금액과 청구 시점'));
+  // 토요일 설치 질문의 답은 "아니요"로 시작하지 않고 전화 상담 가능일과 설치 일정을 분리한다
+  for (const q of ['이번 토요일 설치가 확정되나요?', '전화 상담이 되는 토요일이면 그날 설치도 되나요?']) {
+    const f = FAQ.find((x) => x.q === q);
+    assert.ok(f && !f.a.startsWith('아니요') && !/불가능|안 돼요|안돼요|설치할 수 없/.test(f.a), q);
   }
 });

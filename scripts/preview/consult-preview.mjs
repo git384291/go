@@ -148,7 +148,7 @@ for (const width of [320, 390]) {
     check(`[${tag}] 요약 첫 줄이 "가장 먼저 비교할 점"(동시 사용과 셋톱박스 임대료)과 이유`, (await summaryFirstLine(page))?.includes('가장 먼저 비교할 점') && (await summaryFirstLine(page))?.includes('동시 사용과 셋톱박스 임대료') && (await summaryFirstLine(page))?.includes('월 부담에 영향을 줘요'));
     check(`[${tag}] 요약 3부분 + 비용 구분`, s1 && ['선택 조건', '비용 구분', '확인된 일반 안내', '확인할 항목'].every((h) => s1.includes(h)));
     const costs = await page.$eval('.cp-costs', (e) => e.textContent);
-    check(`[${tag}] 매달 낼 비용(월 요금·장비 임대료)과 처음 낼 비용(설치비) 구분, 숫자 없음`, costs.includes('매달 낼 비용') && costs.includes('월 요금') && costs.includes('장비 임대료') && costs.includes('처음 낼 비용') && costs.includes('설치비') && (costs.match(/확인된 금액 없음/g) ?? []).length === 2 && !/\d/.test(costs), costs.replace(/\s+/g, ' '));
+    check(`[${tag}] 매달 낼 비용(월 요금·장비 임대료)과 설치 관련 비용(금액·청구 시점 확인 필요) 구분, 숫자 없음`, costs.includes('매달 낼 비용') && costs.includes('월 요금') && costs.includes('장비 임대료') && costs.includes('설치 관련 비용') && costs.includes('설치비 금액과 청구 시점은 확인이 필요해요') && !costs.includes('처음 낼 비용') && (costs.match(/확인된 금액 없음/g) ?? []).length === 2 && !/\d/.test(costs), costs.replace(/\s+/g, ' '));
     check(`[${tag}] 요약이 견적·접수가 아니라고 밝힘`, s1.includes('견적이나 접수가 아니에요'));
     check(`[${tag}] 가로 넘침 없음(가정용 요약)`, await noOverflow(page));
     await page.screenshot({ path: path.join(OUT, `03-home-summary-${width}.png`), fullPage: true });
@@ -194,7 +194,7 @@ for (const width of [320, 390]) {
     const firstLine = await summaryFirstLine(page);
     check(`[${tag}] "잘 모르겠어요" 요약 첫 줄: 저녁에 영상회의와 TV 시청이 겹치는지(속도 추천 없음)`, firstLine.includes('저녁에 영상회의와 TV 시청이 겹치는지') && !/추천|업그레이드/.test(firstLine), firstLine.replace(/\s+/g, ' ').slice(0, 80));
     const sumU = await summaryText(page);
-    check(`[${tag}] "잘 모르겠어요" 요약: 비용 구분에 숫자 없음`, sumU.includes('매달 낼 비용') && sumU.includes('처음 낼 비용') && !/\d[\d,]*\s*원/.test(sumU));
+    check(`[${tag}] "잘 모르겠어요" 요약: 비용 구분에 숫자 없음`, sumU.includes('매달 낼 비용') && sumU.includes('설치 관련 비용') && !/\d[\d,]*\s*원/.test(sumU));
     check(`[${tag}] 가로 넘침 없음(잘 모르겠어요 요약)`, await noOverflow(page));
     await page.screenshot({ path: path.join(OUT, `05-home-unsure-summary-${width}.png`), fullPage: true });
 
@@ -230,7 +230,7 @@ for (const width of [320, 390]) {
     const sb = await summaryText(page);
     const fb = await summaryFirstLine(page);
     check(`[${tag}] 결제 매장 요약 첫 줄: 회선이 끊겼을 때 결제 영향과 예비 회선 필요 여부`, fb.includes('회선이 끊겼을 때 결제 영향과 예비 회선 필요 여부') && fb.includes('가장 먼저 비교할 점'), fb.replace(/\s+/g, ' ').slice(0, 80));
-    check(`[${tag}] 사업장 요약에 미정 상태·확인 항목·비용 구분`, sb.includes('아직 정하지 못했어요') && sb.includes('손님이 보는 홀인지 직원 휴게실인지') && sb.includes('매달 낼 비용') && sb.includes('처음 낼 비용'));
+    check(`[${tag}] 사업장 요약에 미정 상태·확인 항목·비용 구분`, sb.includes('아직 정하지 못했어요') && sb.includes('손님이 보는 홀인지 직원 휴게실인지') && sb.includes('매달 낼 비용') && sb.includes('설치 관련 비용'));
     check(`[${tag}] 가로 넘침 없음(사업장 요약)`, await noOverflow(page));
     await page.screenshot({ path: path.join(OUT, `06-business-undecided-${width}.png`), fullPage: true });
     // 홀로 다시 고르기
@@ -248,10 +248,10 @@ for (const width of [320, 390]) {
 // ── G. 광고 → 상담(PM 7018202454): 30초 광고의 설치비·설치 가능 여부·희망일정 장면을 본 고객이 가정용·사업장 상담에서 답을 찾는지 ──
 const adResults = [];
 const ADS = [
-  { scene: '설치비', q: '설치비는 처음에 내나요?', must: ['나눠 내는지', '말씀드릴 수 없어요'] },
+  { scene: '설치비', q: '설치비는 처음에 내나요?', must: ['설치비 금액과 청구 시점은 확인이 필요해요', '처음에 내는지는 지금 말씀드릴 수 없어요'], mustNot: ['나눠 내', '분할', '아니요'] },
   { scene: '설치 가능 여부', q: '우리 집이나 매장에 설치가 되는지 어떻게 알 수 있어요?', must: ['주소와 건물 조건', '주소를 받지 않아서'] },
   { scene: '희망 일정(이번 토요일)', q: '이번 토요일 설치가 확정되나요?', must: ['아직 확정된 일정이 없어요', '확정해 드릴 수 없어요'] },
-  { scene: '전화 가능 요일 vs 기사 방문일', q: '전화 상담이 되는 토요일이면 그날 설치도 되나요?', must: ['별개예요', '방문 가능일'] },
+  { scene: '전화 가능 요일 vs 기사 방문일', q: '전화 상담이 되는 토요일이면 그날 설치도 되나요?', must: ['전화 상담이 가능해도 설치 일정은 별도로 확인해야 해요', '별개예요', '방문 가능일'], mustNot: ['아니요', '불가능'] },
 ];
 const SEG_FLOWS = [
   ['가정용', ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요']],
@@ -266,8 +266,8 @@ for (const width of [320, 390]) {
       for (const x of picks) await click(page, x);
       const sum = await summaryText(page);
       const costs = await page.$eval('.cp-costs', (e) => e.textContent).catch(() => '');
-      const summaryOk = !!sum && sum.includes('처음 낼 비용') && costs.includes('설치비') && costs.includes('확인된 금액 없음') && sum.includes('설치비와 설치 가능 여부, 희망 일정') && sum.includes('처음에 한 번에 내는지, 나눠 내는지') && !/\d[\d,]*\s*원/.test(sum);
-      check(`${tag} 요약: 처음 낼 비용(설치비)·확인할 항목에 설치 가능 여부·희망 일정·납부 방식, 금액 숫자 없음`, summaryOk);
+      const summaryOk = !!sum && sum.includes('설치 관련 비용') && !sum.includes('처음 낼 비용') && costs.includes('설치비 금액과 청구 시점은 확인이 필요해요') && costs.includes('확인된 금액 없음') && sum.includes('설치비와 설치 가능 여부, 희망 일정') && sum.includes('설치비 금액과 청구 시점') && !/나눠 내|분할/.test(sum) && !/\d[\d,]*\s*원/.test(sum);
+      check(`${tag} 요약: 설치 관련 비용(금액·청구 시점 확인 필요)·확인할 항목에 설치 가능 여부·희망 일정·청구 시점, 분할 납부 안내·금액 숫자 없음`, summaryOk);
       await page.locator('details[data-aux="faq"] > summary').click();
       const perScene = [];
       for (const ad of ADS) {
@@ -275,7 +275,7 @@ for (const width of [320, 390]) {
         const found = (await item.count()) === 1;
         let shown = '';
         if (found) { await item.locator('summary').click(); shown = await item.locator('.guide-answer').innerText(); }
-        const ok = found && ad.must.every((m) => shown.includes(m)) && !/\d[\d,]*\s*원|확정됐|확정되었|접수|가입 완료/.test(shown);
+        const ok = found && ad.must.every((m) => shown.includes(m)) && !(ad.mustNot ?? []).some((m) => shown.includes(m)) && !/\d[\d,]*\s*원|확정됐|확정되었|접수|가입 완료/.test(shown);
         perScene.push({ scene: ad.scene, found, ok });
         check(`${tag} 광고 장면 "${ad.scene}": 접힌 도움말에서 실제 표시 답변 확인`, ok, shown.replace(/\s+/g, ' ').slice(0, 70));
       }
