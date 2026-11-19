@@ -272,7 +272,13 @@ class FsGuard {
       throw new Stop('TIMEOUT');
     }
     if (r.k === 'err') throw new Stop(onErr);
-    if (!(this.d.now() < limitAt)) throw new Stop('TIMEOUT'); // 끝났지만 마감 뒤 → 결과 버림
+    // 끝났지만 마감 뒤 → 결과는 버리되(TIMEOUT), 이미 받은 값은 timer 승패와 무관하게 onLate로 소유권을 넘긴다.
+    // race()가 'ok'로 끝난 이 경로는 timedOut이 한 번도 true가 되지 않으므로, 여기서 직접 호출하지 않으면
+    // 자원(mkdtemp가 만든 디렉터리 등)의 경로가 dir·lateDir 어디에도 기록되지 않고 유실된다.
+    if (!(this.d.now() < limitAt)) {
+      if (onLate) onLate(r.v);
+      throw new Stop('TIMEOUT');
+    }
     return r.v;
   }
 

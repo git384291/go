@@ -454,4 +454,43 @@ test('EX13 승인 대본 원본 깊은 동결: 같은 프로세스 수정 불가
   assert.deepEqual(a, b);
   if (a.ok) assert.ok(a.plan.texts.every((t) => !t.text.includes('MARKER')));
 });
+test('EX14 FsGuard.op: race가 ok로 끝난 뒤 시각 재확인에서 마감을 넘겨도 늦은 자원 소유권을 onLate로 넘긴다 (PM 6985613926 재현)', async () => {
+  // 1) 가짜 시각 점프: mkdtemp 자체는 race에서 'ok'로 이기지만, resolve 과정에서 시각이 마감 뒤로 건너뛴다.
+  //    timer가 이긴 적이 없으므로 timedOut은 한 번도 true가 되지 않는다 — 고친 코드만 이 경로에서 onLate를 부른다.
+  let fakeNow = 1_000;
+  let made1 = '';
+  const h1 = harness();
+  const r1 = await renderExplainerVideo(INPUT, {
+    ...h1.deps, totalTimeoutMs: 1_000, now: () => fakeNow,
+    fs: {
+      checkExecutable: async () => true, fontDigest: async () => FONT_SHA256,
+      mkdtemp: (prefix: string) => realMkdtemp(prefix).then((d) => { made1 = d; fakeNow = 2_100; return d; }),
+    },
+  });
+  assert.equal(r1.code, 'TIMEOUT', JSON.stringify(r1));
+  assert.equal(r1.cleanup, 'OK', 'onLate로 소유권을 넘겨받아 정리까지 완료');
+  assert.ok(made1.length > 0 && !existsSync(made1), 'race가 ok로 끝나고도 마감을 넘긴 디렉터리가 결국 삭제됨');
+  assert.equal(h1.spawned.length, 0);
+
+  // 2) 실제 동기 차단: mkdtemp 완료 직후 1050ms 동기 차단(전체 마감 1000ms) → 이미 지난 timer보다 microtask가 먼저 처리된다.
+  let made2 = '';
+  const h2 = harness();
+  const r2 = await renderExplainerVideo(INPUT, {
+    ...h2.deps, totalTimeoutMs: 1_000,
+    fs: {
+      checkExecutable: async () => true, fontDigest: async () => FONT_SHA256,
+      mkdtemp: async (prefix: string) => {
+        const d = await realMkdtemp(prefix);
+        made2 = d;
+        const until = Date.now() + 1_050;
+        while (Date.now() < until) { /* 동기 차단: 이 사이 timer 콜백은 실행되지 못한다 */ }
+        return d;
+      },
+    },
+  });
+  assert.equal(r2.code, 'TIMEOUT', JSON.stringify(r2));
+  assert.equal(r2.cleanup, 'OK');
+  assert.ok(made2.length > 0 && !existsSync(made2), '동기 차단 뒤에도 늦은 디렉터리가 결국 삭제됨');
+  assert.equal(h2.spawned.length, 0);
+});
 type TextLike = Record<string, unknown>;
