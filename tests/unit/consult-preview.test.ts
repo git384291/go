@@ -346,7 +346,7 @@ test('CP21 광고 설치 장면 질문의 답이 도움말에 있고, 금액·�
 // PM 7020185486: 설치비 안내 일관성 — 요약·FAQ·확인 항목이 같은 말(금액·청구 시점 확인 필요)을 하고, 분할 납부를 확인된 선택지처럼 쓰지 않는다
 test('CP22 설치비 안내가 요약·FAQ·확인 항목에서 일관되고 분할 납부·"처음 낼 비용" 단정이 없다', () => {
   const text = ALL_TEXT;
-  assert.ok(!/처음 낼 비용|설치비\(처음\)|한 번에 내는지|나눠 내|분할|할부/.test(text), '단정·분할 납부 표현 없음');
+  assert.ok(!/처음 (낼|내는|내요|내나)|설치비\(처음\)|한 번에 내는지|나눠 내|분할|할부/.test(text), '단정·분할 납부 표현 없음');
   const costRow = COST_ROWS.find((c) => c.title === '설치 관련 비용');
   assert.ok(costRow && costRow.items.includes('금액과 청구 시점'));
   const fee = FAQ.find((f) => f.q === '설치비는 처음에 내나요?');
@@ -357,4 +357,29 @@ test('CP22 설치비 안내가 요약·FAQ·확인 항목에서 일관되고 분
     const f = FAQ.find((x) => x.q === q);
     assert.ok(f && !f.a.startsWith('아니요') && !/불가능|안 돼요|안돼요|설치할 수 없/.test(f.a), q);
   }
+});
+
+// PM 7020585092: 이사 분기 첫 줄(핵심 비교 포인트)도 설치비 청구 시점을 단정하지 않는다. 유효한 모든 최종 선택 조합의 buildSummary 결과를 검사한다
+test('CP23 모든 최종 선택 조합의 요약(첫 줄 포함)에 "처음 내는 비용" 단정이 없고, 이사 경로는 금액·청구 시점 확인 안내가 보인다', () => {
+  const STALE = /처음 (낼|내는|내요|내나)|한 번에 내|나눠 내|분할|할부/;
+  let movingKey = 0;
+  for (const seg of ['home', 'business'] as const) {
+    for (const picks of combos(seg)) {
+      assert.ok(isComplete(seg, picks));
+      const sum = buildSummary(seg, picks);
+      const whole = [sum.keyPoint.point, sum.keyPoint.reason, ...sum.conditions, ...sum.general, ...sum.toCheck, ...sum.costs.flatMap((c) => [c.title, c.items, c.status])].join('\n');
+      assert.ok(!STALE.test(whole), `${seg} ${picks.join('>')}: ${STALE.exec(whole)?.[0]}`);
+      if (seg === 'home' && picks[0] === 'moving' && sum.keyPoint.point === '설치 가능 여부와 설치비') {
+        movingKey++;
+        assert.equal(sum.keyPoint.reason, '새 주소의 건물 조건에 따라 설치 가능 여부가 달라져요. 설치비 금액과 청구 시점도 확인해 보세요.');
+      }
+    }
+  }
+  assert.ok(movingKey >= 5, `이사 첫 줄 조합 ${movingKey}개`);
+  // 이사 대표 경로(moving → few → rare): 첫 줄·비용 구분·확인 항목에서 금액·청구 시점 확인 안내
+  const rep = buildSummary('home', ['moving', 'few', 'rare']);
+  assert.equal(rep.keyPoint.point, '설치 가능 여부와 설치비');
+  assert.ok(rep.keyPoint.reason.includes('설치비 금액과 청구 시점도 확인해 보세요'));
+  assert.ok(rep.costs.some((c) => c.title === '설치 관련 비용' && c.items.includes('금액과 청구 시점')));
+  assert.ok(rep.toCheck.includes('설치비 금액과 청구 시점'));
 });

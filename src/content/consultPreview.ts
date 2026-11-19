@@ -212,7 +212,7 @@ export type KeyPoint = { readonly point: string; readonly reason: string };
 
 export type CostRow = { readonly title: string; readonly items: string; readonly status: string };
 
-/** 매달 내는 비용과 처음 내는 비용을 나눠 보여 준다. 확인된 금액이 없으므로 숫자를 채우지 않는다 */
+/** 매달 내는 비용과 설치 관련 비용(설치비 금액과 청구 시점은 확인 필요)을 나눠 보여 준다. 확인된 금액이 없으므로 숫자를 채우지 않고, 설치비를 처음에 낸다고 단정하지 않는다 */
 export const COST_ROWS: readonly CostRow[] = [
   { title: '매달 낼 비용', items: '월 요금 · 장비 임대료(셋톱박스 등)', status: '확인된 금액 없음' },
   { title: '설치 관련 비용', items: '설치비 금액과 청구 시점은 확인이 필요해요', status: '확인된 금액 없음' },
@@ -240,7 +240,7 @@ export function keyPoint(segment: Segment, picks: readonly string[]): KeyPoint {
       return { point: '동시 사용과 셋톱박스 임대료', reason: '여러 기기를 함께 쓰고 TV도 보신다면, 속도 하나보다 동시에 겹치는 사용과 셋톱박스 비용이 월 부담에 영향을 줘요.' };
     }
     if (reason === 'moving') {
-      return { point: '설치 가능 여부와 설치비', reason: '이사는 새 주소의 건물 조건에 따라 설치 가능 여부와 처음 내는 비용이 달라질 수 있어요.' };
+      return { point: '설치 가능 여부와 설치비', reason: '새 주소의 건물 조건에 따라 설치 가능 여부가 달라져요. 설치비 금액과 청구 시점도 확인해 보세요.' };
     }
     if (reason === 'renewal') {
       return { point: '지금 약정의 해지 비용과 새 약정 조건', reason: '약정 만료 비교는 같은 약정 기간으로 놓고 비교해야 실제 부담이 보여요.' };

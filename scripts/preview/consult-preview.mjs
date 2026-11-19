@@ -290,6 +290,18 @@ for (const width of [320, 390]) {
 }
 writeFileSync(path.join(OUT, 'ad-scenarios.json'), JSON.stringify(adResults, null, 2));
 
+// ── G2. 이사 대표 경로(moving → few → rare): 첫 줄과 요약에서 금액·청구 시점 확인 안내가 보이고 "처음 내는 비용" 단정이 없다(PM 7020585092) ──
+for (const width of [320, 390]) {
+  const { page, context, external, errors } = await openPage(width, NOW_THU);
+  for (const x of ['가정용', '이사해서 새로 알아봐요', '1~2개', '거의 안 봐요']) await click(page, x);
+  const first = await summaryFirstLine(page);
+  const all = await summaryText(page);
+  check(`[${width}px] 이사 대표 경로 첫 줄: 설치 가능 여부와 설치비 + "설치비 금액과 청구 시점도 확인해 보세요"`, first.includes('설치 가능 여부와 설치비') && first.includes('새 주소의 건물 조건에 따라 설치 가능 여부가 달라져요') && first.includes('설치비 금액과 청구 시점도 확인해 보세요'), first.replace(/\s+/g, ' ').slice(0, 90));
+  check(`[${width}px] 이사 대표 경로 요약: 설치 관련 비용·확인 항목에 금액과 청구 시점, "처음 내는/낼 비용" 단정 없음`, all.includes('설치 관련 비용') && all.includes('설치비 금액과 청구 시점은 확인이 필요해요') && all.includes('설치비 금액과 청구 시점') && !/처음 (낼|내는|내요|내나)|나눠 내|분할/.test(all));
+  check(`[${width}px] 이사 대표 경로 가로 넘침·외부 요청·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0);
+  await context.close();
+}
+
 // ── D. 보조 FAQ는 접어서 읽는다(펼치면 보임) ──
 {
   const { page, context } = await openPage(390, NOW_THU);
