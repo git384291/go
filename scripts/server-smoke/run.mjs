@@ -18,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dotenvFilesIn, prepareIsolatedRoot } from './isolate.mjs';
 import { createAbortHandler, createServerManager, finalCleanup } from './lifecycle.mjs';
+import { isHtmlNotFound, isRscNotFound } from './notFound.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(ROOT, 'test-results', 'server-smoke');
@@ -242,11 +243,10 @@ try {
   for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
     r = await get('/preview/consult-chat', h);
     t = await r.text();
-    // HTML은 404 상태. RSC 스트림은 Next가 200으로 줄 수 있어(CI 실측), 이 경우 스트림 안의 실제 Next not-found 신호
-    // (NEXT_HTTP_ERROR_FALLBACK;404 또는 NEXT_NOT_FOUND)만 인정한다. 임의의 '404' 숫자·오류 응답만으로는 통과하지 않는다.
-    const sig = (t.match(/NEXT_HTTP_ERROR_FALLBACK;404|NEXT_NOT_FOUND/) ?? [null])[0];
-    const hidden = label === 'HTML' ? r.status === 404 : r.status === 404 || sig !== null;
-    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, hidden && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, not-found 신호 ${sig ?? '없음'}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
+    // HTML은 404 상태. RSC는 404 또는 200 + text/x-component + 스트림 오류 행의 not-found digest(notFound.mjs, 본문 문자열 검색 아님)
+    const nf = label === 'HTML' ? { ok: isHtmlNotFound({ status: r.status }), via: '404 상태' } : isRscNotFound({ status: r.status, contentType: r.headers.get('content-type'), body: t });
+    const row = label === 'RSC' ? (t.split('\n').find((l) => /^[0-9a-zA-Z]+:E\{/.test(l)) ?? '').slice(0, 100) : '';
+    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, nf.ok && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, 판정 ${nf.via ?? '불일치'}, 표식 ${leaks(t, CONSULT_MARKS)}개${row ? `, 오류 행 ${row}` : ''}`);
   }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
