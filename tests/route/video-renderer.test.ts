@@ -3,7 +3,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, readFileSync, readdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, symlinkSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildStoryboard, wrapLines, NOTICE_TEXT, MAX_LINE_WIDTH } from '../../src/server/advertising/video/storyboard';
@@ -13,10 +13,37 @@ import { ProcessOwner, FIXED_CHILD_ENV, type ChildLike, type FixedSpawnOptions }
 import { AD_DRAFTS } from '../../src/content/adDrafts';
 
 const MOVING = { situationId: 'moving', copy: { title: AD_DRAFTS.moving.title, description: AD_DRAFTS.moving.description }, copySource: 'fixed_draft' };
-const ownTmp = () => readdirSync(tmpdir()).filter((n) => n.startsWith('fideon-video-')).sort();
+// 시험 격리: 이 파일 전용 고유 루트를 만들고 TMPDIR을 그리로 돌린다. renderer의 tmpdir() 호출도 같은 루트를 쓰므로
+// 시스템 tmp 전체의 fideon-video- 접두사를 비교하지 않는다(병렬 실행 중 다른 시험이 만들고 지우는 폴더에 흔들리지 않음).
+const SYS_TMP = tmpdir();
+const TEST_ROOT = mkdtempSync(path.join(SYS_TMP, 'fideon-vtest-'));
+const PREV_TMPDIR = process.env.TMPDIR;
+process.env.TMPDIR = TEST_ROOT;
+const ownTmp = () => readdirSync(TEST_ROOT).filter((n) => n.startsWith('fideon-video-')).sort();
 const tmpBefore = ownTmp();
 after(() => {
-  assert.deepEqual(ownTmp(), tmpBefore, '시험이 만든 임시 디렉터리 잔여 0');
+  try {
+    assert.deepEqual(ownTmp(), tmpBefore, '시험이 만든 임시 디렉터리 잔여 0');
+  } finally {
+    if (PREV_TMPDIR === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = PREV_TMPDIR;
+    rmSync(TEST_ROOT, { recursive: true, force: true });
+  }
+});
+test('TMP1 시험 격리: 타 소유 fideon-video- 폴더는 무시하고 고유 루트의 잔여는 감지', () => {
+  assert.equal(tmpdir(), TEST_ROOT);
+  const foreign = mkdtempSync(path.join(SYS_TMP, 'fideon-video-foreign-'));
+  try {
+    assert.deepEqual(ownTmp(), tmpBefore);
+    const mine = mkdtempSync(path.join(tmpdir(), 'fideon-video-'));
+    try {
+      assert.notDeepEqual(ownTmp(), tmpBefore);
+    } finally {
+      rmSync(mine, { recursive: true, force: true });
+    }
+    assert.deepEqual(ownTmp(), tmpBefore);
+  } finally {
+    rmSync(foreign, { recursive: true, force: true });
+  }
 });
 
 // ── 가짜 도구 출력 ──

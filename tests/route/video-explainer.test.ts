@@ -3,7 +3,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildExplainerStoryboard, validateExplainerPlan, EXPLAINER_PLAN, EX_VARIANT, TEXT_RE } from '../../src/server/advertising/video/explainerStoryboard';
@@ -13,9 +13,38 @@ import { TOOLS, WRAP_ARGS, LIMITS, FONT_SHA256 } from '../../src/server/advertis
 import { FIXED_CHILD_ENV, type ChildLike, type FixedSpawnOptions } from '../../src/server/advertising/video/boundedProcess';
 
 const INPUT = { variant: EX_VARIANT };
-const ownTmp = () => readdirSync(tmpdir()).filter((n) => n.startsWith('fideon-video-')).sort();
+// 시험 격리: 이 파일 전용 고유 루트를 만들고 TMPDIR을 그리로 돌린다. renderer의 tmpdir() 호출도 같은 루트를 쓰므로
+// 시스템 tmp 전체의 fideon-video- 접두사를 비교하지 않는다(병렬 실행 중 다른 시험이 만들고 지우는 폴더에 흔들리지 않음).
+const SYS_TMP = tmpdir();
+const TEST_ROOT = mkdtempSync(path.join(SYS_TMP, 'fideon-vtest-'));
+const PREV_TMPDIR = process.env.TMPDIR;
+process.env.TMPDIR = TEST_ROOT;
+const ownTmp = () => readdirSync(TEST_ROOT).filter((n) => n.startsWith('fideon-video-')).sort();
 const tmpBefore = ownTmp();
-after(() => assert.deepEqual(ownTmp(), tmpBefore, '시험이 만든 임시 디렉터리 잔여 0'));
+after(() => {
+  try {
+    assert.deepEqual(ownTmp(), tmpBefore, '시험이 만든 임시 디렉터리 잔여 0');
+  } finally {
+    if (PREV_TMPDIR === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = PREV_TMPDIR;
+    rmSync(TEST_ROOT, { recursive: true, force: true });
+  }
+});
+test('TMP1 시험 격리: 타 소유 fideon-video- 폴더는 무시하고 고유 루트의 잔여는 감지', () => {
+  assert.equal(tmpdir(), TEST_ROOT);
+  const foreign = mkdtempSync(path.join(SYS_TMP, 'fideon-video-foreign-'));
+  try {
+    assert.deepEqual(ownTmp(), tmpBefore);
+    const mine = mkdtempSync(path.join(tmpdir(), 'fideon-video-'));
+    try {
+      assert.notDeepEqual(ownTmp(), tmpBefore);
+    } finally {
+      rmSync(mine, { recursive: true, force: true });
+    }
+    assert.deepEqual(ownTmp(), tmpBefore);
+  } finally {
+    rmSync(foreign, { recursive: true, force: true });
+  }
+});
 
 const limitsText = (as: number) => [
   'Limit                     Soft Limit           Hard Limit           Units     ',
