@@ -32,6 +32,10 @@ test('NF4 음성: 200 RSC 일반 콘텐츠가 문자열을 언급해도 실패(�
   assert.equal(isRscNotFound({ status: 200, contentType: RSC, body: '0:["$","p",null,{"children":"404"}]\n' }).ok, false);
   assert.equal(isRscNotFound({ status: 200, contentType: RSC, body: '1:E{깨진 json\n' }).ok, false);
   assert.equal(isRscNotFound({ status: 200, contentType: null, body: errRow(D) }).ok, false);
+  // PM 7018202454: 매개변수 안에 x-component가 들어간 text/html, 16진수가 아닌 행 ID
+  assert.equal(isRscNotFound({ status: 200, contentType: 'text/html; note="text/x-component"', body: errRow(D) }).ok, false);
+  assert.equal(isRscNotFound({ status: 200, contentType: RSC, body: `z1:E{"digest":"${D}"}\n` }).ok, false);
+  assert.equal(isRscNotFound({ status: 200, contentType: 'TEXT/X-COMPONENT ; charset=utf-8', body: `a1f:E{"digest":"${D}"}\n` }).ok, true);
 });
 
 test('NF5 digest 추출은 오류 행의 정확한 일치만', () => {

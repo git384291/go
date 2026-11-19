@@ -16,6 +16,7 @@ import {
   MOCK_CALL_RESULT,
   MOCK_SATURDAY_HOURS_TEXT,
   phoneState,
+  PHONE_VS_VISIT_NOTE,
   PRIVACY_FAQ,
   SEGMENTS,
   VIRTUAL_NOTICE,
@@ -113,6 +114,7 @@ const ALL_TEXT = [
   MOCK_CALL_RESULT,
   MOCK_SATURDAY_HOURS_TEXT,
   ...COMMON_TO_CHECK,
+  PHONE_VS_VISIT_NOTE,
   ...EXAMPLES.flatMap((e) => [e.title, e.ask, e.answer]),
   ...FAQ.flatMap((f) => [f.q, f.a]),
   ...PRIVACY_FAQ.flatMap((f) => [f.q, f.a]),
@@ -316,5 +318,27 @@ test('CP20 초점 이동·모션 축소·접힌 보조 영역이 화면 코드�
     const m = new RegExp(`<details[^>]*data-aux="${aux}"[^>]*>`).exec(src);
     assert.ok(m, aux);
     assert.ok(!/\bopen\b/.test(m[0]), `${aux} 접힘`);
+  }
+});
+
+// PM 7018202454: 광고(설치비·설치 가능 여부·희망 일정 장면) → 상담. 빠진 답이 기존 콘텐츠·접힌 도움말에 있는지
+test('CP21 광고 설치 장면 질문의 답이 도움말에 있고, 금액·방문일 추정·성공 표시가 없다', () => {
+  const find = (q: string) => FAQ.find((f) => f.q === q);
+  const fee = find('설치비는 처음에 내나요?');
+  const sat = find('이번 토요일 설치가 확정되나요?');
+  const ok = find('우리 집이나 매장에 설치가 되는지 어떻게 알 수 있어요?');
+  const visit = find('전화 상담이 되는 토요일이면 그날 설치도 되나요?');
+  for (const f of [fee, sat, ok, visit]) assert.ok(f, '도움말 항목 누락');
+  assert.ok(fee!.a.includes('나눠 내는지') && fee!.a.includes('말씀드릴 수 없어요'));
+  assert.ok(sat!.a.includes('아직 확정된 일정이 없어요') && sat!.a.includes('확정해 드릴 수 없어요'));
+  assert.ok(ok!.a.includes('주소와 건물 조건') && ok!.a.includes('주소를 받지 않아서'));
+  assert.ok(visit!.a.includes('전화로 상담할 수 있는 요일과 기사가 방문할 수 있는 날은 별개'));
+  assert.ok(PHONE_VS_VISIT_NOTE.includes('전화 상담이 가능한 시간과 기사가 방문할 수 있는 날은 달라요'));
+  // 모든 요약에 설치비(처음)와 설치 가능 여부·일정·납부 방식 확인 항목, 숫자 금액 없음
+  for (const seg of ['home', 'business'] as const) {
+    const picks = FLOWS[seg].steps.map((st) => st.choices[0].id);
+    const sum = buildSummary(seg, picks);
+    assert.ok(sum.toCheck.includes('설치비와 설치 가능 여부, 희망 일정') && sum.toCheck.includes('설치비를 처음에 한 번에 내는지, 나눠 내는지'));
+    assert.ok(sum.costs.some((c) => c.title === '처음 낼 비용' && c.items === '설치비' && c.status === '확인된 금액 없음'));
   }
 });

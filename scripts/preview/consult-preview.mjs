@@ -245,11 +245,56 @@ for (const width of [320, 390]) {
   }
 }
 
+// ── G. 광고 → 상담(PM 7018202454): 30초 광고의 설치비·설치 가능 여부·희망일정 장면을 본 고객이 가정용·사업장 상담에서 답을 찾는지 ──
+const adResults = [];
+const ADS = [
+  { scene: '설치비', q: '설치비는 처음에 내나요?', must: ['나눠 내는지', '말씀드릴 수 없어요'] },
+  { scene: '설치 가능 여부', q: '우리 집이나 매장에 설치가 되는지 어떻게 알 수 있어요?', must: ['주소와 건물 조건', '주소를 받지 않아서'] },
+  { scene: '희망 일정(이번 토요일)', q: '이번 토요일 설치가 확정되나요?', must: ['아직 확정된 일정이 없어요', '확정해 드릴 수 없어요'] },
+  { scene: '전화 가능 요일 vs 기사 방문일', q: '전화 상담이 되는 토요일이면 그날 설치도 되나요?', must: ['별개예요', '방문 가능일'] },
+];
+const SEG_FLOWS = [
+  ['가정용', ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요']],
+  ['사업장', ['매장·사무실용', '카드 결제·배달 주문이 멈추는 거예요', '손님이 보는 홀·객실에 둬요']],
+];
+const STATES = [['평일(전화 안내 없음)', '2026-11-20T12:00:00+09:00', 0], ['토요일 가상 시간 안', '2026-11-21T11:00:00+09:00', 1]];
+for (const width of [320, 390]) {
+  for (const [segName, picks] of SEG_FLOWS) {
+    for (const [stateName, iso, hasPhone] of STATES) {
+      const tag = `[${width}px 광고→${segName}·${stateName}]`;
+      const { page, context, external, errors } = await openPage(width, iso);
+      for (const x of picks) await click(page, x);
+      const sum = await summaryText(page);
+      const costs = await page.$eval('.cp-costs', (e) => e.textContent).catch(() => '');
+      const summaryOk = !!sum && sum.includes('처음 낼 비용') && costs.includes('설치비') && costs.includes('확인된 금액 없음') && sum.includes('설치비와 설치 가능 여부, 희망 일정') && sum.includes('처음에 한 번에 내는지, 나눠 내는지') && !/\d[\d,]*\s*원/.test(sum);
+      check(`${tag} 요약: 처음 낼 비용(설치비)·확인할 항목에 설치 가능 여부·희망 일정·납부 방식, 금액 숫자 없음`, summaryOk);
+      await page.locator('details[data-aux="faq"] > summary').click();
+      const perScene = [];
+      for (const ad of ADS) {
+        const item = page.locator('details[data-aux="faq"] .guide-item', { hasText: ad.q }).first();
+        const found = (await item.count()) === 1;
+        let shown = '';
+        if (found) { await item.locator('summary').click(); shown = await item.locator('.guide-answer').innerText(); }
+        const ok = found && ad.must.every((m) => shown.includes(m)) && !/\d[\d,]*\s*원|확정됐|확정되었|접수|가입 완료/.test(shown);
+        perScene.push({ scene: ad.scene, found, ok });
+        check(`${tag} 광고 장면 "${ad.scene}": 접힌 도움말에서 실제 표시 답변 확인`, ok, shown.replace(/\s+/g, ' ').slice(0, 70));
+      }
+      const note = await page.locator('.cp-phone-note').count();
+      check(`${tag} 전화 안내 영역: ${hasPhone ? '전화 가능 시간과 기사 방문일은 다르다는 구분 문구 표시' : '전화 영역 없음(구분은 도움말이 맡음)'}`, hasPhone ? note === 1 && (await page.locator('.cp-phone-note').innerText()).includes('기사가 방문할 수 있는 날은 달라요') : note === 0);
+      check(`${tag} 가로 넘침 없음·외부 요청 0·저장소 0·입력칸 0·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0);
+      if (width === 390 && stateName.startsWith('토요일')) await page.screenshot({ path: path.join(OUT, `08-ad-${segName}-faq-390.png`), fullPage: true });
+      adResults.push({ width, segment: segName, state: stateName, summaryOk, scenes: perScene });
+      await context.close();
+    }
+  }
+}
+writeFileSync(path.join(OUT, 'ad-scenarios.json'), JSON.stringify(adResults, null, 2));
+
 // ── D. 보조 FAQ는 접어서 읽는다(펼치면 보임) ──
 {
   const { page, context } = await openPage(390, NOW_THU);
   await page.locator('details[data-aux="faq"] > summary').click();
-  check('[390px] FAQ 펼치면 질문 4개, 각 항목은 다시 접힌 상태', (await page.locator('details[data-aux="faq"] .guide-item').count()) === 4 && (await page.locator('details[data-aux="faq"] .guide-item[open]').count()) === 0);
+  check('[390px] FAQ 펼치면 질문 7개, 각 항목은 다시 접힌 상태', (await page.locator('details[data-aux="faq"] .guide-item').count()) === 7 && (await page.locator('details[data-aux="faq"] .guide-item[open]').count()) === 0);
   await page.locator('details[data-aux="privacy"] > summary').click();
   for (const s of await page.locator('details[data-aux="privacy"] .guide-item > summary').all()) await s.click();
   const priv = await page.locator('details[data-aux="privacy"]').innerText();

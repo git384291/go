@@ -11,6 +11,7 @@ import {
   MOCK_CALL_RESULT,
   MOCK_SATURDAY_HOURS_TEXT,
   phoneState,
+  PHONE_VS_VISIT_NOTE,
   PRIVACY_FAQ,
   SEGMENT_QUESTION,
   SEGMENTS,
@@ -237,6 +238,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
           ) : (
             <p>전화 상담은 {MOCK_SATURDAY_HOURS_TEXT}에만 안내해요. 지금은 전화 버튼을 보여 드리지 않아요.</p>
           )}
+          <p className="cp-phone-note">{PHONE_VS_VISIT_NOTE}</p>
         </section>
       ) : null}
 

@@ -245,8 +245,8 @@ try {
     t = await r.text();
     // HTML은 404 상태. RSC는 404 또는 200 + text/x-component + 스트림 오류 행의 not-found digest(notFound.mjs, 본문 문자열 검색 아님)
     const nf = label === 'HTML' ? { ok: isHtmlNotFound({ status: r.status }), via: '404 상태' } : isRscNotFound({ status: r.status, contentType: r.headers.get('content-type'), body: t });
-    const row = label === 'RSC' ? (t.split('\n').find((l) => /^[0-9a-zA-Z]+:E\{/.test(l)) ?? '').slice(0, 100) : '';
-    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, nf.ok && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, 판정 ${nf.via ?? '불일치'}, 표식 ${leaks(t, CONSULT_MARKS)}개${row ? `, 오류 행 ${row}` : ''}`);
+    // 진단에는 상태·허용된 digest(판정 근거)·표식 수만 남긴다(응답 본문 원문은 로그에 붙이지 않는다)
+    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 없는 페이지로 응답·상담 시안 문구 0`, nf.ok && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, 판정 ${nf.via ?? '불일치'}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
   }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
