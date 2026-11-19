@@ -103,19 +103,19 @@ test('M5 동시 stop은 직렬·멱등(SIGTERM 1회, 같은 결과), 시간 초�
   let cleanups = 0;
   const codes: number[] = [];
   const abort = createAbortHandler({ manager: t.manager, report: () => {}, cleanupRoot: () => { cleanups++; }, finish: (code: number) => codes.push(code) });
-  await abort('전체 시간 제한 240초 초과');
+  await abort('전체 시간 제한 300초 초과');
   await abort('신호 SIGINT');
   assert.deepEqual([codes.join(), cleanups], ['1', 0], '종료 미확인 → 실패 1회, 루트 정리 보류');
 });
 
-test('M6 run.mjs가 이 모듈을 실제로 사용하고, 헤더의 전체 제한 설명이 240초와 일치', () => {
+test('M6 run.mjs가 이 모듈을 실제로 사용하고, 헤더의 전체 제한 설명이 300초와 일치', () => {
   const src = readFileSync(new URL('../../scripts/server-smoke/run.mjs', import.meta.url), 'utf8');
   assert.match(src, /from '\.\/lifecycle\.mjs'/);
   assert.match(src, /createServerManager\(/);
   assert.match(src, /createAbortHandler\(/);
   assert.match(src, /finalCleanup\(/);
   assert.ok(!/\bspawn\([^)]*\)[\s\S]{0,200}server\.kill/.test(src), '자체 kill 경로 없음');
-  assert.match(src, /const TOTAL_MS = 240_000/);
-  assert.match(src, /전체 240초 제한/);
+  assert.match(src, /const TOTAL_MS = 300_000/);
+  assert.match(src, /전체 300초 제한/);
   assert.ok(!/전체 120초/.test(src));
 });
