@@ -9,7 +9,9 @@ import {
   EXAMPLES,
   FAQ,
   FLOWS,
+  COST_ROWS,
   isComplete,
+  keyPoint,
   kstParts,
   MOCK_CALL_RESULT,
   MOCK_SATURDAY_HOURS_TEXT,
@@ -118,22 +120,25 @@ const ALL_TEXT = [
   ...Object.values(FLOWS).flatMap((f) => [f.label, ...f.steps.flatMap((s) => [s.question, ...s.choices.flatMap((c) => [c.label, c.reply, c.general, ...c.toCheck])])]),
 ].join('\n');
 
+const BANNED: [string, RegExp][] = [
+  ['금액(원)', /\d[\d,]*\s*(원|만원)/],
+  ['퍼센트', /%/],
+  ['할인·무료·혜택 약속', /할인|무료|공짜|현금|최저가|혜택|지원금|페이백/],
+  ['보장·확정 약속', /보장|무조건|당일 개통|확정됩니다|확정돼요/],
+  ['카운트다운·마감', /마감|카운트|오늘만|선착순/],
+  ['성공 표시', /(접수|가입|예약|신청|연결)\s*(됐|되었|완료|성공)|전달\s*(됐|되었|완료)|수신\s*(됐|확인했)/],
+  ['주소·링크·전화', /https?:|tel:|www\.|0\d{1,2}-\d{3,4}-\d{4}/],
+  ['외부 채널', /카카오|네이버|ARS/],
+  ['다른 상품', /휴대폰|CCTV|집전화|동판|mobile/i],
+  ['후기·실적', /후기|리뷰|만족도|가입자 수|누적/],
+];
+
+const SUCCESS_DENIAL = '이 문의가 전달됐다고 말씀드릴 수는 없어요';
+
 test('CP9 고정 문구에 가격·혜택·확정 약속·성공 표시·다른 상품·외부 채널이 없다', () => {
   // 승인된 정정 문구 안의 부정 표현("전달됐다고 말씀드릴 수는 없어요")은 성공 표시가 아니다
   const text = ALL_TEXT.replaceAll('이 문의가 전달됐다고 말씀드릴 수는 없어요', '');
-  const banned: [string, RegExp][] = [
-    ['금액(원)', /\d[\d,]*\s*(원|만원)/],
-    ['퍼센트', /%/],
-    ['할인·무료·혜택 약속', /할인|무료|공짜|현금|최저가|혜택|지원금|페이백/],
-    ['보장·확정 약속', /보장|무조건|당일 개통|확정됩니다|확정돼요/],
-    ['카운트다운·마감', /마감|카운트|오늘만|선착순/],
-    ['성공 표시', /(접수|가입|예약|신청|연결)\s*(됐|되었|완료|성공)|전달\s*(됐|되었|완료)|수신\s*(됐|확인했)/],
-    ['주소·링크·전화', /https?:|tel:|www\.|0\d{1,2}-\d{3,4}-\d{4}/],
-    ['외부 채널', /카카오|네이버|ARS/],
-    ['다른 상품', /휴대폰|CCTV|집전화|동판|mobile/i],
-    ['후기·실적', /후기|리뷰|만족도|가입자 수|누적/],
-  ];
-  for (const [name, re] of banned) assert.ok(!re.test(text), `${name}: ${re.exec(text)?.[0]}`);
+  for (const [name, re] of BANNED) assert.ok(!re.test(text), `${name}: ${re.exec(text)?.[0]}`);
 });
 
 test('CP10 승인된 두 상담 예시는 PR에서 승인한 문구 그대로다', () => {
@@ -176,4 +181,140 @@ test('CP13 비공개 경로: 서버 환경값이 정확히 true일 때만, 검�
     assert.ok(!readFileSync(f, 'utf8').includes('consult-chat'), `${f}에 비공개 경로가 나옴`);
   }
   assert.ok(!/vercel|CONSULT_PREVIEW_ENABLED/.test(readFileSync('vercel.json', 'utf8')), 'vercel.json에서 켜지 않음');
+});
+
+// ── PM 7014853871 / 7014881513: 개선 + '아직 잘 모르겠어요' ─────────────────────────────
+const combos = (segment: 'home' | 'business'): string[][] => {
+  const steps = FLOWS[segment].steps;
+  let acc: string[][] = [[]];
+  for (const st of steps) acc = acc.flatMap((a) => st.choices.map((c) => [...a, c.id]));
+  return acc;
+};
+
+test('CP14 가정용 "아직 잘 모르겠어요": 더 비싼 속도를 권하지 않고 스스로 확인할 기준 하나를 제시', () => {
+  const devices = FLOWS.home.steps[1].choices.find((c) => c.id === 'unsure');
+  assert.ok(devices, '선택지 있음');
+  assert.equal(devices.label, '아직 잘 모르겠어요');
+  assert.match(devices.reply, /저녁에 영상회의와 TV 시청이 겹치는지부터 살펴보세요/);
+  assert.ok(!/더 높은 속도(를)? (추천|고르세요|올리세요)|업그레이드/.test(devices.reply));
+  const s = buildSummary('home', ['moving', 'unsure', 'sometimes']);
+  assert.ok(s.conditions.includes('아직 잘 모르겠어요'));
+  assert.equal(s.keyPoint.point, '저녁에 영상회의와 TV 시청이 겹치는지');
+  assert.ok(s.toCheck.includes('저녁에 영상회의와 TV 시청이 겹치는지'));
+  assert.ok(isComplete('home', ['moving', 'unsure', 'sometimes']));
+});
+
+test('CP15 요약은 매달 낼 비용과 처음 낼 비용을 나누고, 확인된 금액이 없으면 숫자를 채우지 않는다', () => {
+  assert.deepEqual(COST_ROWS.map((c) => c.title), ['매달 낼 비용', '처음 낼 비용']);
+  assert.match(COST_ROWS[0].items, /월 요금/);
+  assert.match(COST_ROWS[0].items, /장비 임대료/);
+  assert.equal(COST_ROWS[1].items, '설치비');
+  for (const c of COST_ROWS) {
+    assert.equal(c.status, '확인된 금액 없음');
+    assert.ok(!/\d/.test(c.items + c.status), '숫자 없음');
+  }
+  for (const seg of ['home', 'business'] as const) for (const picks of combos(seg)) assert.deepEqual(buildSummary(seg, picks).costs, COST_ROWS);
+});
+
+test('CP16 사업장 "아직 정하지 못했어요" → 홀로 다시 고르면 새 요약에서 미정 상태가 사라진다', () => {
+  const undecided = FLOWS.business.steps[1].choices.find((c) => c.id === 'undecided');
+  assert.ok(undecided);
+  assert.match(undecided.reply, /손님이 보는 홀인지 직원 휴게실인지 정해지면 이용 조건을 비교할 수 있어요/);
+  const before = buildSummary('business', ['office', 'undecided']);
+  assert.ok(before.conditions.includes('아직 정하지 못했어요'));
+  assert.ok(before.toCheck.some((t) => t.includes('손님이 보는 홀인지 직원 휴게실인지')));
+  assert.ok(before.general.some((t) => t.includes('TV 용도가 정해지지 않았다면')));
+  assert.equal(before.keyPoint.point, 'TV를 둘 장소(손님이 보는 홀인지 직원 휴게실인지)');
+  const after = buildSummary('business', ['office', 'guest']);
+  assert.ok(!after.conditions.includes('아직 정하지 못했어요'));
+  assert.ok(after.conditions.includes('손님이 보는 홀·객실에 둬요'));
+  assert.ok(!after.toCheck.some((t) => t.includes('직원 휴게실인지')));
+  assert.ok(!after.general.some((t) => t.includes('정해지지 않았다면')));
+  assert.notEqual(after.keyPoint.point, before.keyPoint.point);
+});
+
+test('CP17 핵심 비교 포인트: 선택에 따라 달라지고, 이유가 있고, 금액·혜택·필요 상품을 단정하지 않는다', () => {
+  const points = new Set<string>();
+  const texts: string[] = [];
+  for (const seg of ['home', 'business'] as const) {
+    for (const picks of combos(seg)) {
+      const k = keyPoint(seg, picks);
+      assert.ok(k.point.length > 0 && k.reason.length > 0, `${seg}/${picks.join(',')}`);
+      points.add(k.point);
+      texts.push(k.point, k.reason);
+      assert.deepEqual(buildSummary(seg, picks).keyPoint, k);
+    }
+  }
+  assert.ok(points.size >= 6, `서로 다른 포인트 ${points.size}개`);
+  // 지시문 예시: 결제 매장은 회선 중단 시 결제 영향과 예비 회선, 동시 사용+TV는 동시 사용과 셋톱박스 임대료
+  assert.equal(keyPoint('business', ['payment', 'guest']).point, '회선이 끊겼을 때 결제 영향과 예비 회선 필요 여부');
+  assert.equal(keyPoint('home', ['moving', 'many', 'daily']).point, '동시 사용과 셋톱박스 임대료');
+  const text = texts.join('\n');
+  for (const [name, re] of BANNED) assert.ok(!re.test(text), `${name}: ${re.exec(text)?.[0]}`);
+  assert.ok(!/추천|가장 좋|반드시 필요|꼭 필요한 상품/.test(text));
+});
+
+test('CP18 모든 선택 조합의 요약 문구에도 가격·혜택·확정 약속·성공 표시가 없다', () => {
+  const texts: string[] = [];
+  for (const seg of ['home', 'business'] as const) {
+    for (const picks of combos(seg)) {
+      const s = buildSummary(seg, picks);
+      texts.push(...s.conditions, ...s.general, ...s.toCheck, s.keyPoint.point, s.keyPoint.reason);
+    }
+  }
+  const text = texts.join('\n').replaceAll(SUCCESS_DENIAL, '');
+  for (const [name, re] of BANNED) assert.ok(!re.test(text), `${name}: ${re.exec(text)?.[0]}`);
+});
+
+// WCAG 대비(글자색 ↔ 배경색): 화면에 쓰는 어두운 글자색 조합이 일반 글자 기준 4.5:1 이상인지 CSS 토큰에서 읽어 확인
+const CSS = readFileSync('src/app/globals.css', 'utf8');
+const token = (name: string): string => {
+  const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`).exec(CSS);
+  assert.ok(m, `--${name} 토큰`);
+  return m[1];
+};
+const lum = (hex: string): number => {
+  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const contrast = (a: string, b: string): number => {
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+test('CP19 글자 대비 4.5:1 이상(검은 계열 글자) — 시안에서 쓰는 조합', () => {
+  const ink = token('ink');
+  const ink2 = token('ink-2');
+  const paper = token('paper');
+  const wash = token('wash');
+  const soft = token('signal-soft');
+  const pairs: [string, string, string][] = [
+    ['ink/paper', ink, paper],
+    ['ink/wash', ink, wash],
+    ['ink-2/paper', ink2, paper],
+    ['ink-2/wash', ink2, wash],
+    ['ink-2/signal-soft', ink2, soft],
+    ['ink/signal-soft', ink, soft],
+    ['흰 글자/ink', '#ffffff', ink],
+    ['#9a3412/paper', '#9a3412', paper],
+    ['#9a3412/signal-soft', '#9a3412', soft],
+  ];
+  for (const [name, fg, bg] of pairs) assert.ok(contrast(fg, bg) >= 4.5, `${name} ${contrast(fg, bg).toFixed(2)}`);
+  // 시안 규칙 안에서 옅은 글자색(--muted, --signal)을 글자에 쓰지 않는다
+  const block = CSS.slice(CSS.indexOf('/* 모바일 웹 상담 비공개 시안'));
+  assert.ok(!/color:\s*var\(--(muted|signal)\)/.test(block), '시안 글자색에 옅은 토큰 사용');
+});
+
+test('CP20 초점 이동·모션 축소·접힌 보조 영역이 화면 코드에 있다', () => {
+  const src = stripComments(COMPONENT);
+  assert.match(src, /tabIndex=\{-1\}/);
+  assert.match(src, /\.focus\(\)/);
+  assert.match(src, /focusTick/);
+  assert.match(CSS, /@media \(prefers-reduced-motion: no-preference\)/);
+  // 보조 FAQ·예시·개인정보는 접힌 상태(open 속성 없음)로 시작한다
+  for (const aux of ['examples', 'faq', 'privacy']) {
+    const m = new RegExp(`<details[^>]*data-aux="${aux}"[^>]*>`).exec(src);
+    assert.ok(m, aux);
+    assert.ok(!/\bopen\b/.test(m[0]), `${aux} 접힘`);
+  }
 });

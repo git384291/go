@@ -36,7 +36,7 @@ export type Flow = {
 export const AI_NOTICE = 'AI 도우미가 안내하는 화면이에요. 사람 상담원이 아닙니다.';
 export const VIRTUAL_NOTICE = '지금은 가상 대화 시안이에요. 실제 AI 호출·접수·연락·저장은 하지 않고, 선택한 내용은 이 화면을 닫으면 사라져요.';
 
-export const SEGMENT_QUESTION = '어떤 곳의 인터넷·TV를 알아보세요?';
+export const SEGMENT_QUESTION = '집에서 쓰실 건가요, 매장이나 사무실에서 쓰실 건가요?';
 export const SEGMENTS: readonly { readonly id: Segment; readonly label: string; readonly hint: string }[] = [
   { id: 'home', label: '가정용', hint: '집 인터넷·TV' },
   { id: 'business', label: '매장·사무실용', hint: '가게·사무실 인터넷·TV' },
@@ -90,6 +90,13 @@ const HOME_FLOW: Flow = {
           reply: '기기가 많은 집이군요. 속도만 올리기보다 공유기 구성과 집 구조를 함께 확인하는 편이 정확해요.',
           general: '기기가 많으면 속도뿐 아니라 공유기 구성과 집 구조도 함께 확인해야 해요.',
           toCheck: ['공유기 구성(추가 장비 필요 여부)', '집 구조와 방 개수'],
+        },
+        {
+          id: 'unsure',
+          label: '아직 잘 모르겠어요',
+          reply: '아직 모르셔도 괜찮아요. 더 비싼 속도부터 고르지 않아도 돼요. 먼저 저녁에 영상회의와 TV 시청이 겹치는지부터 살펴보세요. 겹친다면 동시 사용을 기준으로, 겹치지 않는다면 기본 구성부터 비교할 수 있어요.',
+          general: '필요한 속도를 아직 모르면 더 높은 속도를 정하지 말고, 저녁에 영상회의와 TV 시청이 겹치는지 먼저 확인해 보세요.',
+          toCheck: ['저녁에 영상회의와 TV 시청이 겹치는지'],
         },
       ],
     },
@@ -179,6 +186,13 @@ const BUSINESS_FLOW: Flow = {
           general: 'TV가 필요 없다면 인터넷과 장애 대응 조건 중심으로 비교해요.',
           toCheck: ['TV 없이 인터넷만 이용할 수 있는지'],
         },
+        {
+          id: 'undecided',
+          label: '아직 정하지 못했어요',
+          reply: '손님이 보는 홀인지 직원 휴게실인지 정해지면 이용 조건을 비교할 수 있어요. 정해지기 전에는 TV는 잠시 미뤄 두고 인터넷 조건부터 비교해도 돼요.',
+          general: 'TV 용도가 정해지지 않았다면 인터넷 조건부터 비교하고, 용도가 정해지면 TV 이용 조건을 비교해요.',
+          toCheck: ['TV를 둘 장소(손님이 보는 홀인지 직원 휴게실인지)'],
+        },
       ],
     },
   ],
@@ -193,11 +207,57 @@ export const COMMON_TO_CHECK: readonly string[] = [
   '장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)',
 ];
 
+export type KeyPoint = { readonly point: string; readonly reason: string };
+
+export type CostRow = { readonly title: string; readonly items: string; readonly status: string };
+
+/** 매달 내는 비용과 처음 내는 비용을 나눠 보여 준다. 확인된 금액이 없으므로 숫자를 채우지 않는다 */
+export const COST_ROWS: readonly CostRow[] = [
+  { title: '매달 낼 비용', items: '월 요금 · 장비 임대료(셋톱박스 등)', status: '확인된 금액 없음' },
+  { title: '처음 낼 비용', items: '설치비', status: '확인된 금액 없음' },
+];
+
 export type Summary = {
+  readonly keyPoint: KeyPoint;
   readonly conditions: readonly string[];
   readonly general: readonly string[];
   readonly toCheck: readonly string[];
+  readonly costs: readonly CostRow[];
 };
+
+/**
+ * 선택에 따라 달라지는 '가장 먼저 비교할 점' 하나와 이유. 요금·혜택·필요한 상품을 단정하지 않는다.
+ * 위에서부터 처음 맞는 규칙을 쓴다(순서가 곧 우선순위).
+ */
+export function keyPoint(segment: Segment, picks: readonly string[]): KeyPoint {
+  if (segment === 'home') {
+    const [reason, devices, tv] = picks;
+    if (devices === 'unsure') {
+      return { point: '저녁에 영상회의와 TV 시청이 겹치는지', reason: '필요한 속도를 아직 모르면 더 높은 속도부터 고르기보다, 가장 많이 겹치는 사용 하나를 먼저 확인하는 게 기준이 돼요.' };
+    }
+    if ((devices === 'some' || devices === 'many') && (tv === 'sometimes' || tv === 'daily')) {
+      return { point: '동시 사용과 셋톱박스 임대료', reason: '여러 기기를 함께 쓰고 TV도 보신다면, 속도 하나보다 동시에 겹치는 사용과 셋톱박스 비용이 월 부담에 영향을 줘요.' };
+    }
+    if (reason === 'moving') {
+      return { point: '설치 가능 여부와 설치비', reason: '이사는 새 주소의 건물 조건에 따라 설치 가능 여부와 처음 내는 비용이 달라질 수 있어요.' };
+    }
+    if (reason === 'renewal') {
+      return { point: '지금 약정의 해지 비용과 새 약정 조건', reason: '약정 만료 비교는 같은 약정 기간으로 놓고 비교해야 실제 부담이 보여요.' };
+    }
+    return { point: '월 요금과 약정 기간', reason: '같은 약정 기간으로 놓고 월 요금과 장비 비용을 함께 봐야 해요.' };
+  }
+  const [work, tvuse] = picks;
+  if (work === 'payment' || work === 'both') {
+    return { point: '회선이 끊겼을 때 결제 영향과 예비 회선 필요 여부', reason: '결제·주문이 멈추면 영업에 바로 지장이 있어서, 기본 구성과 끊김에 대비한 구성을 나눠 비교하는 게 기준이 돼요.' };
+  }
+  if (tvuse === 'undecided') {
+    return { point: 'TV를 둘 장소(손님이 보는 홀인지 직원 휴게실인지)', reason: '장소가 정해지면 그 장소에서 이용할 수 있는 조건을 비교할 수 있어요.' };
+  }
+  if (work === 'office') {
+    return { point: '바쁜 시간에 겹치는 작업과 장애 대응 조건', reason: '업무용은 직원 수보다 화상회의·파일 전송처럼 동시에 겹치는 작업이 구성을 좌우해요.' };
+  }
+  return { point: '월 비용과 장애 대응 조건', reason: '사업장은 월 비용과 함께 끊겼을 때의 대응 조건을 같이 봐야 해요.' };
+}
 
 /** 선택한 값으로만 만든다. 모르는 값·범위를 벗어난 값은 무시한다(이전 선택을 고치면 다시 계산) */
 export function buildSummary(segment: Segment, picks: readonly string[]): Summary {
@@ -214,7 +274,7 @@ export function buildSummary(segment: Segment, picks: readonly string[]): Summar
     for (const t of choice.toCheck) if (!toCheck.includes(t)) toCheck.push(t);
   });
   for (const t of COMMON_TO_CHECK) if (!toCheck.includes(t)) toCheck.push(t);
-  return { conditions, general, toCheck };
+  return { keyPoint: keyPoint(segment, picks), conditions, general, toCheck, costs: COST_ROWS };
 }
 
 /** 선택이 모두 끝났는지(요약을 보여 줄 수 있는지) */

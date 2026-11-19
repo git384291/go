@@ -24,7 +24,7 @@ const OUT = path.join(ROOT, 'test-results', 'server-smoke');
 const NET_LOG = path.join(OUT, 'blocked-network.log');
 const DENY = path.join(ROOT, 'scripts', 'server-smoke', 'deny-network.mjs');
 const READY_MS = 30_000;
-const TOTAL_MS = 240_000; // 기본 + 출처 변형 2회(순차 재기동)
+const TOTAL_MS = 300_000; // 기본 + 출처 변형 2회(순차 재기동)
 const results = [];
 const report = (name, ok, note = '') => results.push({ name, ok, note });
 
@@ -237,6 +237,13 @@ try {
         r.status === 200 && leaks(t, KAKAO_MARKS) === 0 && t.includes(lockText) && robots, `표식 ${leaks(t, KAKAO_MARKS)}개`);
     }
   }
+  // H11 상담 시안(비공개, 기본 꺼짐, PM 7013332604·7014853871): 환경 변수 없으면 HTML·RSC 모두 404이고 화면 문구가 응답에 없다
+  const CONSULT_MARKS = ['가정용', 'AI 도우미', '가상 대화', '집에서 쓰실 건가요', '모의 전화', 'cp-wrap'];
+  for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
+    r = await get('/preview/consult-chat', h);
+    t = await r.text();
+    report(`H11 /preview/consult-chat ${label}(기본 꺼짐): 404·상담 시안 문구 0`, r.status === 404 && leaks(t, CONSULT_MARKS) === 0, `상태 ${r.status}, 표식 ${leaks(t, CONSULT_MARKS)}개`);
+  }
   // H8 서버가 외부로 나가려 한 흔적
   const blocked = netAttempts();
   report('H8 서버의 외부 접속 시도 0건', blocked === 0, `차단 ${blocked}건`);
@@ -271,6 +278,57 @@ try {
     const n = netAttempts();
     report(`${v.id} 서버의 외부 접속 시도 0건`, n === 0, `차단 ${n}건`);
     await stopOrThrow(`${v.id} 서버 정리(종료 이벤트 확인)`);
+  }
+
+  // S3 상담 시안 켠 서버(가짜 env 값 'true'만, 비밀·실제 연결 없음): 200·noindex·화면 표식, 실제 브라우저에서 끝까지 조작
+  {
+    rmSync(NET_LOG, { force: true });
+    const vs = await startServer({ CONSULT_PREVIEW_ENABLED: 'true' });
+    report('S3 상담 시안 켬: 서버 준비', vs.ready);
+    if (!vs.ready) throw new Error('not ready');
+    r = await vs.get('/preview/consult-chat');
+    t = await r.text();
+    report('S3 /preview/consult-chat HTML: 200·noindex 메타·첫 질문·AI 안내', r.status === 200 && /<meta name="robots" content="[^"]*noindex/.test(t) && t.includes('집에서 쓰실 건가요') && t.includes('AI 도우미'), `상태 ${r.status}`);
+    report('S3 HTML: 입력칸·링크 표식 없음(서버 렌더 기준)', !/<input|<textarea|href="tel:/i.test(t));
+    r = await vs.get('/preview/consult-chat', { RSC: '1' });
+    t = await r.text();
+    report('S3 /preview/consult-chat RSC: 200·text/x-component', r.status === 200 && (r.headers.get('content-type') ?? '').includes('text/x-component'));
+    // 실제 브라우저(CI가 설치한 Chromium): 하이드레이션 후 가정용 끝까지 → 요약 → 이전 답 고치기, 외부 요청 0
+    let browserOk = false; let browserNote = '';
+    let browser = null;
+    try {
+      const { chromium } = await import('playwright');
+      browser = await chromium.launch();
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, timezoneId: 'Asia/Seoul' });
+      const external = [];
+      await ctx.route('**/*', (route) => { const u = route.request().url(); if (u.startsWith(base + '/') || u === base) return route.continue(); external.push(u); return route.abort(); });
+      const page = await ctx.newPage();
+      const errs = [];
+      page.on('pageerror', (e) => errs.push(String(e)));
+      await page.goto(base + '/preview/consult-chat', { waitUntil: 'networkidle', timeout: 20_000 });
+      const pick = (text) => page.locator('.cp-choice', { hasText: text }).first().click({ timeout: 10_000 });
+      await pick('가정용');
+      await pick('이사해서 새로 알아봐요');
+      await pick('3~4개');
+      await pick('매일 봐요');
+      const sum1 = await page.locator('.cp-summary').innerText({ timeout: 10_000 });
+      await page.locator('details.cp-history > summary').click();
+      await page.locator('.cp-history-list li', { hasText: '어떤 이유로' }).locator('.cp-edit').click();
+      const gone = (await page.locator('.cp-summary').count()) === 0;
+      const noInput = (await page.locator('input, textarea').count()) === 0;
+      const stor = await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length);
+      browserOk = sum1.includes('가장 먼저 비교할 점') && sum1.includes('동시 사용과 셋톱박스 임대료') && gone && noInput && stor === 0 && external.length === 0 && errs.length === 0;
+      browserNote = `요약 ${sum1.includes('가장 먼저 비교할 점')}, 고치기 후 요약 제거 ${gone}, 외부 요청 ${external.length}, 오류 ${errs.length}`;
+      await ctx.close();
+    } catch (e) {
+      browserNote = `브라우저 단계 실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})`;
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+    }
+    report('S3 실제 브라우저: 하이드레이션 후 가정용 끝까지·요약·이전 답 고치기·낡은 요약 제거·외부 요청 0', browserOk, browserNote);
+    const n = netAttempts();
+    report('S3 서버의 외부 접속 시도 0건', n === 0, `차단 ${n}건`);
+    await stopOrThrow('S3 서버 정리(종료 이벤트 확인)');
   }
 } catch (e) {
   if (!(e instanceof Error && (e.message === 'not ready' || e.message === 'stop failed'))) report('검사 실행', false, '예외 발생(내용 비공개)');
