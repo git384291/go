@@ -20,6 +20,8 @@ const a = buildCreateLeadArgs(
     consentCollection: true,
     marketingOptIn: true,
     privacyVersion: 'privacy-test-v1',
+    noticeVersion: 'privacy-test-v1',
+    noticeKeys: ['n1'],
     idempotencyKey: 'parity-test-0000000001',
     utmSource: 'naver',
   },
@@ -32,6 +34,7 @@ const a = buildCreateLeadArgs(
     }),
     signingKey: leadKey,
     currentPrivacyVersion: 'privacy-test-v1',
+    notices: { version: 'privacy-test-v1', confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: '시험용 문구' }] },
     clientIp: '203.0.113.99',
   },
 );
