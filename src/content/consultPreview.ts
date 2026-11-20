@@ -13,6 +13,8 @@ export type Segment = 'home' | 'business';
 export type Choice = {
   readonly id: string;
   readonly label: string;
+  /** 요약의 '선택 조건'에 쓸 표시(없으면 label). 숫자 답에 무엇을 센 것인지 붙인다 */
+  readonly summaryLabel?: string;
   /** 이 선택에 대한 AI 도우미의 짧은 답(일반 안내만, 확정 약속 없음) */
   readonly reply: string;
   /** 요약의 '확인된 일반 안내'에 들어가는 한 줄 */
@@ -68,25 +70,28 @@ const HOME_FLOW: Flow = {
     },
     {
       id: 'devices',
-      question: '저녁에 동시에 쓰는 기기는 대략 몇 개예요?',
+      question: '저녁에 동시에 쓰는 기기는 대략 몇 대예요?',
       choices: [
         {
           id: 'few',
-          label: '1~2개',
+          label: '1~2대',
+          summaryLabel: '동시에 쓰는 기기 1~2대',
           reply: '동시에 쓰는 기기가 많지 않다면, 필요 이상으로 높은 속도를 고르기보다 집 구조와 쓰는 방식부터 보면 돼요.',
           general: '동시 사용 기기가 적으면 가장 높은 속도부터 고를 필요는 없어요.',
           toCheck: ['집에서 와이파이가 약한 방이 있는지'],
         },
         {
           id: 'some',
-          label: '3~4개',
+          label: '3~4대',
+          summaryLabel: '동시에 쓰는 기기 3~4대',
           reply: '가족이 함께 쓰는 집이 많은 구간이에요. 영상을 보면서 다른 방에서 화상회의를 하는지처럼 겹치는 사용을 알려 주시면 구성을 좁힐 수 있어요.',
           general: '동시에 쓰는 기기가 늘수록 속도와 함께 공유기 성능·위치도 영향을 줘요.',
           toCheck: ['동시에 겹치는 사용(영상 시청·화상회의·게임)', '공유기 위치와 성능'],
         },
         {
           id: 'many',
-          label: '5개 이상',
+          label: '5대 이상',
+          summaryLabel: '동시에 쓰는 기기 5대 이상',
           reply: '기기가 많은 집이군요. 속도만 올리기보다 공유기 구성과 집 구조를 함께 확인하는 편이 정확해요.',
           general: '기기가 많으면 속도뿐 아니라 공유기 구성과 집 구조도 함께 확인해야 해요.',
           toCheck: ['공유기 구성(추가 장비 필요 여부)', '집 구조와 방 개수'],
@@ -205,9 +210,9 @@ export const FLOWS: Readonly<Record<Segment, Flow>> = { home: HOME_FLOW, busines
 // 바로 '지금 쓰는 인터넷이 있는지'를 묻는다. 일반 상담 흐름(FLOWS)은 그대로다.
 export const AD_ENTRY_LABEL = '이사 전 확인 목록 보기';
 export const AD_ENTRY_NOTE = '비공개 광고 시안(미게시 초안)이에요. 실제 광고가 아니고, 아래 버튼은 이 화면 안의 상담 시안으로만 이어져요.';
-// 광고 시안 문구는 광고 소재 초안 모듈의 이사 초안과 같은 글자다(그 모듈을 화면에 배선하지 않으려고 복사해 두고, 시험이 같은지 확인한다)
-export const AD_ENTRY_TITLE = '이사 전 인터넷·TV 확인';
-export const AD_ENTRY_DESC = '새집 인터넷·TV 조건을 확인하세요. 설치 가능 여부는 별도 확인이 필요합니다.';
+// 광고 시안 카드 문구(비공개 미리보기 전용). 광고 소재 초안 모듈은 매체 글자 수 제한(제목 15자)을 따르는 별도 초안이라 화면에 배선하지 않고, 이 카드는 상담 연결 화면용 문안만 둔다
+export const AD_ENTRY_TITLE = '이사할 때 인터넷, 옮길까 새로 가입할까?';
+export const AD_ENTRY_DESC = '쓰던 인터넷이 있다면 남은 약정과 이전 설치비부터, 처음 설치한다면 설치 가능일과 비용부터 살펴보세요.';
 export const AD_ENTRY_PICKS: readonly string[] = ['moving'];
 const EXISTING_STEP: Step = {
   id: 'existing',
@@ -230,15 +235,15 @@ const EXISTING_STEP: Step = {
     {
       id: 'unsure',
       label: '잘 모르겠어요',
-      reply: '통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인해 보세요. 지금은 몰라도 다음으로 넘어갈 수 있어요.',
-      general: '쓰는 인터넷이 있는지 아직 몰라서, 기존 인터넷 확인이 필요해요.',
-      toCheck: ['기존 인터넷 확인 필요(통신사 앱이나 최근 청구서에서 이용 여부)'],
+      reply: '지금 몰라도 괜찮아요. 이사 전에 통신사 앱이나 최근 청구서에서 인터넷을 쓰고 있는지만 확인해 보세요.',
+      general: '쓰는 인터넷이 있는지에 따라 약정·이전 조건부터 볼지, 설치 조건부터 볼지가 달라져요.',
+      toCheck: ['통신사 앱이나 최근 청구서에서 인터넷 이용 여부'],
     },
   ],
 };
 const EXISTING_HAS_KEYPOINT: KeyPoint = {
-  point: '약정 종료일과 이전·해지 비용 비교',
-  reason: '쓰던 인터넷의 약정이 끝나는 날과 이전·해지 비용을, 새 상품 조건과 같은 기준으로 놓고 비교해 보세요. 금액은 확정되지 않았어요.',
+  point: '남은 약정과 이전 설치비 확인',
+  reason: '쓰던 인터넷의 남은 약정과 이전 설치비를 새 상품 조건과 같은 기준으로 놓고 비교해 보세요. 해지 비용이 드는지도 함께 확인하세요. 금액은 확정되지 않았어요.',
 };
 const EXISTING_NONE_KEYPOINT: KeyPoint = {
   point: '설치 가능일과 설치비 금액·청구 시점 확인',
@@ -246,7 +251,7 @@ const EXISTING_NONE_KEYPOINT: KeyPoint = {
 };
 const EXISTING_UNSURE_KEYPOINT: KeyPoint = {
   point: '기존 인터넷 확인 필요',
-  reason: '통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인하면 기존 조건까지 함께 비교할 수 있어요. 지금은 몰라도 요약은 볼 수 있고, 금액과 일정은 확정되지 않았어요.',
+  reason: '지금 몰라도 요약은 볼 수 있어요. 금액과 일정은 확정되지 않았어요.',
 };
 export const HOME_MOVING_AD_FLOW: Flow = {
   ...HOME_FLOW,
@@ -320,7 +325,7 @@ export function buildSummary(segment: Segment, picks: readonly string[], flow: F
     const id = picks[i];
     const choice = step.choices.find((c) => c.id === id);
     if (!choice) return;
-    conditions.push(choice.label);
+    conditions.push(choice.summaryLabel ?? choice.label);
     general.push(choice.general);
     for (const t of choice.toCheck) if (!toCheck.includes(t)) toCheck.push(t);
   });

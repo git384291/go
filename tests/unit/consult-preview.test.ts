@@ -448,7 +448,7 @@ test('CP25 확인할 항목: 가정용은 월 요금·약정이 먼저, 설치 �
   assert.equal(n, 36);
   // 가정 이사 선택은 설치 항목을 따로 더하지 않는다(공통 한 줄이 맡는다)
   assert.deepEqual(FLOWS.home.steps[0].choices.find((c) => c.id === 'moving')!.toCheck, []);
-  // 선택을 바꾸면 이전 조건이 사라진다: 1~2개 → 5개 이상
+  // 선택을 바꾸면 이전 조건이 사라진다: 1~2대 → 5대 이상
   const a = buildSummary('home', ['renewal', 'few', 'rare']).toCheck;
   const b = buildSummary('home', ['renewal', 'many', 'rare']).toCheck;
   assert.ok(a.includes('집에서 와이파이가 약한 방이 있는지') && !b.includes('집에서 와이파이가 약한 방이 있는지'));
@@ -497,24 +497,35 @@ test('CP27 광고 시안 → 이사 상담: 이사 선택 상태로 시작, 쓰�
   assert.ok(has.toCheck.some((t) => t.includes('이전·해지 조건')) && !none.toCheck.some((t) => t.includes('이전·해지 조건')));
   assert.notDeepEqual(has.general, none.general);
   // 핵심 비교점은 기본 흐름과 같은 규칙(쓰는 인터넷 답은 규칙 입력에서 뺀다)
-  assert.equal(has.keyPoint.point, '약정 종료일과 이전·해지 비용 비교');
+  assert.equal(has.keyPoint.point, '남은 약정과 이전 설치비 확인');
   assert.equal(none.keyPoint.point, '설치 가능일과 설치비 금액·청구 시점 확인');
   assert.notDeepEqual(has.keyPoint, none.keyPoint);
   // 쓰는 인터넷을 모르는 고객도 요약까지: 첫 문장 '기존 인터넷 확인 필요', 확인 방법 안내, 확인 항목, 다른 두 답의 문구는 없음
   const unsure = buildSummary('home', ['moving', 'unsure', 'some', 'daily'], f);
   assert.equal(f.steps[1].choices.map((c) => c.id).join(), 'has,none,unsure');
-  assert.equal(f.steps[1].choices[2].reply, '통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인해 보세요. 지금은 몰라도 다음으로 넘어갈 수 있어요.');
+  assert.equal(f.steps[1].choices[2].reply, '지금 몰라도 괜찮아요. 이사 전에 통신사 앱이나 최근 청구서에서 인터넷을 쓰고 있는지만 확인해 보세요.');
   assert.equal(unsure.keyPoint.point, '기존 인터넷 확인 필요');
   assert.ok(unsure.conditions.includes('잘 모르겠어요'));
-  assert.ok(unsure.toCheck.some((t) => t.includes('기존 인터넷 확인 필요')));
+  assert.ok(unsure.toCheck.some((t) => t.includes('통신사 앱이나 최근 청구서')));
+  // 같은 확인 안내가 요약에 두 번 이상 나오지 않는다(첫 문장 표시 한 번 + 확인 항목 한 줄)
+  const uWhole = [unsure.keyPoint.point, unsure.keyPoint.reason, ...unsure.conditions, ...unsure.general, ...unsure.toCheck].join('\n');
+  assert.equal((uWhole.match(/통신사 앱이나 최근 청구서/g) ?? []).length, 1);
+  assert.equal((uWhole.match(/기존 인터넷 확인 필요/g) ?? []).length, 1);
+  // 숫자 답에는 무엇을 센 것인지 붙여 요약에 쓴다
+  const dv = (id: string) => buildSummary('home', ['moving', 'none', id, 'daily'], f).conditions;
+  assert.ok(dv('some').includes('동시에 쓰는 기기 3~4대') && dv('few').includes('동시에 쓰는 기기 1~2대') && dv('many').includes('동시에 쓰는 기기 5대 이상'));
+  assert.deepEqual(FLOWS.home.steps[1].choices.map((c) => c.label), ['1~2대', '3~4대', '5대 이상', '아직 잘 모르겠어요']);
   assert.ok(!unsure.toCheck.some((t) => t.includes('이전·해지 조건')) && !unsure.general.some((t) => t.includes('해지할 조건은 없고')));
   assert.equal(isComplete('home', ['moving', 'unsure', 'some', 'daily'], f), true);
   for (const x of [unsure.keyPoint.point + unsure.keyPoint.reason, JSON.stringify(f.steps[1].choices[2])]) assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|확정됩니다|확정돼요|처음 (낼|내는|내요|내나)|접수|가입|예약|신청|업로드|전화번호/.test(x));
   // 쓰는 인터넷을 아직 안 고른 중간 상태·일반 흐름은 기본 규칙
   assert.deepEqual(buildSummary('home', ['moving', 'some', 'daily']).keyPoint, keyPoint('home', ['moving', 'some', 'daily']));
   for (const k of [has.keyPoint, none.keyPoint]) assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|확정됩니다|확정돼요|처음 (낼|내는|내요|내나)|접수|가입|예약|신청/.test(k.point + k.reason));
-  assert.equal(AD_ENTRY_TITLE, AD_DRAFTS.moving.title);
-  assert.equal(AD_ENTRY_DESC, AD_DRAFTS.moving.description);
+  // 카드 문안: 쓰던 인터넷 유무에 따라 먼저 볼 것이 다르다는 것을 말하되 금액·확약·후기·실적 없음
+  assert.equal(AD_ENTRY_TITLE, '이사할 때 인터넷, 옮길까 새로 가입할까?');
+  assert.ok(AD_ENTRY_DESC.includes('남은 약정과 이전 설치비') && AD_ENTRY_DESC.includes('설치 가능일'));
+  assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|최저|당일|후기|보장|1위|확정/.test(AD_ENTRY_TITLE + AD_ENTRY_DESC));
+  assert.notEqual(AD_ENTRY_TITLE, AD_DRAFTS.moving.title, '매체 글자 수 제한을 따르는 광고 초안 모듈과는 별개 문안');
   assert.ok(!/adDrafts/.test(COMPONENT), '광고 초안 모듈은 화면에 배선하지 않는다(AD4)');
   // 새 문구에 금액·확정·성공 표현 없음
   const all = JSON.stringify(f.steps[1]);

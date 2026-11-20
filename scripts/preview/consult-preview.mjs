@@ -146,7 +146,7 @@ for (const width of [320, 390]) {
     check(`[${tag}] 가정용 선택 후 첫 질문과 선택지가 바로 보임`, (await page.locator('.cp-current[data-step="reason"]').count()) === 1 && (await currentFullyVisible(page)));
     await click(page, '이사해서 새로 알아봐요');
     check(`[${tag}] 이사 선택 후 AI 안내가 현재 질문 바로 위에 있고 다음 질문 하나만 보임`, (await page.locator('.cp-current[data-reply], .cp-current [data-reply]').count()) === 1 && (await page.locator('.cp-current[data-step="devices"]').count()) === 1 && (await currentFullyVisible(page)));
-    await click(page, '3~4개');
+    await click(page, '3~4대');
     check(`[${tag}] 선택이 쌓여도(2개 답) 현재 질문·선택지가 화면에 바로 보임`, (await page.locator('.cp-current[data-step="tv"]').count()) === 1 && (await currentFullyVisible(page)));
     const hist = await page.locator('details.cp-history').evaluate((e) => e.open);
     check(`[${tag}] 이전 답은 접혀 있음`, hist === false);
@@ -173,7 +173,7 @@ for (const width of [320, 390]) {
     check(`[${tag}] 이전 답 고치면 낡은 요약 제거·그 질문부터 다시·이전 답 접힘`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="reason"]').count()) === 1 && (await page.locator('details.cp-history').evaluate((e) => e.open)) === false);
     check(`[${tag}] 고친 질문으로 초점 이동`, (await active(page)).cls.includes('cp-question'), JSON.stringify(await active(page)));
     await click(page, '쓰던 약정이 끝나서 비교해요');
-    await click(page, '3~4개');
+    await click(page, '3~4대');
     await click(page, '거의 안 봐요');
     const s2 = await summaryText(page);
     check(`[${tag}] 고친 뒤 요약 갱신(이전 선택 잔재 0, 핵심 포인트 교체)`, s2.includes('쓰던 약정이 끝나서 비교해요') && !s2.includes('이사해서 새로 알아봐요') && !s2.includes('매일 봐요') && s2.includes('해지 비용') && !(await summaryFirstLine(page)).includes('셋톱박스 임대료'), (await summaryFirstLine(page)).replace(/\s+/g, ' ').slice(0, 70));
@@ -218,7 +218,7 @@ for (const width of [320, 390]) {
     check(`[${tag}] [키보드] Tab으로 "동시 사용" 고치기 버튼에 닿음`, onEdit.text === '고치기', JSON.stringify(onEdit));
     await page.keyboard.press('Enter');
     check(`[${tag}] [키보드] 고치면 낡은 요약이 바로 사라지고 그 질문으로 초점 이동`, (await summaryText(page)) === null && (await active(page)).cls.includes('cp-question') && (await active(page)).text.includes('동시에 쓰는 기기'), JSON.stringify(await active(page)));
-    await keyChoose(page, '3~4개');
+    await keyChoose(page, '3~4대');
     await keyChoose(page, '가끔 봐요');
     const s3 = await summaryText(page);
     check(`[${tag}] [키보드] 고친 뒤 새 요약: "잘 모르겠어요" 잔재 0, 첫 줄이 동시 사용·셋톱박스 임대료로 교체`, !s3.includes('아직 잘 모르겠어요') && !s3.includes('영상회의와 TV 시청이 겹치는지') && (await summaryFirstLine(page)).includes('동시 사용과 셋톱박스 임대료'), (await summaryFirstLine(page)).replace(/\s+/g, ' ').slice(0, 70));
@@ -264,7 +264,7 @@ const ADS = [
   { scene: '전화 가능 요일 vs 기사 방문일', q: '전화 상담이 되는 토요일이면 그날 설치도 되나요?', must: ['전화 상담이 가능해도 설치 일정은 별도로 확인해야 해요', '별개예요', '방문 가능일'], mustNot: ['아니요', '불가능'] },
 ];
 const SEG_FLOWS = [
-  ['가정용', ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요']],
+  ['가정용', ['가정용', '이사해서 새로 알아봐요', '3~4대', '매일 봐요']],
   ['사업장', ['매장·사무실용', '카드 결제·배달 주문이 멈추는 거예요', '손님이 보는 홀·객실에 둬요']],
 ];
 const STATES = [['평일(전화 안내 없음)', '2026-11-20T12:00:00+09:00', 0], ['토요일 가상 시간 안', '2026-11-21T11:00:00+09:00', 1]];
@@ -303,7 +303,7 @@ writeFileSync(path.join(OUT, 'ad-scenarios.json'), JSON.stringify(adResults, nul
 // ── G2. 이사 대표 경로(moving → few → rare): 첫 줄과 요약에서 금액·청구 시점 확인 안내가 보이고 "처음 내는 비용" 단정이 없다(PM 7020585092) ──
 for (const width of [320, 390]) {
   const { page, context, external, errors } = await openPage(width, NOW_THU);
-  for (const x of ['가정용', '이사해서 새로 알아봐요', '1~2개', '거의 안 봐요']) await click(page, x);
+  for (const x of ['가정용', '이사해서 새로 알아봐요', '1~2대', '거의 안 봐요']) await click(page, x);
   const first = await summaryFirstLine(page);
   const all = await summaryText(page);
   check(`[${width}px] 이사 대표 경로 첫 줄: 설치 가능 여부와 설치비 + "설치비 금액과 청구 시점도 확인해 보세요"`, first.includes('설치 가능 여부와 설치비') && first.includes('새 주소의 건물 조건에 따라 설치 가능 여부가 달라져요') && first.includes('설치비 금액과 청구 시점도 확인해 보세요'), first.replace(/\s+/g, ' ').slice(0, 90));
@@ -365,8 +365,8 @@ const PRICE_LINE = '월 요금과 약정 기간(VAT 포함 여부 구분)';
 const GIFT_LINE = '장비 비용과 사은품 지급 조건(조건이 확인된 것만 비교)';
 for (const width of [320, 390]) {
   for (const [name, picks] of [
-    ['가정용 이사', ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요']],
-    ['가정용 약정 갱신', ['가정용', '쓰던 약정이 끝나서 비교해요', '5개 이상', '가끔 봐요']],
+    ['가정용 이사', ['가정용', '이사해서 새로 알아봐요', '3~4대', '매일 봐요']],
+    ['가정용 약정 갱신', ['가정용', '쓰던 약정이 끝나서 비교해요', '5대 이상', '가끔 봐요']],
     ['사업장 결제', ['매장·사무실용', '카드 결제·배달 주문이 멈추는 거예요', '손님이 보는 홀·객실에 둬요']],
   ]) {
     const tag = `[${width}px ${name}]`;
@@ -409,7 +409,7 @@ for (const width of [320, 390]) {
       await page.locator('details.cp-history > summary').click();
       await page.locator('.cp-history-list li', { hasText: '동시에 쓰는 기기' }).locator('.cp-edit').click();
       check(`${tag} 선택 변경 직후 낡은 요약 제거`, (await summaryText(page)) === null);
-      await click(page, '1~2개');
+      await click(page, '1~2대');
       await click(page, '거의 안 봐요');
       const l2 = await toCheckLines(page);
       check(`${tag} 변경 후 새 요약: 이전 조건(공유기 위치·TV 이용료 등) 제거, 새 조건(와이파이 약한 방) 반영, 월 요금 첫 줄·설치 한 줄 유지`, !l2.includes('공유기 위치와 성능') && !l2.includes('TV 이용료와 셋톱박스 비용') && l2.includes('집에서 와이파이가 약한 방이 있는지') && l2[0] === PRICE_LINE && l2.filter((t) => /설치 가능 여부|희망 일정|설치비/.test(t)).length === 1);
@@ -422,7 +422,9 @@ for (const width of [320, 390]) {
 for (const width of [320, 390]) {
   const tag = `[${width}px 이사 광고→상담]`;
   const { page, context, external, errors } = await openPage(width, NOW_THU);
-  check(`${tag} 시작 화면에 광고 시안(미게시 초안)과 '이사 전 확인 목록 보기' 버튼, 입력칸·링크 없음`, (await page.locator('[data-ad-draft="moving"] .cp-ad-cta').innerText()) === '이사 전 확인 목록 보기' && (await page.locator('[data-ad-draft]').innerText()).includes('미게시 초안') && (await page.locator('input, textarea, a[href]').count()) === 0);
+  check(`${tag} 시작 화면에 광고 시안(미게시 초안)과 '이사 전 확인 목록 보기' 버튼, 입력칸·링크 없음`, (await page.locator('[data-ad-draft="moving"] .cp-ad-cta').innerText()) === '이사 전 확인 목록 보기' && (await page.locator('[data-ad-draft]').innerText()).includes('미게시 초안') && (await page.locator('.cp-ad-title').innerText()) === '이사할 때 인터넷, 옮길까 새로 가입할까?' && (await page.locator('.cp-ad-desc').innerText()).includes('남은 약정과 이전 설치비부터') && (await noOverflow(page)) && (await page.locator('.cp-ad-cta').evaluate((e) => e.scrollWidth <= e.clientWidth + 1)) && (await page.locator('input, textarea, a[href]').count()) === 0);
+  await page.locator('.cp-ad').scrollIntoViewIfNeeded();
+  await shot(page, path.join(OUT, `10-ad-card-${width}.png`));
   await page.locator('.cp-ad-cta').focus();
   await page.keyboard.press('Enter');
   const step = await page.locator('.cp-current').getAttribute('data-step');
@@ -437,11 +439,11 @@ for (const width of [320, 390]) {
   const fo = await page.evaluate(() => { const e = document.activeElement; const st = getComputedStyle(e); const r = e.getBoundingClientRect(); return { outline: st.outlineStyle !== 'none' && parseFloat(st.outlineWidth) >= 2, inView: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth }; });
   check(`${tag} [키보드] 선택지 초점 표시(윤곽선 ≥2px)가 보이고 화면 안`, fo.outline && fo.inView);
   await click(page, '지금 쓰는 인터넷이 있어요');
-  await click(page, '3~4개');
+  await click(page, '3~4대');
   await click(page, '매일 봐요');
   const sHas = await summaryText(page);
   const kpHas = await summaryFirstLine(page);
-  check(`${tag} "있어요" 요약 맨 위: 약정 종료일과 이전·해지 비용 비교`, kpHas.includes('가장 먼저 비교할 점') && kpHas.includes('약정 종료일과 이전·해지 비용 비교'), kpHas.replace(/\s+/g, ' ').slice(0, 60));
+  check(`${tag} "있어요" 요약 맨 위: 남은 약정과 이전 설치비 확인`, kpHas.includes('가장 먼저 비교할 점') && kpHas.includes('남은 약정과 이전 설치비 확인'), kpHas.replace(/\s+/g, ' ').slice(0, 60));
   await settle(page);
   const sc = await contrastOf(page, '.cp-summary .cp-keypoint strong, .cp-summary .cp-keypoint-label, .cp-summary .cp-keypoint-reason, .cp-summary li, .cp-summary h3');
   check(`${tag} 요약 글자 대비 ≥4.5:1, 흐림 없음`, sc.length > 5 && sc.every((x) => x.ratio >= 4.5 && x.op === 1), `최저 ${Math.min(...sc.map((x) => x.ratio)).toFixed(1)}`);
@@ -451,7 +453,7 @@ for (const width of [320, 390]) {
   await page.locator('.cp-history-list li', { hasText: '지금 쓰는 인터넷이 있나요' }).locator('.cp-edit').click();
   check(`${tag} 선택을 고치면 낡은 요약이 사라지고 그 질문부터 다시`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="existing"]').count()) === 1);
   await click(page, '지금은 없어요');
-  await click(page, '3~4개');
+  await click(page, '3~4대');
   await click(page, '매일 봐요');
   const sNone = await summaryText(page);
   const kpNone = await summaryFirstLine(page);
@@ -465,11 +467,13 @@ for (const width of [320, 390]) {
   await page.locator('.cp-current .cp-choice', { hasText: '잘 모르겠어요' }).focus();
   await page.keyboard.press('Enter');
   const unsureReply = await page.locator('.cp-current[data-step="devices"]').count();
-  check(`${tag} [키보드 Enter] "잘 모르겠어요" 선택 → 확인 방법 안내가 보이고 다음 질문으로 넘어감(몰라도 진행)`, unsureReply === 1 && (await page.locator('.cp-bubble[data-reply]').innerText()).includes('통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인해 보세요. 지금은 몰라도 다음으로 넘어갈 수 있어요.'));
-  for (const t of ['3~4개', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
+  check(`${tag} [키보드 Enter] "잘 모르겠어요" 선택 → 확인 방법 안내가 보이고 다음 질문으로 넘어감(몰라도 진행)`, unsureReply === 1 && (await page.locator('.cp-bubble[data-reply]').innerText()).includes('지금 몰라도 괜찮아요. 이사 전에 통신사 앱이나 최근 청구서에서 인터넷을 쓰고 있는지만 확인해 보세요.'));
+  for (const t of ['3~4대', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
   const kpU = await summaryFirstLine(page);
   const sU = await summaryText(page);
   check(`${tag} "잘 모르겠어요" 요약 도달: 맨 위 '기존 인터넷 확인 필요', 확인 항목 표시, 있어요·없어요 안내(약정 종료일·이전·해지, 해지할 조건은 없고) 없음`, !!sU && kpU.includes('가장 먼저 비교할 점') && kpU.includes('기존 인터넷 확인 필요') && sU.includes('통신사 앱이나 최근 청구서') && sU.includes('잘 모르겠어요') && !sU.includes('이전·해지') && !sU.includes('약정 종료일') && !sU.includes('해지할 조건은 없고') && !sU.includes('지금은 없어요'), kpU.replace(/\s+/g, ' ').slice(0, 50));
+  const body = await page.locator('body').innerText();
+  check(`${tag} "잘 모르겠어요" 요약: 확인 안내(통신사 앱·청구서)는 화면에 한 번만, "동시에 쓰는 기기 3~4대" 표시`, (body.match(/통신사 앱이나 최근 청구서/g) ?? []).length === 1 && sU.includes('동시에 쓰는 기기 3~4대'), `안내 ${(body.match(/통신사 앱이나 최근 청구서/g) ?? []).length}회`);
   await settle(page);
   const uc = await contrastOf(page, '.cp-summary .cp-keypoint strong, .cp-summary .cp-keypoint-reason, .cp-summary li');
   check(`${tag} "잘 모르겠어요" 요약 글자 대비 ≥4.5:1·흐림 없음`, uc.length > 5 && uc.every((x) => x.ratio >= 4.5 && x.op === 1));
@@ -482,7 +486,7 @@ for (const width of [320, 390]) {
     const gone = (await summaryText(page)) === null;
     await page.locator('.cp-current .cp-choice', { hasText: label }).focus();
     await page.keyboard.press('Space');
-    for (const t of ['3~4개', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
+    for (const t of ['3~4대', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
     const sx = await summaryText(page);
     const hasOnly = !!sx && sx.includes(only) && none.every((n) => !sx.includes(n)) && (await page.locator('.cp-summary').count()) === 1;
     seqOk.push(gone && hasOnly);
