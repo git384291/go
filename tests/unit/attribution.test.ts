@@ -52,3 +52,11 @@ test('AT7 출처가 없으면 저장하지 않는다', () => {
   resolveAttribution('?foo=1', s);
   assert.equal(s.m.size, 0);
 });
+
+test('AT8 전화번호·이메일 모양 값은 출처로 쓰지 않는다', () => {
+  assert.deepEqual(parseAttribution('?utm_source=01012345678'), {});
+  assert.deepEqual(parseAttribution('?utm_source=010-1234-5678'), {});
+  assert.deepEqual(parseAttribution('?utm_source=a@b.com'), {});
+  assert.deepEqual(parseAttribution('?utm_source=naver&utm_campaign=01012345678'), { utmSource: 'naver' });
+  assert.equal(parseAttribution('?utm_source=naver&utm_campaign=cpc_2026_11').utmCampaign, 'cpc_2026_11');
+});

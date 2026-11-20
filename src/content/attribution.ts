@@ -9,10 +9,13 @@ export type Attribution = { utmSource?: string; utmMedium?: string; utmCampaign?
 export const ATTRIBUTION_STORAGE_KEY = 'fideon_attr_v1';
 const CODE = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 
+/** 숫자 7자리 이상 연속은 전화번호 등 개인정보일 수 있어 출처 코드로 쓰지 않는다 */
+const LOOKS_PERSONAL = /\d[\s_.-]?(?:\d[\s_.-]?){6,}/;
+
 const clean = (v: string | null): string | undefined => {
   if (v === null) return undefined;
   const s = v.trim().toLowerCase();
-  return CODE.test(s) ? s : undefined;
+  return CODE.test(s) && !LOOKS_PERSONAL.test(s) ? s : undefined;
 };
 
 /** 쿼리 문자열에서 유효한 출처만 뽑는다. utm_source가 없으면 빈 객체(매체·캠페인만으로는 귀속하지 않음) */
