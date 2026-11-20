@@ -17,6 +17,7 @@ import {
   buildSummary,
   EXAMPLES,
   FAQ,
+  DATE_UNKNOWN,
   FLOWS,
   HOME_MOVING_AD_FLOW,
   isComplete,
@@ -47,6 +48,8 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   const [picks, setPicks] = useState<string[]>([]);
   // 광고 시안에서 들어온 이사 상담인지(질문에 '지금 쓰는 인터넷' 하나가 더 들어간다)
   // 이사 상담에서 고른 바로 질문(답을 하나만 보여 주고, 다음 선택·고치기를 하면 지운다)
+  // '기존 약정은 언제 끝나세요?' 뒤의 '만기일을 모르겠어요' 안내(하나만, 다음 선택·고치기를 하면 지운다)
+  const [dateUnknown, setDateUnknown] = useState(false);
   const [quick, setQuick] = useState<'moving' | 'speed' | 'bundle' | 'bundle_unknown' | 'return' | null>(null);
   const [fromAd, setFromAd] = useState<'moving' | 'renewal' | null>(null);
   const [clock, setClock] = useState<Date | null>(now ?? null);
@@ -83,6 +86,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
 
   const startFromAd = (kind: 'moving' | 'renewal') => {
     setQuick(null);
+    setDateUnknown(false);
     setFromAd(kind);
     setSegment('home');
     setPicks([...(kind === 'moving' ? AD_ENTRY_PICKS : AD_RENEWAL_PICKS)]);
@@ -91,6 +95,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   };
   const chooseSegment = (s: Segment) => {
     setQuick(null);
+    setDateUnknown(false);
     setFromAd(null);
     setSegment(s);
     setPicks([]);
@@ -99,18 +104,21 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   };
   const choose = (choiceId: string) => {
     setQuick(null);
+    setDateUnknown(false);
     setPicks((prev) => [...prev.slice(0, stepIndex), choiceId]);
     setFocusTick((n) => n + 1);
   };
   // 이전 선택을 고치면 그 뒤 선택은 지우고 그 질문부터 다시 묻는다(요약도 함께 다시 계산된다)
   const editStep = (i: number) => {
     setQuick(null);
+    setDateUnknown(false);
     setPicks((prev) => prev.slice(0, i));
     setHistoryOpen(false);
     setFocusTick((n) => n + 1);
   };
   const editSegment = () => {
     setQuick(null);
+    setDateUnknown(false);
     setFromAd(null);
     setSegment(null);
     setPicks([]);
@@ -223,6 +231,18 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
                 <div className="cp-bubble cp-bot" data-reply="">
                   <p>{lastChoice.reply}</p>
                 </div>
+              ) : null}
+              {lastStep?.id === 'remaining' && lastChoice?.id === 'month' ? (
+                <>
+                  <button type="button" className="btn btn-ghost btn-block cp-quick-btn" data-date-unknown-btn="" aria-pressed={dateUnknown} onClick={() => setDateUnknown(true)}>
+                    {DATE_UNKNOWN.label}
+                  </button>
+                  {dateUnknown ? (
+                    <div className="cp-bubble cp-bot" data-date-unknown-reply="" role="status">
+                      <p>{DATE_UNKNOWN.reply}</p>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
               <h2 className="cp-question" tabIndex={-1} ref={focusRef}>
                 {currentStep.question}

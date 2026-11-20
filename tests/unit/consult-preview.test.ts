@@ -30,6 +30,7 @@ import {
   PHONE_VS_VISIT_NOTE,
   PRICE_TERM_TO_CHECK,
   QUICK_BUNDLE,
+  DATE_UNKNOWN,
   QUICK_BUNDLE_UNKNOWN,
   QUICK_MOVING,
   QUICK_RETURN,
@@ -604,4 +605,12 @@ test('CP33 가족 결합 후속 "결합상품 이름을 모르겠어요": 정확
   assert.equal(QUICK_BUNDLE_UNKNOWN.reply, '이용 중인 통신사 앱이나 청구서에서 결합상품 이름을 찾아보세요. 찾기 어려우면 통신사 고객센터에서도 확인할 수 있어요.');
   assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(QUICK_BUNDLE_UNKNOWN.label + QUICK_BUNDLE_UNKNOWN.reply));
   assert.match(COMPONENT, /quick === 'bundle' \|\| quick === 'bundle_unknown' \? \(\s*<button[^>]*data-quick-btn="bundle-unknown"/);
+});
+
+test('CP34 약정 만기 "만기일을 모르겠어요": 정확한 안내, 한 달쯤 응답 뒤에만, 확정 표현 없음', () => {
+  assert.equal(DATE_UNKNOWN.label, '만기일을 모르겠어요');
+  assert.equal(DATE_UNKNOWN.reply, '지금 쓰는 통신사 앱에서 인터넷 약정 종료일을 확인해 보세요. 찾기 어려우면 고객센터에 인터넷과 TV의 약정이 각각 언제 끝나는지 물어보세요.');
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(DATE_UNKNOWN.label + DATE_UNKNOWN.reply));
+  assert.match(COMPONENT, /lastStep\?\.id === 'remaining' && lastChoice\?\.id === 'month'/);
+  assert.ok(HOME_RENEWAL_AD_FLOW.steps[1].choices[0].reply.endsWith('기존 약정은 언제 끝나세요?'));
 });

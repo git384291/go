@@ -694,6 +694,33 @@ for (const width of [320, 390]) {
   }
 }
 
+// ── G13. 약정 만기 "기존 약정은 언제 끝나세요?" → "만기일을 모르겠어요"(PM 7038654861): 안내 한 번, 며칠 남음에는 없음 ──
+const DREPLY = '지금 쓰는 통신사 앱에서 인터넷 약정 종료일을 확인해 보세요. 찾기 어려우면 고객센터에 인터넷과 TV의 약정이 각각 언제 끝나는지 물어보세요.';
+for (const width of [320, 390]) {
+  const tag = `[${width}px 만기일 모름]`;
+  const { page, context, external, errors } = await openPage(width, NOW_THU);
+  await page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await page.keyboard.press('Enter');
+  check(`${tag} 남은 기간을 고르기 전에는 "만기일을 모르겠어요" 없음`, (await page.locator('[data-date-unknown-btn]').count()) === 0);
+  await page.locator('.cp-current .cp-choice', { hasText: '한 달쯤 남았어요' }).focus(); await page.keyboard.press('Enter');
+  const ask = await page.locator('.cp-bubble[data-reply]').innerText();
+  const ub = page.locator('[data-date-unknown-btn]');
+  check(`${tag} "기존 약정은 언제 끝나세요?" 다음에 "만기일을 모르겠어요" 선택이 보이고 안내는 아직 없음`, ask.includes('기존 약정은 언제 끝나세요?') && (await ub.count()) === 1 && (await ub.innerText()) === '만기일을 모르겠어요' && (await page.locator('[data-date-unknown-reply]').count()) === 0 && (await noOverflow(page)));
+  await ub.focus(); await page.keyboard.press('Enter');
+  const rep = await page.locator('[data-date-unknown-reply]').innerText();
+  check(`${tag} [키보드 Enter] 정확한 안내 하나만·금칙어 없음·가로 넘침 없음`, rep.trim() === DREPLY && !SBAN.test(rep) && (await page.locator('[data-date-unknown-reply]').count()) === 1 && (await noOverflow(page)));
+  await page.keyboard.press('Space');
+  check(`${tag} 다시 눌러도 안내 하나만`, (await page.locator('[data-date-unknown-reply]').count()) === 1);
+  if (width === 390) await shot(page, path.join(OUT, '23-date-unknown-390.png'));
+  await page.locator('.cp-current .cp-choice').first().focus(); await page.keyboard.press('Enter');
+  check(`${tag} 다음 질문을 고르면 선택·안내가 사라지고 요약까지 진행`, (await page.locator('[data-date-unknown-btn]').count()) === 0 && (await page.locator('[data-date-unknown-reply]').count()) === 0);
+  await page.locator('details.cp-history > summary').click();
+  await page.locator('.cp-history-list li', { hasText: '약정이 끝나기까지' }).locator('.cp-edit').click();
+  await page.locator('.cp-current .cp-choice', { hasText: '며칠 남았어요' }).focus(); await page.keyboard.press('Enter');
+  check(`${tag} "며칠 남았어요"에는 "만기일을 모르겠어요" 없음`, (await page.locator('[data-date-unknown-btn]').count()) === 0);
+  check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+  await context.close();
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',
