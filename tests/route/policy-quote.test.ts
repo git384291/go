@@ -156,7 +156,9 @@ test('Q10 경계: 모든 런타임 파일이 server-only, 클라이언트 파일
   for (const f of walk('src')) {
     const s = readFileSync(f, 'utf8');
     if (/^['"]use client['"]/.test(s.trimStart())) assert.ok(!/server\/policies/.test(s), `${f}: 클라이언트 파일이 정책 모듈 import`);
-    if (!f.startsWith(path.join('src', 'server', 'policies'))) assert.ok(!/server\/policies/.test(s), `${f}: 아직 어떤 화면·API도 정책 모듈에 연결하지 않음`);
+    // PM 11/21 1항: 상담 금액 안내 서버 모듈 1개만 정책 모듈을 읽는다(정확한 allowlist, 화면·API 라우트는 이 모듈을 통해서만)
+    const POLICY_USERS = [path.join('src', 'server', 'consult', 'quoteAnswer.ts')];
+    if (!f.startsWith(path.join('src', 'server', 'policies')) && !POLICY_USERS.includes(f)) assert.ok(!/server\/policies/.test(s), `${f}: 아직 어떤 화면·API도 정책 모듈에 연결하지 않음`);
   }
 });
 
