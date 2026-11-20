@@ -253,6 +253,12 @@ const EXISTING_UNSURE_KEYPOINT: KeyPoint = {
   point: '기존 인터넷 확인 필요',
   reason: '지금 몰라도 요약은 볼 수 있어요. 금액과 일정은 확정되지 않았어요.',
 };
+// 이사 상담에서 바로 고를 수 있는 질문(답은 일반 안내만, 예약·접수 연결 없음)
+export const QUICK_MOVING = {
+  label: '이삿날 바로 설치돼요?',
+  reply: '이삿날 설치가 가능한지는 새 주소와 기사님 일정에 따라 달라요. 이사 날짜가 언제예요?',
+} as const;
+
 // ── 약정 만료 광고 → 상담: 약정이 끝나기까지 얼마나 남았는지에 따라 먼저 안내할 것이 다르다 ──
 export const AD_RENEWAL_LABEL = '약정 끝나기 전 비교하기';
 export const AD_RENEWAL_TITLE = '약정 만료 전 인터넷·TV';

@@ -353,3 +353,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .cp-ad-note { font-size: 0.8rem; color: var(--ink-2); }
 .cp-ad-title { font-weight: 700; }
 .cp-ad-cta { min-height: 44px; margin-top: 4px; }
+
+.cp-quick { display: grid; gap: 8px; margin: 0 0 12px; }
+.cp-quick-btn { min-height: 44px; }
+.cp-quick-btn:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }

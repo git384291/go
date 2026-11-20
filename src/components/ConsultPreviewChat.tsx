@@ -24,6 +24,7 @@ import {
   MOCK_SATURDAY_HOURS_TEXT,
   phoneState,
   PHONE_VS_VISIT_NOTE,
+  QUICK_MOVING,
   PRIVACY_FAQ,
   SEGMENT_QUESTION,
   SEGMENTS,
@@ -41,6 +42,8 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   const [segment, setSegment] = useState<Segment | null>(null);
   const [picks, setPicks] = useState<string[]>([]);
   // 광고 시안에서 들어온 이사 상담인지(질문에 '지금 쓰는 인터넷' 하나가 더 들어간다)
+  // 이사 상담에서 고른 바로 질문(답을 하나만 보여 주고, 다음 선택·고치기를 하면 지운다)
+  const [quickOpen, setQuickOpen] = useState(false);
   const [fromAd, setFromAd] = useState<'moving' | 'renewal' | null>(null);
   const [clock, setClock] = useState<Date | null>(now ?? null);
   const [mockCalled, setMockCalled] = useState(false);
@@ -75,6 +78,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   const lastChoice = lastStep ? lastStep.choices.find((c) => c.id === picks[picks.length - 1]) : null;
 
   const startFromAd = (kind: 'moving' | 'renewal') => {
+    setQuickOpen(false);
     setFromAd(kind);
     setSegment('home');
     setPicks([...(kind === 'moving' ? AD_ENTRY_PICKS : AD_RENEWAL_PICKS)]);
@@ -82,6 +86,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
     setFocusTick((n) => n + 1);
   };
   const chooseSegment = (s: Segment) => {
+    setQuickOpen(false);
     setFromAd(null);
     setSegment(s);
     setPicks([]);
@@ -89,16 +94,19 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
     setFocusTick((n) => n + 1);
   };
   const choose = (choiceId: string) => {
+    setQuickOpen(false);
     setPicks((prev) => [...prev.slice(0, stepIndex), choiceId]);
     setFocusTick((n) => n + 1);
   };
   // 이전 선택을 고치면 그 뒤 선택은 지우고 그 질문부터 다시 묻는다(요약도 함께 다시 계산된다)
   const editStep = (i: number) => {
+    setQuickOpen(false);
     setPicks((prev) => prev.slice(0, i));
     setHistoryOpen(false);
     setFocusTick((n) => n + 1);
   };
   const editSegment = () => {
+    setQuickOpen(false);
     setFromAd(null);
     setSegment(null);
     setPicks([]);
@@ -253,6 +261,19 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
               ))}
             </ol>
           </details>
+
+          {segment === 'home' && picks[0] === 'moving' && fromAd !== 'renewal' ? (
+            <section className="cp-quick" data-quick="moving" aria-label="바로 묻기">
+              <button type="button" className="btn btn-ghost btn-block cp-quick-btn" aria-pressed={quickOpen} onClick={() => setQuickOpen(true)}>
+                {QUICK_MOVING.label}
+              </button>
+              {quickOpen ? (
+                <div className="cp-bubble cp-bot" data-quick-reply="" role="status">
+                  <p>{QUICK_MOVING.reply}</p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           {notices}
         </div>

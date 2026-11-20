@@ -539,6 +539,42 @@ for (const width of [320, 390]) {
   await context.close();
 }
 
+// ── G8. 이사 상담 바로 질문 "이삿날 바로 설치돼요?"(PM 7036916817): 광고에서 들어온 이사·일반 이사 둘 다, 약정 만기 두 경로에는 없음 ──
+const QBAN = /\d[\d,]*\s*원|할인|무료|혜택|지원금|확정됩니다|확정돼요|접수|가입 완료|예약|연결 완료|전화번호|휴대폰/;
+const QREPLY = '이삿날 설치가 가능한지는 새 주소와 기사님 일정에 따라 달라요. 이사 날짜가 언제예요?';
+for (const width of [320, 390]) {
+  for (const route of ['광고에서 이사', '일반 가정용 이사']) {
+    const tag = `[${width}px 이사 바로 질문·${route}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    if (route === '광고에서 이사') { await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    else { await click(page, '가정용'); await click(page, '이사해서 새로 알아봐요'); }
+    const btn = page.locator('.cp-quick-btn');
+    check(`${tag} 버튼 "이삿날 바로 설치돼요?" 표시, 처음엔 응답 없음`, (await btn.count()) === 1 && (await btn.innerText()) === '이삿날 바로 설치돼요?' && (await page.locator('[data-quick-reply]').count()) === 0);
+    await btn.focus();
+    await page.keyboard.press('Enter');
+    const rep = await page.locator('[data-quick-reply]').innerText();
+    check(`${tag} [키보드 Enter] 정확한 응답 표시·금칙어 없음·응답 하나만`, rep.trim() === QREPLY && !QBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await noOverflow(page)) && (await btn.getAttribute('aria-pressed')) === 'true');
+    await page.keyboard.press('Space');
+    check(`${tag} 다시 눌러도 응답 하나만`, (await page.locator('[data-quick-reply]').count()) === 1);
+    if (width === 390 && route === '광고에서 이사') await shot(page, path.join(OUT, '18-quick-moving-390.png'));
+    await page.locator('.cp-current .cp-choice').first().focus();
+    await page.keyboard.press('Enter');
+    check(`${tag} 다음 질문을 고르면 바로 질문 응답은 사라짐`, (await page.locator('[data-quick-reply]').count()) === 0);
+    check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    await context.close();
+  }
+  const tag = `[${width}px 약정 만기 두 경로]`;
+  const { page, context } = await openPage(width, NOW_THU);
+  await click(page, '가정용'); await click(page, '쓰던 약정이 끝나서 비교해요');
+  const a = await page.locator('.cp-quick-btn').count();
+  await context.close();
+  const o2 = await openPage(width, NOW_THU);
+  await o2.page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await o2.page.keyboard.press('Enter');
+  const b = await o2.page.locator('.cp-quick-btn').count();
+  await o2.context.close();
+  check(`${tag} 이사가 아닌 약정 만기 흐름에는 바로 질문 버튼 없음`, a === 0 && b === 0);
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',

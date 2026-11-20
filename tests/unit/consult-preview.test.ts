@@ -29,6 +29,7 @@ import {
   phoneState,
   PHONE_VS_VISIT_NOTE,
   PRICE_TERM_TO_CHECK,
+  QUICK_MOVING,
   INSTALL_TO_CHECK,
   GIFT_TO_CHECK,
   PRIVACY_FAQ,
@@ -561,4 +562,12 @@ test('CP28 약정 만료 광고 → 상담: 갱신 선택 상태로 시작, 남�
   for (const c of f.steps[1].choices) assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|대납|면제|확정됩니다|확정돼요|접수|가입|예약|신청|위약금/.test(JSON.stringify(c) + month.keyPoint.reason + days.keyPoint.reason));
   assert.deepEqual(FLOWS.home.steps.map((x) => x.id), ['reason', 'devices', 'tv']);
   assert.match(COMPONENT, /data-ad-draft="renewal"/);
+});
+
+test('CP29 이사 상담 바로 질문 "이삿날 바로 설치돼요?": 정확한 응답, 이사 흐름에서만, 금칙 표현 없음', () => {
+  assert.equal(QUICK_MOVING.label, '이삿날 바로 설치돼요?');
+  assert.equal(QUICK_MOVING.reply, '이삿날 설치가 가능한지는 새 주소와 기사님 일정에 따라 달라요. 이사 날짜가 언제예요?');
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료/.test(QUICK_MOVING.label + QUICK_MOVING.reply));
+  assert.match(COMPONENT, /picks\[0\] === 'moving' && fromAd !== 'renewal'/);
+  assert.match(COMPONENT, /data-quick-reply/);
 });
