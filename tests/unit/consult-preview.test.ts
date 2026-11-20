@@ -29,6 +29,7 @@ import {
   phoneState,
   PHONE_VS_VISIT_NOTE,
   PRICE_TERM_TO_CHECK,
+  QUICK_BUNDLE,
   QUICK_MOVING,
   QUICK_SPEED,
   INSTALL_TO_CHECK,
@@ -580,4 +581,11 @@ test('CP30 가정용 속도 바로 질문: 정확한 응답, 가정용 흐름에
   assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|최고|무조건|보장/.test(QUICK_SPEED.label + QUICK_SPEED.reply));
   assert.match(COMPONENT, /data-quick-btn="speed"/);
   assert.match(COMPONENT, /segment === 'home' \? \(\s*<section className="cp-quick"/);
+});
+
+test('CP31 가정용 가족 결합 바로 질문: 정확한 응답, 추가 가능 여부·금액을 정해 주지 않음', () => {
+  assert.equal(QUICK_BUNDLE.label, '이미 가족 결합을 쓰는데 인터넷을 추가할 수 있나요?');
+  assert.equal(QUICK_BUNDLE.reply, '인터넷을 더 묶을 수 있는지는 결합상품과 이미 묶인 회선 수에 따라 달라요. 지금 쓰는 결합상품 이름을 알고 계세요?');
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|가능해요|무조건|보장/.test(QUICK_BUNDLE.label.replace('추가할 수 있나요','') + QUICK_BUNDLE.reply));
+  assert.match(COMPONENT, /data-quick-btn="bundle"/);
 });

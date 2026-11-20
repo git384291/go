@@ -605,6 +605,33 @@ for (const width of [320, 390]) {
   await o.context.close();
 }
 
+// ── G10. 가정용 가족 결합 바로 질문(PM 7037476609): 세 가정용 경로, 선택 시 답변 하나만, 세 바로 질문을 번갈아 눌러도 하나만 ──
+const BREPLY = '인터넷을 더 묶을 수 있는지는 결합상품과 이미 묶인 회선 수에 따라 달라요. 지금 쓰는 결합상품 이름을 알고 계세요?';
+for (const width of [320, 390]) {
+  for (const route of ['일반 가정용', '광고에서 이사', '광고에서 약정 만기']) {
+    const tag = `[${width}px 결합 바로 질문·${route}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    if (route === '일반 가정용') await click(page, '가정용');
+    else if (route === '광고에서 이사') { await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    else { await page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    const btn = page.locator('[data-quick-btn="bundle"]');
+    check(`${tag} 버튼 표시, 처음엔 응답 없음`, (await btn.count()) === 1 && (await btn.innerText()) === '이미 가족 결합을 쓰는데 인터넷을 추가할 수 있나요?' && (await page.locator('[data-quick-reply]').count()) === 0 && (await noOverflow(page)));
+    await btn.focus();
+    await page.keyboard.press('Enter');
+    const rep = await page.locator('[data-quick-reply]').innerText();
+    check(`${tag} [키보드 Enter] 정확한 응답 하나만·금칙어 없음·가로 넘침 없음`, rep.trim() === BREPLY && !SBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await noOverflow(page)));
+    let only = true;
+    for (const k of ['speed', 'bundle', 'speed', 'bundle']) {
+      await page.locator(`[data-quick-btn="${k}"]`).focus(); await page.keyboard.press('Space');
+      if ((await page.locator('[data-quick-reply]').count()) !== 1 || (await page.locator('[data-quick-reply]').getAttribute('data-quick-reply')) !== k) only = false;
+    }
+    check(`${tag} 속도·결합 바로 질문을 번갈아 눌러도 응답은 눌린 것 하나만`, only);
+    if (width === 390 && route === '일반 가정용') await shot(page, path.join(OUT, '20-quick-bundle-390.png'));
+    check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    await context.close();
+  }
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',
