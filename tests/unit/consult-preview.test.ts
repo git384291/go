@@ -9,6 +9,9 @@ import {
   EXAMPLES,
   FAQ,
   FLOWS,
+  HOME_MOVING_AD_FLOW,
+  AD_ENTRY_PICKS,
+  AD_ENTRY_LABEL,
   COST_ROWS,
   isComplete,
   keyPoint,
@@ -475,4 +478,27 @@ test('CP26 담당자 연결 모의 예시: 네 사례가 각각 하나의 안내
   assert.ok(COMPONENT.indexOf('data-handoff-fold') < COMPONENT.indexOf('data-aux="faq"'));
   assert.ok(!/<details[^>]*cp-handoff-fold[^>]*\bopen\b/.test(COMPONENT));
   assert.ok(!/MOCK_BADGE|모의 결과/.test(COMPONENT), '배지 문구는 별도 컴포넌트·콘텐츠에서만');
+});
+
+test('CP27 광고 시안 → 이사 상담: 이사 선택 상태로 시작, 쓰는 인터넷 선택에 따라 요약이 바뀌고 일반 흐름은 그대로', () => {
+  assert.equal(AD_ENTRY_LABEL, '이사 전 확인 목록 보기');
+  assert.deepEqual([...AD_ENTRY_PICKS], ['moving']);
+  assert.deepEqual(HOME_MOVING_AD_FLOW.steps.map((x) => x.id), ['reason', 'existing', 'devices', 'tv']);
+  assert.deepEqual(FLOWS.home.steps.map((x) => x.id), ['reason', 'devices', 'tv'], '일반 상담 흐름은 바뀌지 않는다');
+  const f = HOME_MOVING_AD_FLOW;
+  assert.equal(isComplete('home', ['moving', 'has', 'some'], f), false);
+  const has = buildSummary('home', ['moving', 'has', 'some', 'daily'], f);
+  const none = buildSummary('home', ['moving', 'none', 'some', 'daily'], f);
+  assert.ok(has.conditions.includes('지금 쓰는 인터넷이 있어요') && !has.conditions.includes('지금은 없어요'));
+  assert.ok(none.conditions.includes('지금은 없어요') && !none.conditions.includes('지금 쓰는 인터넷이 있어요'));
+  assert.ok(has.toCheck.some((t) => t.includes('이전·해지 조건')) && !none.toCheck.some((t) => t.includes('이전·해지 조건')));
+  assert.notDeepEqual(has.general, none.general);
+  // 핵심 비교점은 기본 흐름과 같은 규칙(쓰는 인터넷 답은 규칙 입력에서 뺀다)
+  assert.deepEqual(has.keyPoint, keyPoint('home', ['moving', 'some', 'daily']));
+  // 새 문구에 금액·확정·성공 표현 없음
+  const all = JSON.stringify(f.steps[1]);
+  assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|확정됩니다|확정돼요|접수|가입|예약|신청/.test(all));
+  // 화면: 광고 카드는 시작 화면에서 버튼 하나로만 이어지고 전송·링크·입력이 없다
+  assert.match(COMPONENT, /data-ad-draft="moving"/);
+  assert.match(COMPONENT, /onClick=\{startFromAd\}/);
 });

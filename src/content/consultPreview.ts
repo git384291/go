@@ -200,6 +200,37 @@ const BUSINESS_FLOW: Flow = {
 
 export const FLOWS: Readonly<Record<Segment, Flow>> = { home: HOME_FLOW, business: BUSINESS_FLOW };
 
+// ── 광고 시안 → 상담 연결(PM, 비공개 미리보기 한 곳) ───────────────────────
+// 이사 광고 시안의 '이사 전 확인 목록 보기'를 누르면 가정용·이사가 이미 고른 상태로 시작하고,
+// 바로 '지금 쓰는 인터넷이 있는지'를 묻는다. 일반 상담 흐름(FLOWS)은 그대로다.
+export const AD_ENTRY_LABEL = '이사 전 확인 목록 보기';
+export const AD_ENTRY_NOTE = '비공개 광고 시안(미게시 초안)이에요. 실제 광고가 아니고, 아래 버튼은 이 화면 안의 상담 시안으로만 이어져요.';
+export const AD_ENTRY_PICKS: readonly string[] = ['moving'];
+const EXISTING_STEP: Step = {
+  id: 'existing',
+  question: '지금 쓰는 인터넷이 있나요?',
+  choices: [
+    {
+      id: 'has',
+      label: '지금 쓰는 인터넷이 있어요',
+      reply: '쓰던 인터넷이 있다면 이사할 때 옮길지 끝낼지에 따라 확인할 조건이 달라져요. 해지 비용이나 이전 조건은 지금 확정해 드릴 수 없어요.',
+      general: '쓰던 인터넷이 있으면 약정이 남았는지와 이전·해지 조건을 새 상품 조건과 함께 봐야 해요.',
+      toCheck: ['지금 쓰는 인터넷의 약정 종료 시기와 이전·해지 조건'],
+    },
+    {
+      id: 'none',
+      label: '지금은 없어요',
+      reply: '지금 쓰는 인터넷이 없다면 끝낼 기존 조건 없이 새 주소의 설치 조건부터 보면 돼요. 설치 가능 여부와 설치비는 주소와 건물 조건을 확인해야 알 수 있어요.',
+      general: '쓰는 인터넷이 없으면 해지할 조건은 없고, 새 주소의 설치 조건이 먼저예요.',
+      toCheck: [],
+    },
+  ],
+};
+export const HOME_MOVING_AD_FLOW: Flow = {
+  ...HOME_FLOW,
+  steps: [HOME_FLOW.steps[0], EXISTING_STEP, ...HOME_FLOW.steps.slice(1)],
+};
+
 // 어떤 선택에서도 마지막 요약에 들어가는 확인 항목(가격·혜택을 말하지 않는다). 설치 관련 질문은 한 줄로 한 번만 묻는다
 export const PRICE_TERM_TO_CHECK = '월 요금과 약정 기간(VAT 포함 여부 구분)';
 export const INSTALL_TO_CHECK = '설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점';
@@ -259,8 +290,7 @@ export function keyPoint(segment: Segment, picks: readonly string[]): KeyPoint {
 }
 
 /** 선택한 값으로만 만든다. 모르는 값·범위를 벗어난 값은 무시한다(이전 선택을 고치면 다시 계산) */
-export function buildSummary(segment: Segment, picks: readonly string[]): Summary {
-  const flow = FLOWS[segment];
+export function buildSummary(segment: Segment, picks: readonly string[], flow: Flow = FLOWS[segment]): Summary {
   const conditions: string[] = [`${flow.label} 인터넷·TV`];
   const general: string[] = [];
   const toCheck: string[] = [];
@@ -279,12 +309,13 @@ export function buildSummary(segment: Segment, picks: readonly string[]): Summar
   const head = segment === 'home' ? [PRICE_TERM_TO_CHECK] : [];
   const rest = segment === 'home' ? [] : [PRICE_TERM_TO_CHECK];
   for (const t of [...head, ...selected, ...rest, ...tail]) if (!toCheck.includes(t)) toCheck.push(t);
-  return { keyPoint: keyPoint(segment, picks), conditions, general, toCheck, costs: COST_ROWS };
+  // 핵심 비교점 규칙은 기본 흐름의 답 순서를 쓴다(광고 연결 흐름에만 있는 '쓰는 인터넷' 답은 뺀다)
+  const base = flow.steps.map((st, i) => [st.id, picks[i]] as const).filter(([id]) => id !== 'existing').map(([, v]) => v as string);
+  return { keyPoint: keyPoint(segment, base), conditions, general, toCheck, costs: COST_ROWS };
 }
 
 /** 선택이 모두 끝났는지(요약을 보여 줄 수 있는지) */
-export function isComplete(segment: Segment, picks: readonly string[]): boolean {
-  const flow = FLOWS[segment];
+export function isComplete(segment: Segment, picks: readonly string[], flow: Flow = FLOWS[segment]): boolean {
   return flow.steps.every((step, i) => step.choices.some((c) => c.id === picks[i]));
 }
 

@@ -1,13 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { AD_DRAFTS } from '../content/adDrafts';
 import { ConsultHandoffDemo } from './ConsultHandoffDemo';
 import {
+  AD_ENTRY_LABEL,
+  AD_ENTRY_NOTE,
+  AD_ENTRY_PICKS,
   AI_NOTICE,
   buildSummary,
   EXAMPLES,
   FAQ,
   FLOWS,
+  HOME_MOVING_AD_FLOW,
   isComplete,
   MOCK_CALL_RESULT,
   MOCK_SATURDAY_HOURS_TEXT,
@@ -29,6 +34,8 @@ import {
 export function ConsultPreviewChat({ now }: { now?: Date }) {
   const [segment, setSegment] = useState<Segment | null>(null);
   const [picks, setPicks] = useState<string[]>([]);
+  // 광고 시안에서 들어온 이사 상담인지(질문에 '지금 쓰는 인터넷' 하나가 더 들어간다)
+  const [fromAd, setFromAd] = useState(false);
   const [clock, setClock] = useState<Date | null>(now ?? null);
   const [mockCalled, setMockCalled] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -50,18 +57,26 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
     if (focusTick > 0) focusRef.current?.focus();
   }, [focusTick]);
 
-  const flow = segment ? FLOWS[segment] : null;
-  const complete = segment ? isComplete(segment, picks) : false;
+  const flow = segment ? (fromAd ? HOME_MOVING_AD_FLOW : FLOWS[segment]) : null;
+  const complete = segment && flow ? isComplete(segment, picks, flow) : false;
   const stepIndex = flow ? Math.min(picks.length, flow.steps.length) : 0;
   const currentStep = flow && !complete ? flow.steps[stepIndex] : null;
-  const summary = segment && complete ? buildSummary(segment, picks) : null;
+  const summary = segment && complete ? buildSummary(segment, picks, flow ?? undefined) : null;
   const phone = clock ? phoneState(clock) : { kind: 'hidden' as const };
 
   // 방금 고른 답에 대한 AI 도우미의 안내(현재 질문 바로 위에 보여 준다)
   const lastStep = flow && picks.length > 0 ? flow.steps[picks.length - 1] : null;
   const lastChoice = lastStep ? lastStep.choices.find((c) => c.id === picks[picks.length - 1]) : null;
 
+  const startFromAd = () => {
+    setFromAd(true);
+    setSegment('home');
+    setPicks([...AD_ENTRY_PICKS]);
+    setHistoryOpen(false);
+    setFocusTick((n) => n + 1);
+  };
   const chooseSegment = (s: Segment) => {
+    setFromAd(false);
     setSegment(s);
     setPicks([]);
     setHistoryOpen(false);
@@ -78,6 +93,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
     setFocusTick((n) => n + 1);
   };
   const editSegment = () => {
+    setFromAd(false);
     setSegment(null);
     setPicks([]);
     setHistoryOpen(false);
@@ -118,6 +134,14 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
                 </button>
               ))}
             </div>
+          </section>
+          <section className="cp-ad" data-ad-draft="moving" aria-label="광고 시안(미게시 초안)">
+            <p className="cp-ad-note">{AD_ENTRY_NOTE}</p>
+            <p className="cp-ad-title">{AD_DRAFTS.moving.title}</p>
+            <p className="cp-ad-desc">{AD_DRAFTS.moving.description}</p>
+            <button type="button" className="btn btn-ghost btn-block cp-ad-cta" onClick={startFromAd}>
+              {AD_ENTRY_LABEL}
+            </button>
           </section>
           {notices}
         </>

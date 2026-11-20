@@ -408,6 +408,43 @@ for (const width of [320, 390]) {
   }
 }
 
+// ── G6. 광고 시안 → 이사 상담(PM): 버튼 하나로 이사가 선택된 상태로 시작, 기존 인터넷 유무 선택 → 요약, 선택을 바꾸면 요약 갱신 ──
+for (const width of [320, 390]) {
+  const tag = `[${width}px 이사 광고→상담]`;
+  const { page, context, external, errors } = await openPage(width, NOW_THU);
+  check(`${tag} 시작 화면에 광고 시안(미게시 초안)과 '이사 전 확인 목록 보기' 버튼, 입력칸·링크 없음`, (await page.locator('[data-ad-draft="moving"] .cp-ad-cta').innerText()) === '이사 전 확인 목록 보기' && (await page.locator('[data-ad-draft]').innerText()).includes('미게시 초안') && (await page.locator('input, textarea, a[href]').count()) === 0);
+  await page.locator('.cp-ad-cta').focus();
+  await page.keyboard.press('Enter');
+  const step = await page.locator('.cp-current').getAttribute('data-step');
+  const act = await page.evaluate(() => document.activeElement.className);
+  const hist = await page.locator('details.cp-history').evaluate((e) => e.textContent);
+  check(`${tag} [키보드 Enter] 가정용·이사가 이미 선택된 채 "지금 쓰는 인터넷이 있나요?"부터 묻고, 이사 안내 답이 보이고 초점이 질문으로`, step === 'existing' && act.includes('cp-question') && (await page.locator('.cp-bubble[data-reply]').innerText()).includes('이사를 앞두고 계시군요') && hist.includes('이사해서 새로 알아봐요') && (await page.locator('.cp-progress').innerText()).includes('질문 2/4'));
+  await page.screenshot({ path: path.join(OUT, `11-ad-moving-start-${width}.png`), fullPage: true });
+  await click(page, '지금 쓰는 인터넷이 있어요');
+  await click(page, '3~4개');
+  await click(page, '매일 봐요');
+  const sHas = await summaryText(page);
+  check(`${tag} 쓰는 인터넷 "있어요" 요약: 선택 조건과 이전·해지 확인 항목 표시`, !!sHas && sHas.includes('지금 쓰는 인터넷이 있어요') && sHas.includes('지금 쓰는 인터넷의 약정 종료 시기와 이전·해지 조건') && sHas.includes('이사해서 새로 알아봐요') && sHas.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점'));
+  await page.screenshot({ path: path.join(OUT, `12-ad-moving-has-${width}.png`), fullPage: true });
+  await page.locator('details.cp-history > summary').click();
+  await page.locator('.cp-history-list li', { hasText: '지금 쓰는 인터넷이 있나요' }).locator('.cp-edit').click();
+  check(`${tag} 선택을 고치면 낡은 요약이 사라지고 그 질문부터 다시`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="existing"]').count()) === 1);
+  await click(page, '지금은 없어요');
+  await click(page, '3~4개');
+  await click(page, '매일 봐요');
+  const sNone = await summaryText(page);
+  check(`${tag} "없어요"로 바꾸면 요약이 갱신: 새 선택 표시, 이전·해지 항목과 "있어요" 문구 사라짐`, !!sNone && sNone.includes('지금은 없어요') && !sNone.includes('지금 쓰는 인터넷이 있어요') && !sNone.includes('이전·해지 조건') && sNone.includes('이사해서 새로 알아봐요'));
+  await page.screenshot({ path: path.join(OUT, `13-ad-moving-none-${width}.png`), fullPage: true });
+  // 처음 화면으로 돌아가 일반 가정용 흐름은 그대로(질문 3개, 쓰는 인터넷 질문 없음)
+  await page.locator('details.cp-history > summary').click();
+  await page.locator('.cp-history-list li', { hasText: '집에서 쓰실 건가요' }).locator('.cp-edit').click();
+  await click(page, '가정용');
+  await click(page, '이사해서 새로 알아봐요');
+  check(`${tag} 일반 상담으로 다시 시작하면 질문 3개 흐름 그대로(쓰는 인터넷 질문 없음)`, (await page.locator('.cp-progress').innerText()).includes('질문 2/3') && (await page.locator('.cp-current[data-step="devices"]').count()) === 1);
+  check(`${tag} 가로 넘침 없음·외부 요청 0·저장소 0·입력칸 0·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0, `외부 ${external.length}`);
+  await context.close();
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',
