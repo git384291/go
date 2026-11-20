@@ -35,7 +35,7 @@ test('BG7 승인 상한을 넘는 한도·형식 오류·추가 키는 거부', 
   const bad: unknown[] = [
     base([day('2026-11-23', 1)], 10001), base([day('2026-11-23', 1)], 10000, 30001), base([day('2026-11-23', 1)], 0),
     base([]), base([day('2026-11-23', 1), day('2026-11-24', 1), day('2026-11-25', 1), day('2026-11-26', 1)]),
-    base([day('2026-02-30', 1)]), base([day('2026-11-23', -1)]), base([day('2026-11-23', 1.5)]), base([day('2026-11-23', '1')]),
+    base([day('2026-02-30', 1)]), base([day('2026-11-23', -1)]), base([day('2026-11-23', 1.5)]), base([{ date: '2026-11-23', spendKrw: '1' }]),
     { ...base([day('2026-11-23', 1)]), extra: 1 }, null, [], 'x',
   ];
   for (const b of bad) assert.deepEqual(judgeSpend(b), { ok: false, error: 'INVALID_INPUT' }, JSON.stringify(b));
