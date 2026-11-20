@@ -667,6 +667,33 @@ for (const width of [320, 390]) {
   check(`[${width}px 장비 반납 바로 질문] 이사·사업장 흐름에는 표시 안 됨`, m === 0 && n === 0);
 }
 
+// ── G12. 가족 결합 후속 "결합상품 이름을 모르겠어요"(PM 7038180830): 결합 질문 → 이름 모름 → 안내, 응답은 하나만 ──
+const UREPLY = '이용 중인 통신사 앱이나 청구서에서 결합상품 이름을 찾아보세요. 찾기 어려우면 통신사 고객센터에서도 확인할 수 있어요.';
+for (const width of [320, 390]) {
+  for (const route of ['일반 가정용', '광고에서 이사', '광고에서 약정 만기']) {
+    const tag = `[${width}px 결합 이름 모름·${route}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    if (route === '일반 가정용') await click(page, '가정용');
+    else if (route === '광고에서 이사') { await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    else { await page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    check(`${tag} 결합 질문 전에는 후속 선택 없음`, (await page.locator('[data-quick-btn="bundle-unknown"]').count()) === 0);
+    await page.locator('[data-quick-btn="bundle"]').focus(); await page.keyboard.press('Enter');
+    const first = await page.locator('[data-quick-reply]').innerText();
+    const u = page.locator('[data-quick-btn="bundle-unknown"]');
+    check(`${tag} 결합 응답(결합상품 이름 질문) 뒤에 "결합상품 이름을 모르겠어요" 선택이 이어짐`, first.includes('지금 쓰는 결합상품 이름을 알고 계세요?') && (await u.count()) === 1 && (await u.innerText()) === '결합상품 이름을 모르겠어요');
+    await u.focus(); await page.keyboard.press('Enter');
+    const rep = await page.locator('[data-quick-reply]').innerText();
+    check(`${tag} [키보드 Enter] 이름 모름 안내 하나만 표시(결합 질문 응답은 대체)·금칙어 없음·가로 넘침 없음`, rep.trim() === UREPLY && !SBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && !(await page.locator('[data-quick-reply]').innerText()).includes('알고 계세요') && (await noOverflow(page)));
+    await page.keyboard.press('Space');
+    check(`${tag} 다시 눌러도 안내 하나만`, (await page.locator('[data-quick-reply]').count()) === 1);
+    await page.locator('[data-quick-btn="speed"]').focus(); await page.keyboard.press('Enter');
+    check(`${tag} 다른 바로 질문을 누르면 후속 선택·이전 안내가 사라짐`, (await page.locator('[data-quick-btn="bundle-unknown"]').count()) === 0 && (await page.locator('[data-quick-reply]').getAttribute('data-quick-reply')) === 'speed');
+    if (width === 390 && route === '일반 가정용') { await page.locator('[data-quick-btn="bundle"]').focus(); await page.keyboard.press('Enter'); await page.locator('[data-quick-btn="bundle-unknown"]').focus(); await page.keyboard.press('Enter'); await shot(page, path.join(OUT, '22-quick-bundle-unknown-390.png')); }
+    check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    await context.close();
+  }
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',

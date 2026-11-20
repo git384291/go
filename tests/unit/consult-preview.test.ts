@@ -30,6 +30,7 @@ import {
   PHONE_VS_VISIT_NOTE,
   PRICE_TERM_TO_CHECK,
   QUICK_BUNDLE,
+  QUICK_BUNDLE_UNKNOWN,
   QUICK_MOVING,
   QUICK_RETURN,
   QUICK_SPEED,
@@ -596,4 +597,11 @@ test('CP32 약정 만기 장비 반납 바로 질문: 정확한 응답, 약정 �
   assert.equal(QUICK_RETURN.reply, '기존 통신사에 반납할 장비 목록과 반납 방법을 확인해 주세요. 수거 일정이 잡힐 때까지 공유기와 셋톱박스, 전원 어댑터는 함께 보관해 주세요.');
   assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(QUICK_RETURN.label + QUICK_RETURN.reply));
   assert.match(COMPONENT, /picks\[0\] === 'renewal' \? \(\s*<button[^>]*data-quick-btn="return"/);
+});
+
+test('CP33 가족 결합 후속 "결합상품 이름을 모르겠어요": 정확한 안내, 결합 질문 뒤에만 이어짐, 확정 표현 없음', () => {
+  assert.equal(QUICK_BUNDLE_UNKNOWN.label, '결합상품 이름을 모르겠어요');
+  assert.equal(QUICK_BUNDLE_UNKNOWN.reply, '이용 중인 통신사 앱이나 청구서에서 결합상품 이름을 찾아보세요. 찾기 어려우면 통신사 고객센터에서도 확인할 수 있어요.');
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(QUICK_BUNDLE_UNKNOWN.label + QUICK_BUNDLE_UNKNOWN.reply));
+  assert.match(COMPONENT, /quick === 'bundle' \|\| quick === 'bundle_unknown' \? \(\s*<button[^>]*data-quick-btn="bundle-unknown"/);
 });

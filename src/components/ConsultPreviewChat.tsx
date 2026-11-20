@@ -25,6 +25,7 @@ import {
   phoneState,
   PHONE_VS_VISIT_NOTE,
   QUICK_BUNDLE,
+  QUICK_BUNDLE_UNKNOWN,
   QUICK_MOVING,
   QUICK_RETURN,
   QUICK_SPEED,
@@ -46,7 +47,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   const [picks, setPicks] = useState<string[]>([]);
   // 광고 시안에서 들어온 이사 상담인지(질문에 '지금 쓰는 인터넷' 하나가 더 들어간다)
   // 이사 상담에서 고른 바로 질문(답을 하나만 보여 주고, 다음 선택·고치기를 하면 지운다)
-  const [quick, setQuick] = useState<'moving' | 'speed' | 'bundle' | 'return' | null>(null);
+  const [quick, setQuick] = useState<'moving' | 'speed' | 'bundle' | 'bundle_unknown' | 'return' | null>(null);
   const [fromAd, setFromAd] = useState<'moving' | 'renewal' | null>(null);
   const [clock, setClock] = useState<Date | null>(now ?? null);
   const [mockCalled, setMockCalled] = useState(false);
@@ -285,8 +286,13 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
               ) : null}
               {quick ? (
                 <div className="cp-bubble cp-bot" data-quick-reply={quick} role="status">
-                  <p>{quick === 'moving' ? QUICK_MOVING.reply : quick === 'speed' ? QUICK_SPEED.reply : quick === 'return' ? QUICK_RETURN.reply : QUICK_BUNDLE.reply}</p>
+                  <p>{quick === 'moving' ? QUICK_MOVING.reply : quick === 'speed' ? QUICK_SPEED.reply : quick === 'return' ? QUICK_RETURN.reply : quick === 'bundle_unknown' ? QUICK_BUNDLE_UNKNOWN.reply : QUICK_BUNDLE.reply}</p>
                 </div>
+              ) : null}
+              {quick === 'bundle' || quick === 'bundle_unknown' ? (
+                <button type="button" className="btn btn-ghost btn-block cp-quick-btn" data-quick-btn="bundle-unknown" aria-pressed={quick === 'bundle_unknown'} onClick={() => setQuick('bundle_unknown')}>
+                  {QUICK_BUNDLE_UNKNOWN.label}
+                </button>
               ) : null}
             </section>
           ) : null}
