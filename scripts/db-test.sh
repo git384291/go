@@ -55,6 +55,7 @@ run db/tests/30_leads_pii.sql >/dev/null
 run db/tests/40_product_scope.sql >/dev/null   # PHASE 1 상품 상태·2인 승인
 run db/tests/45_product_scope_hardening.sql >/dev/null   # PHASE 1 보완: 승인 서명 재사용 방지
 run db/tests/50_required_notices.sql >/dev/null   # 필수 고지 문구·버전·노출 기록(0007)
+run db/tests/60_policy_store.sql >/dev/null   # 정책 저장소(0008)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -402,31 +403,50 @@ fi
 SQL "drop table core.commissions_probe, core.settlement_ledger_probe"
 rm -f "$LOG_DIR/probe.err"
 
-echo "== migration drill: 0007 적용(기존 데이터 보존) → 롤백 → 재적용 (별도 가상 DB)"
+echo "== migration drill: 0007·0008 적용(기존 데이터 보존) → 롤백(고지·정책 보관) → 복구 → 재적용 (별도 가상 DB)"
 DRILL=fideon_drill
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" -c "create database $DRILL" >/dev/null
-for f in db/migrations/000[1-6]_*.sql db/migrations/zz_grants.sql; do "${PSQL[@]}" -d "$DRILL" -f "$f" >/dev/null; done
-"${PSQL[@]}" -d "$DRILL" -f db/seed/test_seed.sql >/dev/null
-d_before=$("${PSQL[@]}" -d "$DRILL" -At -c "select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)")
-"${PSQL[@]}" -d "$DRILL" -f db/migrations/0007_required_notices.sql >/dev/null
-"${PSQL[@]}" -d "$DRILL" -f db/migrations/zz_grants.sql >/dev/null 2>&1
-d_after=$("${PSQL[@]}" -d "$DRILL" -At -c "select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)")
-[ "$d_before" = "$d_after" ] || { echo "FAIL | M1 0007 적용 뒤 기존 데이터 건수 변화 $d_before → $d_after" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-echo "NOTICE:  PASS | M1 0007 적용 뒤 기존 리드·고객·동의 건수 그대로 ($d_after)" >> "$LOG_DIR/db-test.log"
-"${PSQL[@]}" -d "$DRILL" -f db/rollback/0007_down.sql >/dev/null
-"${PSQL[@]}" -d "$DRILL" -f db/migrations/zz_grants.sql >/dev/null 2>&1
-d_down=$("${PSQL[@]}" -d "$DRILL" -At -c "select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)")
+D() { "${PSQL[@]}" -d "$DRILL" "$@"; }
+for f in db/migrations/000[1-6]_*.sql; do D -f "$f" >/dev/null; done
+D -f db/seed/test_seed.sql >/dev/null
+CNT="select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)"
+d_before=$(D -At -c "$CNT")
+D -f db/migrations/0007_required_notices.sql >/dev/null
+D -f db/migrations/0008_policy_store.sql >/dev/null
+d_after=$(D -At -c "$CNT")
+[ "$d_before" = "$d_after" ] || { echo "FAIL | M1 0007·0008 적용 뒤 기존 데이터 건수 변화 $d_before → $d_after" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M1 0007·0008 적용 뒤 기존 리드·고객·동의 건수 그대로 ($d_after)" >> "$LOG_DIR/db-test.log"
+# 고지·정책 기록을 만들어 롤백 때 보존되는지 본다(가상 값)
+D -f db/seed/test_notices.sql >/dev/null
+D -q -c "insert into pii.notice_exposures (customer_id, doc_version, notice_key, body_sha256, channel)
+         select '20000000-0000-4000-8000-000000000001', n.version, n.notice_key, n.body_sha256, 'web' from core.notice_texts n"
+D -q -c "insert into core.policy_versions (supplier_id, segment, carrier, product_id, category, revision, state, source_kind, confirmed_at, valid_from, valid_until, product_label, terms, content_hash, created_by)
+         values ('supplier-a', 'household', 'carrier-x', 'p1', 'internet_tv', 1, 'draft', 'official_policy_sheet', now(), now(), now() + interval '1 day', '가상',
+           '{\"monthlyFee\":{\"known\":false},\"contractMonths\":{\"known\":false},\"equipmentMonthlyFee\":{\"known\":false},\"installFee\":{\"known\":false},\"bundlePrerequisites\":{\"known\":false},\"regionScope\":{\"known\":false},\"customerBenefit\":{\"known\":false}}'::jsonb,
+           repeat('a', 64), '00000000-0000-4000-8000-000000000001')"
+n_exp=$(D -At -c "select count(*) from pii.notice_exposures"); n_pol=$(D -At -c "select count(*) from core.policy_versions")
+D -f db/rollback/0008_down.sql >/dev/null
+D -f db/rollback/0007_down.sql >/dev/null
+d_down=$(D -At -c "$CNT")
 [ "$d_before" = "$d_down" ] || { echo "FAIL | M2 롤백 뒤 기존 데이터 건수 변화 $d_before → $d_down" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-gone=$("${PSQL[@]}" -d "$DRILL" -At -c "select (to_regclass('core.notice_texts') is null and to_regclass('pii.notice_exposures') is null)::text")
+gone=$(D -At -c "select (to_regclass('core.notice_texts') is null and to_regclass('pii.notice_exposures') is null and to_regclass('core.policy_versions') is null)::text")
 [ "$gone" = true ] || { echo "FAIL | M3 롤백 뒤 새 테이블이 남음" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-d_md5=$("${PSQL[@]}" -d "$DRILL" -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
+d_md5=$(D -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
 [ "$d_md5" = "a99eddfc2884a4e7e588925a5664c811" ] || { echo "FAIL | M4 롤백 뒤 create_lead가 0004 본문이 아님 ($d_md5)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-echo "NOTICE:  PASS | M2~M4 롤백: 데이터 보존, 새 테이블 제거, create_lead 0004 본문 복원" >> "$LOG_DIR/db-test.log"
-"${PSQL[@]}" -d "$DRILL" -f db/migrations/0007_required_notices.sql >/dev/null
-"${PSQL[@]}" -d "$DRILL" -f db/migrations/zz_grants.sql >/dev/null 2>&1
-d_re=$("${PSQL[@]}" -d "$DRILL" -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
+a_exp=$(D -At -c "select count(*) from pii.notice_exposures_rollback_archive"); a_pol=$(D -At -c "select count(*) from core.policy_versions_rollback_archive")
+[ "$a_exp" = "$n_exp" ] && [ "$a_pol" = "$n_pol" ] && [ "$n_exp" -gt 0 ] || { echo "FAIL | M6 롤백 보관본 건수 불일치 exp $n_exp/$a_exp pol $n_pol/$a_pol" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M2~M4·M6 롤백: 기존 데이터 보존, 새 테이블 제거, create_lead 0004 본문, 고지 노출 $a_exp건·정책 $a_pol건 보관" >> "$LOG_DIR/db-test.log"
+if D -q -f db/rollback/0007_down.sql >/dev/null 2>&1; then echo "FAIL | M7 보관본이 있는데 롤백이 다시 성공(덮어쓰기)" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
+echo "NOTICE:  PASS | M7 보관본이 있으면 롤백이 실패(덮어쓰지 않음)" >> "$LOG_DIR/db-test.log"
+D -f db/migrations/0007_required_notices.sql >/dev/null
+D -f db/migrations/0008_policy_store.sql >/dev/null
+D -q -f db/rollback/0007_restore.sql >/dev/null
+D -q -f db/rollback/0008_restore.sql >/dev/null
+r_exp=$(D -At -c "select count(*) from pii.notice_exposures"); r_pol=$(D -At -c "select count(*) from core.policy_versions")
+[ "$r_exp" = "$n_exp" ] && [ "$r_pol" = "$n_pol" ] || { echo "FAIL | M8 복구 건수 불일치 exp $n_exp/$r_exp pol $n_pol/$r_pol" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+d_re=$(D -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
 [ "$d_re" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | M5 재적용 뒤 create_lead 본문이 고정 해시와 다름" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-echo "NOTICE:  PASS | M5 롤백 뒤 0007 재적용 정상" >> "$LOG_DIR/db-test.log"
+echo "NOTICE:  PASS | M5·M8 재적용·복구: 고지 노출 $r_exp건·정책 $r_pol건 되살림, create_lead 고정 해시 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

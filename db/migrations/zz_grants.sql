@@ -78,11 +78,13 @@ $$;
 grant execute on function
   security.assert_staff(uuid, uuid, text, text[]),
   security.verify_token(text, text, text[]),
-  core.purge_customer_internal(uuid, uuid, text)
+  core.purge_customer_internal(uuid, uuid, text),
+  core.policy_terms_shape(jsonb)   -- 0008: terms 형태 검사(check 제약이 쓴다)
   to fideon_api;
 
 grant execute on function
-  api.create_lead(text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text)
+  api.create_lead(text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text),
+  api.policy_published()
   to app_public;
 
 grant execute on function
@@ -95,7 +97,11 @@ grant execute on function
   api.assign_lead(uuid, uuid, text, uuid, uuid),
   api.export_leads_masked(uuid, uuid, text, date, date),
   api.set_feature_flag(uuid, uuid, text, text, boolean, text),
-  api.purge_customer(uuid, uuid, text, uuid, text)
+  api.purge_customer(uuid, uuid, text, uuid, text),
+  api.policy_create_draft(uuid, uuid, text, text, text, text, text, text, text, timestamptz, timestamptz, timestamptz, text, jsonb),
+  api.policy_submit(uuid, uuid, text, uuid),
+  api.policy_approve(uuid, uuid, text, uuid, text, jsonb),
+  api.policy_reject(uuid, uuid, text, uuid, text)
   to app_staff;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.

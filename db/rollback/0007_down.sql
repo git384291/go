@@ -1,7 +1,14 @@
 -- 0007 롤백: api.create_lead를 0004 정의로 되돌리고 필수 고지 테이블을 삭제한다. 접수·동의 등 기존 데이터는 건드리지 않는다.
--- 롤백 시 db/audit/catalog_audit.sql의 create_lead 고정 해시도 이전 값(a99eddfc…)으로 되돌린다.
--- 고지 노출 기록(pii.notice_exposures)은 삭제되므로 필요하면 실행 전에 백업한다. 실행 뒤 zz_grants.sql을 다시 실행한다.
+-- 고지 문구와 고객별 노출 기록은 삭제 전에 보관 테이블로 옮긴다(삭제하지 않고 보존, PM 11/21 6항).
+--   core.notice_texts_rollback_archive, pii.notice_exposures_rollback_archive (FK 없는 복사본)
+--   이미 보관 테이블이 있으면 이 스크립트는 실패한다(이전 보관본을 덮어쓰지 않는다). 먼저 0007_restore.sql로 복구하거나 보관본 이름을 바꾼다.
+-- 복구: 0007을 다시 적용한 뒤 db/rollback/0007_restore.sql 실행(고객이 이미 파기된 노출 기록은 건너뛰고 건수를 알려 준다).
+-- 롤백 시 db/audit/catalog_audit.sql의 create_lead 고정 해시도 이전 값(a99eddfc…)으로 되돌리고, 마지막에 zz_grants.sql을 다시 실행한다.
+-- 보관 테이블에는 고객 식별자(customer_id)가 들어 있다. 보존기간이 지나면 고객 파기 절차와 같은 기준으로 삭제한다.
 begin;
+
+create table core.notice_texts_rollback_archive as table core.notice_texts;
+create table pii.notice_exposures_rollback_archive as table pii.notice_exposures;
 
 create or replace function api.create_lead(
   p_token text,
@@ -120,8 +127,8 @@ begin
 end
 $$;
 
-drop table if exists pii.notice_exposures;
-drop table if exists core.notice_texts;
+drop table pii.notice_exposures;
+drop table core.notice_texts;
 drop function if exists core.notice_texts_guard();
 
 commit;

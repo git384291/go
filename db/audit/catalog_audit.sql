@@ -23,11 +23,13 @@ guarded_funcs as (
 ),
 exec_allow(rolname, proname) as (
   values
-    ('app_public', 'create_lead'),
+    ('app_public', 'create_lead'), ('app_public', 'policy_published'),
     ('app_staff', 'staff_session_open'), ('app_staff', 'staff_session_revoke'), ('app_staff', 'whoami'),
     ('app_staff', 'list_leads'), ('app_staff', 'reveal_contact'), ('app_staff', 'update_lead'),
     ('app_staff', 'assign_lead'), ('app_staff', 'export_leads_masked'), ('app_staff', 'set_feature_flag'),
     ('app_staff', 'purge_customer'),
+    -- 0008 정책 저장소(PM 11/21): 쓰기 함수 4개는 직원 서명·역할로, 게시 조회는 고객 견적 필드만 돌려준다
+    ('app_staff', 'policy_create_draft'), ('app_staff', 'policy_submit'), ('app_staff', 'policy_approve'), ('app_staff', 'policy_reject'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),
