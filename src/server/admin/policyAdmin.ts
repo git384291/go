@@ -3,7 +3,6 @@ import type { AdminAuthMode } from '../auth/adminAuthMode';
 import { StaffAuthError } from '../auth/staffAssertion';
 import type { StaffIdentity } from '../auth/staffSession';
 import { quotePolicy } from '@/server/policies';
-import type { TxRunner } from './leadsReadStore';
 import { dbReadReady } from './leadsSource';
 
 /**
@@ -15,6 +14,9 @@ import { dbReadReady } from './leadsSource';
  * - DB 오류는 허용 목록 코드로만 바꿔 응답한다(SQL 메시지·접속 정보 비노출).
  * - '게시'는 승인과 별개다: DB 스위치 policy_publish를 켜는 것은 이 화면의 범위가 아니다(기존 set_feature_flag 경로).
  */
+/** DB 실행기 모양(구조적 타입). 리드 어댑터 모듈과 분리해 둔다 */
+export type SqlTag = (strings: TemplateStringsArray, ...values: unknown[]) => PromiseLike<readonly unknown[]>;
+export type TxRunner = <T>(fn: (tx: SqlTag) => Promise<T>) => Promise<T>;
 type Env = Readonly<Record<string, string | undefined>>;
 export type PolicyAdminDeps = {
   env: () => Env;

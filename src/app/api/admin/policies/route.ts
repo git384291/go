@@ -1,7 +1,6 @@
 import { adminAuthMode } from '@/server/auth/adminAuthMode';
 import { requireStaff } from '@/server/auth/requireStaff';
-import { createPolicyDraft, listPolicies, type PolicyAdminDeps } from '@/server/admin/policyAdmin';
-import type { SqlTag } from '@/server/admin/leadsReadStore';
+import { createPolicyDraft, listPolicies, type PolicyAdminDeps, type SqlTag } from '@/server/admin/policyAdmin';
 import { withRole } from '@/server/db/client';
 
 // 관리자 정책 목록·초안 업로드. 기본 닫힘(ADMIN_POLICY_SOURCE=db + 지정된 로컬 폐기 DB에서만). 권한 판정은 DB 함수가 한다.

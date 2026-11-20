@@ -16,6 +16,7 @@ const ctx = {
   }),
   signingKey: { keyId: 1, secret: Buffer.alloc(32, 0x22) },
   currentPrivacyVersion: 'privacy-test-v1',
+  notices: { version: 'privacy-test-v1', confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: '시험용 문구' }] },
   clientIp: '203.0.113.10',
   nowSeconds: 1_800_000_000,
 };

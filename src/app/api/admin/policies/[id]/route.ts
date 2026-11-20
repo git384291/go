@@ -1,7 +1,6 @@
 import { adminAuthMode } from '@/server/auth/adminAuthMode';
 import { requireStaff } from '@/server/auth/requireStaff';
-import { policyAction, type PolicyAdminDeps } from '@/server/admin/policyAdmin';
-import type { SqlTag } from '@/server/admin/leadsReadStore';
+import { policyAction, type PolicyAdminDeps, type SqlTag } from '@/server/admin/policyAdmin';
 import { withRole } from '@/server/db/client';
 
 // 정책 제출·승인·반려. 승인·반려는 owner만(서버가 한 번 더 좁히고 DB 함수가 최종 판정).

@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
 import { adminAuthMode } from '@/server/auth/adminAuthMode';
 import { requireStaff } from '@/server/auth/requireStaff';
-import { listPolicies, type PolicyAdminDeps } from '@/server/admin/policyAdmin';
-import type { SqlTag } from '@/server/admin/leadsReadStore';
+import { listPolicies, type PolicyAdminDeps, type SqlTag } from '@/server/admin/policyAdmin';
 import { withRole } from '@/server/db/client';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from './PolicyAdminView';
 
