@@ -54,7 +54,7 @@ select test.expect_eq($$
       'app_staff -> list_leads', 'app_staff -> reveal_contact', 'app_staff -> update_lead',
       'app_staff -> assign_lead', 'app_staff -> export_leads_masked', 'app_staff -> set_feature_flag',
       'app_staff -> purge_customer',
-      'app_staff -> policy_create_draft', 'app_staff -> policy_submit', 'app_staff -> policy_approve', 'app_staff -> policy_reject',
+      'app_staff -> policy_create_draft', 'app_staff -> policy_submit', 'app_staff -> policy_approve', 'app_staff -> policy_reject', 'app_staff -> policy_list',
       -- app_server는 두 역할의 멤버지만 NOINHERIT라 직접 실행 권한이 없어야 한다
       'none'])
   ) t$$, '', 'G5 EXECUTE 허용 목록 외 권한 0');

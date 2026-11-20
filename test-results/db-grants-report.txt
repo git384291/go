@@ -7,6 +7,7 @@
  api.list_leads                  | fideon_api | app_staff, fideon_api  | t
  api.policy_approve              | fideon_api | app_staff, fideon_api  | t
  api.policy_create_draft         | fideon_api | app_staff, fideon_api  | t
+ api.policy_list                 | fideon_api | app_staff, fideon_api  | t
  api.policy_published            | fideon_api | app_public, fideon_api | t
  api.policy_reject               | fideon_api | app_staff, fideon_api  | t
  api.policy_submit               | fideon_api | app_staff, fideon_api  | t
@@ -23,7 +24,7 @@
  core.product_catalog_guard      | postgres   |                        | t
  security.assert_staff           | postgres   | fideon_api             | t
  security.verify_token           | postgres   | fideon_api             | t
-(22 rows)
+(23 rows)
 
 psql:db/tests/10_grants.sql:21: NOTICE:  PASS | G1 모든 테이블 RLS+FORCE | 0
  expect_eq 

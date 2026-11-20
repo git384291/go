@@ -56,6 +56,7 @@ run db/tests/40_product_scope.sql >/dev/null   # PHASE 1 상품 상태·2인 승
 run db/tests/45_product_scope_hardening.sql >/dev/null   # PHASE 1 보완: 승인 서명 재사용 방지
 run db/tests/50_required_notices.sql >/dev/null   # 필수 고지 문구·버전·노출 기록(0007)
 run db/tests/60_policy_store.sql >/dev/null   # 정책 저장소(0008)
+run db/tests/61_policy_list.sql >/dev/null   # 정책 조회 함수(0009)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -442,6 +443,7 @@ CNT="select (select count(*) from core.leads) || '/' || (select count(*) from pi
 d_before=$(D -At -c "$CNT")
 D -f db/migrations/0007_required_notices.sql >/dev/null
 D -f db/migrations/0008_policy_store.sql >/dev/null
+D -f db/migrations/0009_policy_list.sql >/dev/null
 d_after=$(D -At -c "$CNT")
 [ "$d_before" = "$d_after" ] || { echo "FAIL | M1 0007·0008 적용 뒤 기존 데이터 건수 변화 $d_before → $d_after" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M1 0007·0008 적용 뒤 기존 리드·고객·동의 건수 그대로 ($d_after)" >> "$LOG_DIR/db-test.log"
@@ -454,6 +456,7 @@ D -q -c "insert into core.policy_versions (supplier_id, segment, carrier, produc
            '{\"monthlyFee\":{\"known\":false},\"contractMonths\":{\"known\":false},\"equipmentMonthlyFee\":{\"known\":false},\"installFee\":{\"known\":false},\"bundlePrerequisites\":{\"known\":false},\"regionScope\":{\"known\":false},\"customerBenefit\":{\"known\":false}}'::jsonb,
            repeat('a', 64), '00000000-0000-4000-8000-000000000001')"
 n_exp=$(D -At -c "select count(*) from pii.notice_exposures"); n_pol=$(D -At -c "select count(*) from core.policy_versions")
+D -f db/rollback/0009_down.sql >/dev/null
 D -f db/rollback/0008_down.sql >/dev/null
 D -f db/rollback/0007_down.sql >/dev/null
 d_down=$(D -At -c "$CNT")
@@ -477,6 +480,7 @@ if D -q -f db/rollback/0007_down.sql >/dev/null 2>&1; then echo "FAIL | M7 보�
 echo "NOTICE:  PASS | M7 보관본이 있으면 롤백이 실패(덮어쓰지 않음)" >> "$LOG_DIR/db-test.log"
 D -f db/migrations/0007_required_notices.sql >/dev/null
 D -f db/migrations/0008_policy_store.sql >/dev/null
+D -f db/migrations/0009_policy_list.sql >/dev/null
 D -q -f db/rollback/0007_restore.sql >/dev/null
 D -q -f db/rollback/0008_restore.sql >/dev/null
 r_exp=$(D -At -c "select count(*) from pii.notice_exposures"); r_pol=$(D -At -c "select count(*) from core.policy_versions")

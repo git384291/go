@@ -15,6 +15,7 @@ import { AdminMockView } from '../../src/app/admin/AdminMockView';
 import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
 import { ProgressView } from '../../src/app/admin/progress/ProgressView';
 import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
+import { PolicyAdminView, PolicyLocked, type PolicyRow } from '../../src/app/admin/policies/PolicyAdminView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
 import { resolveOfficialIntake, type OfficialIntakeResult } from '../../src/content/officialIntake';
@@ -139,6 +140,12 @@ async function guideInteraction(page: Page, intakeOn: boolean, requests: () => n
     + `\t상품안내 신청 안내=${applyOk}\t상품안내 보장·AI 표현 없음=${!GUARANTEE.test(text)}\t상품안내 주소 변화 없음=${same}\t상품안내 입력·외부요소=${inputs}\t상품안내 요청=${reqs}`;
 }
 
+const POLICY_FIXTURE: PolicyRow[] = [
+  { id: '10000000-0000-4000-8000-000000000001', supplier_id: 'sample-supplier', segment: 'household', carrier: 'sample-carrier', product_id: 'sample-1', category: 'internet_tv', revision: 1, state: 'submitted', source_kind: 'official_policy_sheet', product_label: '인터넷+TV 샘플', confirmed_at: '2026-11-21T09:00:00+09:00', valid_from: '2026-11-21T00:00:00+09:00', valid_until: '2026-11-30T00:00:00+09:00', content_hash: 'ab12cd34ef56', self_approval: false, decided_at: null, decision_reason: null },
+  { id: '10000000-0000-4000-8000-000000000002', supplier_id: 'sample-supplier', segment: 'household', carrier: 'sample-carrier', product_id: 'sample-2', category: 'internet_tv', revision: 2, state: 'approved', source_kind: 'distributor_notice', product_label: '인터넷+TV 샘플 B', confirmed_at: '2026-11-20T09:00:00+09:00', valid_from: '2026-11-20T00:00:00+09:00', valid_until: '2026-11-30T00:00:00+09:00', content_hash: '99aa88bb77cc', self_approval: false, decided_at: '2026-11-20T10:00:00+09:00', decision_reason: '정책표와 대조 완료' },
+  { id: '10000000-0000-4000-8000-000000000003', supplier_id: 'sample-supplier', segment: 'household', carrier: 'sample-carrier', product_id: 'sample-3', category: 'internet_tv', revision: 1, state: 'draft', source_kind: 'training_material', product_label: '인터넷+TV 샘플 C', confirmed_at: '2026-11-19T09:00:00+09:00', valid_from: '2026-11-19T00:00:00+09:00', valid_until: '2026-11-30T00:00:00+09:00', content_hash: '1122334455aa', self_approval: false, decided_at: null, decision_reason: null },
+];
+
 const OUT = process.argv[2] ?? 'test-results/screens';
 // 검사 폭: 좁은 휴대폰(320)과 일반 휴대폰(390). 둘 다 통과해야 한다.
 const WIDTHS = [320, 390] as const;
@@ -155,6 +162,10 @@ async function main() {
     // 로컬 시험용 읽기 전용 목록(가상 7키 DTO, 실제 데이터 아님)과 잠금 화면
     ['09-admin-read', <LeadsReadView key="read" items={READ_FIXTURE} actor={READ_ACTOR} offset={20} limit={2} headerExtra={<span className="admin-role">대표</span>} />],
     ['10-admin-read-locked', <LeadsReadLocked key="read-locked" kind="failed" />],
+    // 관리자 정책 화면(가상 목록, 실제 정책 아님): 대표 / 정책 담당 / 잠금
+    ['16-admin-policies-owner', <PolicyAdminView key="pol-owner" items={POLICY_FIXTURE} role="owner" publishOn={false} />],
+    ['17-admin-policies-editor', <PolicyAdminView key="pol-editor" items={POLICY_FIXTURE} role="policy_editor" publishOn={false} />],
+    ['18-admin-policies-locked', <PolicyLocked key="pol-locked" kind="disabled" />],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
     ['11-official-intake-fake', <PageShell key="intake-fake"><section className="hero"><h1>가상 공식 접수처 표시</h1><OfficialIntakeCta intake={FAKE_INTAKE} /></section></PageShell>],
     // 선택형 상품 안내 패널(실제 코드 상수는 false). 가상 켜짐 화면: 접수 꺼짐(12)과 가상 접수 켜짐(13). 공개 화면 아님
