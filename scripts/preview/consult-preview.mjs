@@ -513,15 +513,18 @@ for (const width of [320, 390]) {
   await card.locator('.cp-ad-cta').focus();
   await page.keyboard.press('Enter');
   check(`${tag} [키보드 Enter] 가정용·약정 비교가 선택된 채 "약정이 끝나기까지 얼마나 남았나요?"부터 묻고 초점이 질문으로`, (await page.locator('.cp-current').getAttribute('data-step')) === 'remaining' && (await active(page)).cls.includes('cp-question') && (await page.locator('details.cp-history').evaluate((e) => e.textContent)).includes('쓰던 약정이 끝나서 비교해요'));
-  const runRem = async (label, expectPoint, forbid) => {
+  const BAN = /\d[\d,]*\s*원|할인|무료|혜택|지원금|대납|면제|확정됩니다|확정돼요|접수|가입 완료|신청 완료|예약|연결 완료|설치비는 처음|전화번호|휴대폰/;
+  const runRem = async (label, expectPoint, forbid, expectReply) => {
     await page.locator('.cp-current .cp-choice', { hasText: label }).focus();
     await page.keyboard.press('Enter');
+    const bubble = await page.locator('.cp-bubble[data-reply]').innerText();
+    check(`${tag} "${label}" 응답 문구 그대로 표시·금칙어 없음`, bubble.trim() === expectReply && !BAN.test(bubble), bubble.slice(0, 40));
     for (const t of ['3~4대', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
     const first = await summaryFirstLine(page);
     const sum = await summaryText(page);
     return !!sum && first.includes(expectPoint) && forbid.every((f) => !sum.includes(f)) && (await noOverflow(page));
   };
-  const okMonth = await runRem('한 달쯤 남았어요', '재약정 제안과 변경 비용 비교', ['며칠 남았어요', '희망 변경일', '정확한 종료일']);
+  const okMonth = await runRem('한 달쯤 남았어요', '재약정 제안과 변경 비용 비교', ['며칠 남았어요', '희망 변경일', '정확한 종료일'], '지금 옮기면 두 회선의 이용 기간이 겹칠 수 있어요. 기존 약정은 언제 끝나세요?');
   await settle(page);
   const mc = await contrastOf(page, '.cp-summary .cp-keypoint strong, .cp-summary .cp-keypoint-reason, .cp-summary li');
   check(`${tag} "한 달쯤" 요약 맨 위: 재약정 제안과 변경 비용 비교(며칠 남음 안내 없음), 글자 대비 ≥4.5:1`, okMonth && mc.every((x) => x.ratio >= 4.5 && x.op === 1));
@@ -529,7 +532,7 @@ for (const width of [320, 390]) {
   await page.locator('details.cp-history > summary').click();
   await page.locator('.cp-history-list li', { hasText: '약정이 끝나기까지' }).locator('.cp-edit').click();
   check(`${tag} 답을 고치면 낡은 요약이 먼저 사라짐`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="remaining"]').count()) === 1);
-  const okDays = await runRem('며칠 남았어요', '정확한 종료일·희망 변경일과 예상 해지 비용 확인', ['한 달쯤 남았어요', '재약정 제안']);
+  const okDays = await runRem('며칠 남았어요', '정확한 종료일·희망 변경일과 예상 해지 비용 확인', ['한 달쯤 남았어요', '재약정 제안'], '새 인터넷이 연결되면 기존 통신사에 해지 여부와 장비 반납 방법을 확인해 주세요. 인터넷이 꼭 필요한 날은 언제예요?');
   check(`${tag} "며칠" 요약 맨 위: 정확한 종료일·희망 변경일·예상 해지 비용 확인, 이전 "한 달쯤" 안내 사라짐`, okDays);
   await shot(page, path.join(OUT, `17-renewal-days-${width}.png`));
   check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0);

@@ -554,6 +554,8 @@ test('CP28 약정 만료 광고 → 상담: 갱신 선택 상태로 시작, 남�
   assert.ok(month.conditions.includes('한 달쯤 남았어요') && !month.conditions.includes('며칠 남았어요'));
   assert.ok(days.conditions.includes('며칠 남았어요') && days.toCheck.some((t) => t.includes('예상 해지 비용')));
   assert.ok(!month.toCheck.some((t) => t.includes('희망 변경일')) && !month.keyPoint.reason.includes('정확히 언제'));
+  assert.equal(f.steps[1].choices[0].reply, '지금 옮기면 두 회선의 이용 기간이 겹칠 수 있어요. 기존 약정은 언제 끝나세요?');
+  assert.equal(f.steps[1].choices[1].reply, '새 인터넷이 연결되면 기존 통신사에 해지 여부와 장비 반납 방법을 확인해 주세요. 인터넷이 꼭 필요한 날은 언제예요?');
   assert.equal(isComplete('home', ['renewal', 'days', 'some'], f), false);
   assert.ok(isComplete('home', ['renewal', 'days', 'some', 'daily'], f));
   for (const c of f.steps[1].choices) assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|대납|면제|확정됩니다|확정돼요|접수|가입|예약|신청|위약금/.test(JSON.stringify(c) + month.keyPoint.reason + days.keyPoint.reason));
