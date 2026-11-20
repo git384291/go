@@ -205,6 +205,9 @@ export const FLOWS: Readonly<Record<Segment, Flow>> = { home: HOME_FLOW, busines
 // 바로 '지금 쓰는 인터넷이 있는지'를 묻는다. 일반 상담 흐름(FLOWS)은 그대로다.
 export const AD_ENTRY_LABEL = '이사 전 확인 목록 보기';
 export const AD_ENTRY_NOTE = '비공개 광고 시안(미게시 초안)이에요. 실제 광고가 아니고, 아래 버튼은 이 화면 안의 상담 시안으로만 이어져요.';
+// 광고 시안 문구는 광고 소재 초안 모듈의 이사 초안과 같은 글자다(그 모듈을 화면에 배선하지 않으려고 복사해 두고, 시험이 같은지 확인한다)
+export const AD_ENTRY_TITLE = '이사 전 인터넷·TV 확인';
+export const AD_ENTRY_DESC = '새집 인터넷·TV 조건을 확인하세요. 설치 가능 여부는 별도 확인이 필요합니다.';
 export const AD_ENTRY_PICKS: readonly string[] = ['moving'];
 const EXISTING_STEP: Step = {
   id: 'existing',

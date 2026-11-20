@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { AD_DRAFTS } from '../../src/content/adDrafts';
 import {
   AI_NOTICE,
   buildSummary,
@@ -12,6 +13,8 @@ import {
   HOME_MOVING_AD_FLOW,
   AD_ENTRY_PICKS,
   AD_ENTRY_LABEL,
+  AD_ENTRY_TITLE,
+  AD_ENTRY_DESC,
   COST_ROWS,
   isComplete,
   keyPoint,
@@ -495,6 +498,9 @@ test('CP27 광고 시안 → 이사 상담: 이사 선택 상태로 시작, 쓰�
   assert.notDeepEqual(has.general, none.general);
   // 핵심 비교점은 기본 흐름과 같은 규칙(쓰는 인터넷 답은 규칙 입력에서 뺀다)
   assert.deepEqual(has.keyPoint, keyPoint('home', ['moving', 'some', 'daily']));
+  assert.equal(AD_ENTRY_TITLE, AD_DRAFTS.moving.title);
+  assert.equal(AD_ENTRY_DESC, AD_DRAFTS.moving.description);
+  assert.ok(!/adDrafts/.test(COMPONENT), '광고 초안 모듈은 화면에 배선하지 않는다(AD4)');
   // 새 문구에 금액·확정·성공 표현 없음
   const all = JSON.stringify(f.steps[1]);
   assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|확정됩니다|확정돼요|접수|가입|예약|신청/.test(all));

@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { AD_DRAFTS } from '../content/adDrafts';
 import { ConsultHandoffDemo } from './ConsultHandoffDemo';
 import {
+  AD_ENTRY_DESC,
   AD_ENTRY_LABEL,
   AD_ENTRY_NOTE,
   AD_ENTRY_PICKS,
+  AD_ENTRY_TITLE,
   AI_NOTICE,
   buildSummary,
   EXAMPLES,
@@ -137,8 +138,8 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
           </section>
           <section className="cp-ad" data-ad-draft="moving" aria-label="광고 시안(미게시 초안)">
             <p className="cp-ad-note">{AD_ENTRY_NOTE}</p>
-            <p className="cp-ad-title">{AD_DRAFTS.moving.title}</p>
-            <p className="cp-ad-desc">{AD_DRAFTS.moving.description}</p>
+            <p className="cp-ad-title">{AD_ENTRY_TITLE}</p>
+            <p className="cp-ad-desc">{AD_ENTRY_DESC}</p>
             <button type="button" className="btn btn-ghost btn-block cp-ad-cta" onClick={startFromAd}>
               {AD_ENTRY_LABEL}
             </button>
