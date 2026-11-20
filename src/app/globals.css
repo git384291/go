@@ -295,7 +295,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .cp-choices { display: grid; gap: 10px; }
 .cp-choice { display: grid; gap: 2px; text-align: left; min-height: 56px; padding: 12px 16px; border: 1px solid var(--ink-2); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; word-break: keep-all; }
 .cp-choice span { font-size: 13px; font-weight: 400; color: var(--ink-2); }
-.cp-choice:focus-visible, .cp-edit:focus-visible, .cp-fold > summary:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.cp-choice:focus-visible, .cp-ad-cta:focus-visible, .cp-edit:focus-visible, .cp-fold > summary:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
 .cp-fold { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; min-width: 0; }
 .cp-fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 12px 16px; cursor: pointer; font-weight: 700; color: var(--ink); list-style: none; }
 .cp-fold > summary::-webkit-details-marker { display: none; }
@@ -350,6 +350,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .cp-ad { border: 1px dashed var(--line, #cbd5e1); border-radius: 12px; padding: 12px; margin: 0 0 12px; display: grid; gap: 6px; overflow-wrap: anywhere; }
 .cp-ad p { margin: 0; }
-.cp-ad-note { font-size: 0.8rem; opacity: 0.8; }
+.cp-ad-note { font-size: 0.8rem; color: var(--ink-2); }
 .cp-ad-title { font-weight: 700; }
 .cp-ad-cta { min-height: 44px; margin-top: 4px; }

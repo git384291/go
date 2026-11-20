@@ -229,6 +229,14 @@ const EXISTING_STEP: Step = {
     },
   ],
 };
+const EXISTING_HAS_KEYPOINT: KeyPoint = {
+  point: '약정 종료일과 이전·해지 비용 비교',
+  reason: '쓰던 인터넷의 약정이 끝나는 날과 이전·해지 비용을, 새 상품 조건과 같은 기준으로 놓고 비교해 보세요. 금액은 확정되지 않았어요.',
+};
+const EXISTING_NONE_KEYPOINT: KeyPoint = {
+  point: '설치 가능일과 설치비 금액·청구 시점 확인',
+  reason: '끝낼 기존 조건이 없으니 새 주소의 설치 가능일부터 확인하세요. 설치비 금액과 청구 시점도 함께 확인해 보세요. 금액과 일정은 확정되지 않았어요.',
+};
 export const HOME_MOVING_AD_FLOW: Flow = {
   ...HOME_FLOW,
   steps: [HOME_FLOW.steps[0], EXISTING_STEP, ...HOME_FLOW.steps.slice(1)],
@@ -314,7 +322,10 @@ export function buildSummary(segment: Segment, picks: readonly string[], flow: F
   for (const t of [...head, ...selected, ...rest, ...tail]) if (!toCheck.includes(t)) toCheck.push(t);
   // 핵심 비교점 규칙은 기본 흐름의 답 순서를 쓴다(광고 연결 흐름에만 있는 '쓰는 인터넷' 답은 뺀다)
   const base = flow.steps.map((st, i) => [st.id, picks[i]] as const).filter(([id]) => id !== 'existing').map(([, v]) => v as string);
-  return { keyPoint: keyPoint(segment, base), conditions, general, toCheck, costs: COST_ROWS };
+  // 광고 연결 흐름: 쓰는 인터넷 답에 맞춰 요약 맨 위 첫 문장을 정한다(다른 규칙보다 먼저)
+  const existing = picks[flow.steps.findIndex((st) => st.id === 'existing')];
+  const kp = existing === 'has' ? EXISTING_HAS_KEYPOINT : existing === 'none' ? EXISTING_NONE_KEYPOINT : keyPoint(segment, base);
+  return { keyPoint: kp, conditions, general, toCheck, costs: COST_ROWS };
 }
 
 /** 선택이 모두 끝났는지(요약을 보여 줄 수 있는지) */

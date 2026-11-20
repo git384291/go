@@ -497,7 +497,12 @@ test('CP27 광고 시안 → 이사 상담: 이사 선택 상태로 시작, 쓰�
   assert.ok(has.toCheck.some((t) => t.includes('이전·해지 조건')) && !none.toCheck.some((t) => t.includes('이전·해지 조건')));
   assert.notDeepEqual(has.general, none.general);
   // 핵심 비교점은 기본 흐름과 같은 규칙(쓰는 인터넷 답은 규칙 입력에서 뺀다)
-  assert.deepEqual(has.keyPoint, keyPoint('home', ['moving', 'some', 'daily']));
+  assert.equal(has.keyPoint.point, '약정 종료일과 이전·해지 비용 비교');
+  assert.equal(none.keyPoint.point, '설치 가능일과 설치비 금액·청구 시점 확인');
+  assert.notDeepEqual(has.keyPoint, none.keyPoint);
+  // 쓰는 인터넷을 아직 안 고른 중간 상태·일반 흐름은 기본 규칙
+  assert.deepEqual(buildSummary('home', ['moving', 'some', 'daily']).keyPoint, keyPoint('home', ['moving', 'some', 'daily']));
+  for (const k of [has.keyPoint, none.keyPoint]) assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|확정됩니다|확정돼요|처음 (낼|내는|내요|내나)|접수|가입|예약|신청/.test(k.point + k.reason));
   assert.equal(AD_ENTRY_TITLE, AD_DRAFTS.moving.title);
   assert.equal(AD_ENTRY_DESC, AD_DRAFTS.moving.description);
   assert.ok(!/adDrafts/.test(COMPONENT), '광고 초안 모듈은 화면에 배선하지 않는다(AD4)');

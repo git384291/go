@@ -79,6 +79,16 @@ async function openPage(width, nowIso, ctxOpts = {}) {
   return { page, context, external, errors };
 }
 
+// 화면 전환(0.18초 나타남 효과) 도중에 찍으면 흐리게 보인다. 모든 효과가 끝나고 두 프레임이 지난 뒤에 찍는다.
+const settle = (page) => page.evaluate(async () => { await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); });
+const shot = async (page, file) => { await settle(page); await page.screenshot({ path: file, fullPage: true }); };
+// 글자 대비(실제 계산된 색, 투명 배경은 위 조상으로 올라가며 합성)와 초점 표시
+const contrastOf = (page, selector) => page.$$eval(selector, (els) => {
+  const parse = (c) => { const m = c.match(/rgba?\(([^)]+)\)/); if (!m) return null; const [r, g, b, a = 1] = m[1].split(',').map((x) => parseFloat(x)); return { r, g, b, a }; };
+  const lum = ({ r, g, b }) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const bgOf = (el) => { let cur = el; let base = { r: 255, g: 255, b: 255 }; const stack = []; while (cur) { const c = parse(getComputedStyle(cur).backgroundColor); if (c && c.a > 0) { stack.push(c); if (c.a >= 1) break; } cur = cur.parentElement; } for (const c of stack.reverse()) base = { r: c.r * c.a + base.r * (1 - c.a), g: c.g * c.a + base.g * (1 - c.a), b: c.b * c.a + base.b * (1 - c.a) }; return base; };
+  return els.map((el) => { const st = getComputedStyle(el); const fg = parse(st.color); const bg = bgOf(el); let op = 1; for (let c = el; c; c = c.parentElement) op *= parseFloat(getComputedStyle(c).opacity); const f = fg.a < 1 ? { r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a) } : fg; const L1 = lum(f), L2 = lum(bg); const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05); return { ratio, op, text: (el.textContent || '').trim().slice(0, 24) }; });
+});
 const noOverflow = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && document.body.scrollWidth <= document.documentElement.clientWidth);
 const summaryText = (page) => page.$eval('.cp-summary', (e) => e.textContent).catch(() => null);
 const summaryFirstLine = (page) => page.$eval('.cp-summary', (e) => e.firstElementChild?.textContent ?? '').catch(() => null);
@@ -151,14 +161,14 @@ for (const width of [320, 390]) {
     check(`[${tag}] 매달 낼 비용(월 요금·장비 임대료)과 설치 관련 비용(금액·청구 시점 확인 필요) 구분, 숫자 없음`, costs.includes('매달 낼 비용') && costs.includes('월 요금') && costs.includes('장비 임대료') && costs.includes('설치 관련 비용') && costs.includes('설치비 금액과 청구 시점은 확인이 필요해요') && !costs.includes('처음 낼 비용') && (costs.match(/확인된 금액 없음/g) ?? []).length === 2 && !/\d/.test(costs), costs.replace(/\s+/g, ' '));
     check(`[${tag}] 요약이 견적·접수가 아니라고 밝힘`, s1.includes('견적이나 접수가 아니에요'));
     check(`[${tag}] 가로 넘침 없음(가정용 요약)`, await noOverflow(page));
-    await page.screenshot({ path: path.join(OUT, `03-home-summary-${width}.png`), fullPage: true });
+    await shot(page, path.join(OUT, `03-home-summary-${width}.png`));
 
     // 이전 답 펼쳐서 고치기(포인터)
     await page.locator('details.cp-history > summary').click();
     check(`[${tag}] 이전 답 펼치면 답 4개(용도+질문 3개)와 고치기 버튼`, (await page.locator('.cp-history .cp-edit').count()) === 4);
     const spEdit = await spacing(page, '.cp-history .cp-edit');
     check(`[${tag}] 고치기 버튼 높이·너비 ≥44px`, spEdit.minH >= 44 && spEdit.minW >= 44, `높이 ${Math.round(spEdit.minH)}, 너비 ${Math.round(spEdit.minW)}`);
-    await page.screenshot({ path: path.join(OUT, `04-history-open-${width}.png`), fullPage: true });
+    await shot(page, path.join(OUT, `04-history-open-${width}.png`));
     await page.locator('.cp-history-list li', { hasText: '어떤 이유로' }).locator('.cp-edit').click();
     check(`[${tag}] 이전 답 고치면 낡은 요약 제거·그 질문부터 다시·이전 답 접힘`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="reason"]').count()) === 1 && (await page.locator('details.cp-history').evaluate((e) => e.open)) === false);
     check(`[${tag}] 고친 질문으로 초점 이동`, (await active(page)).cls.includes('cp-question'), JSON.stringify(await active(page)));
@@ -196,7 +206,7 @@ for (const width of [320, 390]) {
     const sumU = await summaryText(page);
     check(`[${tag}] "잘 모르겠어요" 요약: 비용 구분에 숫자 없음`, sumU.includes('매달 낼 비용') && sumU.includes('설치 관련 비용') && !/\d[\d,]*\s*원/.test(sumU));
     check(`[${tag}] 가로 넘침 없음(잘 모르겠어요 요약)`, await noOverflow(page));
-    await page.screenshot({ path: path.join(OUT, `05-home-unsure-summary-${width}.png`), fullPage: true });
+    await shot(page, path.join(OUT, `05-home-unsure-summary-${width}.png`));
 
     // 키보드로 이전 답 펼치기 → '동시 사용' 고치기
     await page.keyboard.press('Tab'); // 이전 답 보기 summary
@@ -232,7 +242,7 @@ for (const width of [320, 390]) {
     check(`[${tag}] 결제 매장 요약 첫 줄: 회선이 끊겼을 때 결제 영향과 예비 회선 필요 여부`, fb.includes('회선이 끊겼을 때 결제 영향과 예비 회선 필요 여부') && fb.includes('가장 먼저 비교할 점'), fb.replace(/\s+/g, ' ').slice(0, 80));
     check(`[${tag}] 사업장 요약에 미정 상태·확인 항목·비용 구분`, sb.includes('아직 정하지 못했어요') && sb.includes('손님이 보는 홀인지 직원 휴게실인지') && sb.includes('매달 낼 비용') && sb.includes('설치 관련 비용'));
     check(`[${tag}] 가로 넘침 없음(사업장 요약)`, await noOverflow(page));
-    await page.screenshot({ path: path.join(OUT, `06-business-undecided-${width}.png`), fullPage: true });
+    await shot(page, path.join(OUT, `06-business-undecided-${width}.png`));
     // 홀로 다시 고르기
     await page.locator('details.cp-history > summary').click();
     await page.locator('.cp-history-list li', { hasText: 'TV는 어디에서' }).locator('.cp-edit').click();
@@ -282,7 +292,7 @@ for (const width of [320, 390]) {
       const note = await page.locator('.cp-phone-note').count();
       check(`${tag} 전화 안내 영역: ${hasPhone ? '전화 가능 시간과 기사 방문일은 다르다는 구분 문구 표시' : '전화 영역 없음(구분은 도움말이 맡음)'}`, hasPhone ? note === 1 && (await page.locator('.cp-phone-note').innerText()).includes('기사가 방문할 수 있는 날은 달라요') : note === 0);
       check(`${tag} 가로 넘침 없음·외부 요청 0·저장소 0·입력칸 0·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0);
-      if (width === 390 && stateName.startsWith('토요일')) await page.screenshot({ path: path.join(OUT, `08-ad-${segName}-faq-390.png`), fullPage: true });
+      if (width === 390 && stateName.startsWith('토요일')) await shot(page, path.join(OUT, `08-ad-${segName}-faq-390.png`));
       adResults.push({ width, segment: segName, state: stateName, summaryOk, scenes: perScene });
       await context.close();
     }
@@ -419,13 +429,24 @@ for (const width of [320, 390]) {
   const act = await page.evaluate(() => document.activeElement.className);
   const hist = await page.locator('details.cp-history').evaluate((e) => e.textContent);
   check(`${tag} [키보드 Enter] 가정용·이사가 이미 선택된 채 "지금 쓰는 인터넷이 있나요?"부터 묻고, 이사 안내 답이 보이고 초점이 질문으로`, step === 'existing' && act.includes('cp-question') && (await page.locator('.cp-bubble[data-reply]').innerText()).includes('이사를 앞두고 계시군요') && hist.includes('이사해서 새로 알아봐요') && (await page.locator('.cp-progress').innerText()).includes('질문 2/4'));
-  await page.screenshot({ path: path.join(OUT, `11-ad-moving-start-${width}.png`), fullPage: true });
+  await shot(page, path.join(OUT, `11-ad-moving-start-${width}.png`));
+  await settle(page);
+  const qc = await contrastOf(page, '.cp-current .cp-question, .cp-current .cp-choice, .cp-current .cp-progress, .cp-bubble[data-reply] p');
+  check(`${tag} 전환이 끝난 뒤 질문·선택지·안내 글자 대비 ≥4.5:1, 투명도 1(흐림 없음)`, qc.length >= 4 && qc.every((x) => x.ratio >= 4.5 && x.op === 1), qc.map((x) => `${x.ratio.toFixed(1)}/${x.op}`).join(' '));
+  await page.locator('.cp-current .cp-choice').first().focus();
+  const fo = await page.evaluate(() => { const e = document.activeElement; const st = getComputedStyle(e); const r = e.getBoundingClientRect(); return { outline: st.outlineStyle !== 'none' && parseFloat(st.outlineWidth) >= 2, inView: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth }; });
+  check(`${tag} [키보드] 선택지 초점 표시(윤곽선 ≥2px)가 보이고 화면 안`, fo.outline && fo.inView);
   await click(page, '지금 쓰는 인터넷이 있어요');
   await click(page, '3~4개');
   await click(page, '매일 봐요');
   const sHas = await summaryText(page);
+  const kpHas = await summaryFirstLine(page);
+  check(`${tag} "있어요" 요약 맨 위: 약정 종료일과 이전·해지 비용 비교`, kpHas.includes('가장 먼저 비교할 점') && kpHas.includes('약정 종료일과 이전·해지 비용 비교'), kpHas.replace(/\s+/g, ' ').slice(0, 60));
+  await settle(page);
+  const sc = await contrastOf(page, '.cp-summary .cp-keypoint strong, .cp-summary .cp-keypoint-label, .cp-summary .cp-keypoint-reason, .cp-summary li, .cp-summary h3');
+  check(`${tag} 요약 글자 대비 ≥4.5:1, 흐림 없음`, sc.length > 5 && sc.every((x) => x.ratio >= 4.5 && x.op === 1), `최저 ${Math.min(...sc.map((x) => x.ratio)).toFixed(1)}`);
   check(`${tag} 쓰는 인터넷 "있어요" 요약: 선택 조건과 이전·해지 확인 항목 표시`, !!sHas && sHas.includes('지금 쓰는 인터넷이 있어요') && sHas.includes('지금 쓰는 인터넷의 약정 종료 시기와 이전·해지 조건') && sHas.includes('이사해서 새로 알아봐요') && sHas.includes('설치 가능 여부, 희망 일정, 설치비 금액과 청구 시점'));
-  await page.screenshot({ path: path.join(OUT, `12-ad-moving-has-${width}.png`), fullPage: true });
+  await shot(page, path.join(OUT, `12-ad-moving-has-${width}.png`));
   await page.locator('details.cp-history > summary').click();
   await page.locator('.cp-history-list li', { hasText: '지금 쓰는 인터넷이 있나요' }).locator('.cp-edit').click();
   check(`${tag} 선택을 고치면 낡은 요약이 사라지고 그 질문부터 다시`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="existing"]').count()) === 1);
@@ -433,8 +454,10 @@ for (const width of [320, 390]) {
   await click(page, '3~4개');
   await click(page, '매일 봐요');
   const sNone = await summaryText(page);
+  const kpNone = await summaryFirstLine(page);
+  check(`${tag} "없어요" 요약 맨 위: 설치 가능일과 설치비 금액·청구 시점 확인, 이전 "있어요" 안내(약정 종료일·이전·해지 비용)는 사라짐`, kpNone.includes('설치 가능일과 설치비 금액·청구 시점 확인') && !kpNone.includes('약정 종료일') && !(await summaryText(page)).includes('이전·해지'), kpNone.replace(/\s+/g, ' ').slice(0, 60));
   check(`${tag} "없어요"로 바꾸면 요약이 갱신: 새 선택 표시, 이전·해지 항목과 "있어요" 문구 사라짐`, !!sNone && sNone.includes('지금은 없어요') && !sNone.includes('지금 쓰는 인터넷이 있어요') && !sNone.includes('이전·해지 조건') && sNone.includes('이사해서 새로 알아봐요'));
-  await page.screenshot({ path: path.join(OUT, `13-ad-moving-none-${width}.png`), fullPage: true });
+  await shot(page, path.join(OUT, `13-ad-moving-none-${width}.png`));
   // 처음 화면으로 돌아가 일반 가정용 흐름은 그대로(질문 3개, 쓰는 인터넷 질문 없음)
   await page.locator('details.cp-history > summary').click();
   await page.locator('.cp-history-list li', { hasText: '집에서 쓰실 건가요' }).locator('.cp-edit').click();
@@ -487,7 +510,7 @@ for (const width of [320, 390]) {
   await page.locator('[data-case="confirmed"]').focus();
   await page.keyboard.press('Enter');
   await page.locator('[data-handoff-result]').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(OUT, `10-handoff-confirmed-${width}.png`), fullPage: true });
+  await shot(page, path.join(OUT, `10-handoff-confirmed-${width}.png`));
   check(`${tag} 선택으로 발생한 외부 요청 0·저장소 0·입력칸 0·링크 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.locator('a[href]').count()) === 0, `외부 ${external.length}건`);
   await context.close();
 }
