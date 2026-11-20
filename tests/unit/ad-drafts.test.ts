@@ -61,7 +61,8 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
   const u1 = users.trim().split('\n').filter(Boolean);
   // 정확한 allowlist(PM 6952112639: 디렉터리 전체 허용 금지). 새 사용처는 별도 검수 후 이 목록을 갱신한다
   // PM 6954300094: 영상 storyboard가 고정 상황 ID를 읽는다(새 사용처 1개)
-  assert.deepEqual(u1.sort(), ['src/server/advertising/adGeneration.ts', 'src/server/advertising/campaignDraft.ts', 'src/server/advertising/video/storyboard.ts', 'src/server/advertising/youtubeAdPreparation.ts']);
+  // PM 11/21 4항: 예산 한도 감시(budgetGuard)가 승인 상한 상수를 읽는다(새 사용처 1개, 검수 필요)
+  assert.deepEqual(u1.sort(), ['src/server/advertising/adGeneration.ts', 'src/server/advertising/budgetGuard.ts', 'src/server/advertising/campaignDraft.ts', 'src/server/advertising/video/storyboard.ts', 'src/server/advertising/youtubeAdPreparation.ts']);
   let adv = '';
   try {
     adv = execFileSync('grep', ['-rlE', 'server/advertising|openAiAdGenerator|adGeneration', 'src'], { encoding: 'utf8' });
