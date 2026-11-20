@@ -11,6 +11,11 @@ import {
   FAQ,
   FLOWS,
   HOME_MOVING_AD_FLOW,
+  HOME_RENEWAL_AD_FLOW,
+  AD_RENEWAL_LABEL,
+  AD_RENEWAL_TITLE,
+  AD_RENEWAL_DESC,
+  AD_RENEWAL_PICKS,
   AD_ENTRY_PICKS,
   AD_ENTRY_LABEL,
   AD_ENTRY_TITLE,
@@ -532,5 +537,26 @@ test('CP27 광고 시안 → 이사 상담: 이사 선택 상태로 시작, 쓰�
   assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|확정됩니다|확정돼요|접수|가입|예약|신청/.test(all));
   // 화면: 광고 카드는 시작 화면에서 버튼 하나로만 이어지고 전송·링크·입력이 없다
   assert.match(COMPONENT, /data-ad-draft="moving"/);
-  assert.match(COMPONENT, /onClick=\{startFromAd\}/);
+  assert.match(COMPONENT, /startFromAd\('moving'\)/);
+});
+
+test('CP28 약정 만료 광고 → 상담: 갱신 선택 상태로 시작, 남은 기간 답에 따라 첫 안내가 달라지고 답을 바꾸면 갱신', () => {
+  assert.equal(AD_RENEWAL_LABEL, '약정 끝나기 전 비교하기');
+  assert.equal(AD_RENEWAL_TITLE, AD_DRAFTS.contract_end.title, '기존 약정 만료 광고 초안 문구를 그대로 쓴다');
+  assert.equal(AD_RENEWAL_DESC, AD_DRAFTS.contract_end.description);
+  assert.deepEqual([...AD_RENEWAL_PICKS], ['renewal']);
+  const f = HOME_RENEWAL_AD_FLOW;
+  assert.deepEqual(f.steps.map((x) => x.id), ['reason', 'remaining', 'devices', 'tv']);
+  const month = buildSummary('home', ['renewal', 'month', 'some', 'daily'], f);
+  const days = buildSummary('home', ['renewal', 'days', 'some', 'daily'], f);
+  assert.equal(month.keyPoint.point, '재약정 제안과 변경 비용 비교');
+  assert.equal(days.keyPoint.point, '정확한 종료일·희망 변경일과 예상 해지 비용 확인');
+  assert.ok(month.conditions.includes('한 달쯤 남았어요') && !month.conditions.includes('며칠 남았어요'));
+  assert.ok(days.conditions.includes('며칠 남았어요') && days.toCheck.some((t) => t.includes('예상 해지 비용')));
+  assert.ok(!month.toCheck.some((t) => t.includes('희망 변경일')) && !month.keyPoint.reason.includes('정확히 언제'));
+  assert.equal(isComplete('home', ['renewal', 'days', 'some'], f), false);
+  assert.ok(isComplete('home', ['renewal', 'days', 'some', 'daily'], f));
+  for (const c of f.steps[1].choices) assert.ok(!/\d[\d,]*\s*원|무료|할인|혜택|대납|면제|확정됩니다|확정돼요|접수|가입|예약|신청|위약금/.test(JSON.stringify(c) + month.keyPoint.reason + days.keyPoint.reason));
+  assert.deepEqual(FLOWS.home.steps.map((x) => x.id), ['reason', 'devices', 'tv']);
+  assert.match(COMPONENT, /data-ad-draft="renewal"/);
 });

@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { ConsultHandoffDemo } from './ConsultHandoffDemo';
 import {
   AD_ENTRY_DESC,
+  AD_RENEWAL_DESC,
+  AD_RENEWAL_LABEL,
+  AD_RENEWAL_PICKS,
+  AD_RENEWAL_TITLE,
+  HOME_RENEWAL_AD_FLOW,
   AD_ENTRY_LABEL,
   AD_ENTRY_NOTE,
   AD_ENTRY_PICKS,
@@ -36,7 +41,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   const [segment, setSegment] = useState<Segment | null>(null);
   const [picks, setPicks] = useState<string[]>([]);
   // 광고 시안에서 들어온 이사 상담인지(질문에 '지금 쓰는 인터넷' 하나가 더 들어간다)
-  const [fromAd, setFromAd] = useState(false);
+  const [fromAd, setFromAd] = useState<'moving' | 'renewal' | null>(null);
   const [clock, setClock] = useState<Date | null>(now ?? null);
   const [mockCalled, setMockCalled] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -58,7 +63,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
     if (focusTick > 0) focusRef.current?.focus();
   }, [focusTick]);
 
-  const flow = segment ? (fromAd ? HOME_MOVING_AD_FLOW : FLOWS[segment]) : null;
+  const flow = segment ? (fromAd === 'moving' ? HOME_MOVING_AD_FLOW : fromAd === 'renewal' ? HOME_RENEWAL_AD_FLOW : FLOWS[segment]) : null;
   const complete = segment && flow ? isComplete(segment, picks, flow) : false;
   const stepIndex = flow ? Math.min(picks.length, flow.steps.length) : 0;
   const currentStep = flow && !complete ? flow.steps[stepIndex] : null;
@@ -69,15 +74,15 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   const lastStep = flow && picks.length > 0 ? flow.steps[picks.length - 1] : null;
   const lastChoice = lastStep ? lastStep.choices.find((c) => c.id === picks[picks.length - 1]) : null;
 
-  const startFromAd = () => {
-    setFromAd(true);
+  const startFromAd = (kind: 'moving' | 'renewal') => {
+    setFromAd(kind);
     setSegment('home');
-    setPicks([...AD_ENTRY_PICKS]);
+    setPicks([...(kind === 'moving' ? AD_ENTRY_PICKS : AD_RENEWAL_PICKS)]);
     setHistoryOpen(false);
     setFocusTick((n) => n + 1);
   };
   const chooseSegment = (s: Segment) => {
-    setFromAd(false);
+    setFromAd(null);
     setSegment(s);
     setPicks([]);
     setHistoryOpen(false);
@@ -94,7 +99,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
     setFocusTick((n) => n + 1);
   };
   const editSegment = () => {
-    setFromAd(false);
+    setFromAd(null);
     setSegment(null);
     setPicks([]);
     setHistoryOpen(false);
@@ -140,8 +145,15 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
             <p className="cp-ad-note">{AD_ENTRY_NOTE}</p>
             <p className="cp-ad-title">{AD_ENTRY_TITLE}</p>
             <p className="cp-ad-desc">{AD_ENTRY_DESC}</p>
-            <button type="button" className="btn btn-ghost btn-block cp-ad-cta" onClick={startFromAd}>
+            <button type="button" className="btn btn-ghost btn-block cp-ad-cta" onClick={() => startFromAd('moving')}>
               {AD_ENTRY_LABEL}
+            </button>
+          </section>
+          <section className="cp-ad" data-ad-draft="renewal" aria-label="광고 시안(미게시 초안)">
+            <p className="cp-ad-title">{AD_RENEWAL_TITLE}</p>
+            <p className="cp-ad-desc">{AD_RENEWAL_DESC}</p>
+            <button type="button" className="btn btn-ghost btn-block cp-ad-cta" onClick={() => startFromAd('renewal')}>
+              {AD_RENEWAL_LABEL}
             </button>
           </section>
           {notices}

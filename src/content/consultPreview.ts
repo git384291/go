@@ -253,6 +253,43 @@ const EXISTING_UNSURE_KEYPOINT: KeyPoint = {
   point: '기존 인터넷 확인 필요',
   reason: '지금 몰라도 요약은 볼 수 있어요. 금액과 일정은 확정되지 않았어요.',
 };
+// ── 약정 만료 광고 → 상담: 약정이 끝나기까지 얼마나 남았는지에 따라 먼저 안내할 것이 다르다 ──
+export const AD_RENEWAL_LABEL = '약정 끝나기 전 비교하기';
+export const AD_RENEWAL_TITLE = '약정 만료 전 인터넷·TV';
+export const AD_RENEWAL_DESC = '약정 종료일과 결합 조건을 함께 비교하세요. 해지 비용은 신청 전 확인합니다.';
+export const AD_RENEWAL_PICKS: readonly string[] = ['renewal'];
+const REMAINING_STEP: Step = {
+  id: 'remaining',
+  question: '약정이 끝나기까지 얼마나 남았나요?',
+  choices: [
+    {
+      id: 'month',
+      label: '한 달쯤 남았어요',
+      reply: '한 달쯤 남으셨군요. 지금 통신사의 재약정 제안과 바꿀 때 드는 비용을 나란히 비교할 시간이 있어요. 금액이나 일정은 확정해 드릴 수 없어요.',
+      general: '약정 만료까지 한 달쯤 남았다면 재약정 제안과 변경 비용을 같은 기간으로 놓고 비교할 수 있어요.',
+      toCheck: ['지금 통신사의 재약정 제안', '다른 곳으로 바꿀 때 드는 비용'],
+    },
+    {
+      id: 'days',
+      label: '며칠 남았어요',
+      reply: '며칠 남으셨군요. 정확한 종료일과 바꾸고 싶은 날짜, 지금 통신사가 안내하는 예상 해지 비용부터 확인해 보세요. 금액이나 일정은 확정해 드릴 수 없어요.',
+      general: '남은 기간이 며칠이면 종료일과 희망 변경일을 먼저 맞춰야 해요.',
+      toCheck: ['약정의 정확한 종료일과 희망 변경일', '지금 통신사가 안내하는 예상 해지 비용'],
+    },
+  ],
+};
+const REMAINING_MONTH_KEYPOINT: KeyPoint = {
+  point: '재약정 제안과 변경 비용 비교',
+  reason: '한 달쯤 여유가 있으니 지금 통신사의 재약정 제안과 다른 곳으로 바꿀 때 드는 비용을 같은 기간으로 놓고 비교해 보세요. 금액은 확정되지 않았어요.',
+};
+const REMAINING_DAYS_KEYPOINT: KeyPoint = {
+  point: '정확한 종료일·희망 변경일과 예상 해지 비용 확인',
+  reason: '남은 기간이 짧으니 약정이 정확히 언제 끝나는지, 바꾸고 싶은 날짜, 지금 통신사가 안내하는 예상 해지 비용부터 확인하세요. 금액과 일정은 확정되지 않았어요.',
+};
+export const HOME_RENEWAL_AD_FLOW: Flow = {
+  ...HOME_FLOW,
+  steps: [HOME_FLOW.steps[0], REMAINING_STEP, ...HOME_FLOW.steps.slice(1)],
+};
 export const HOME_MOVING_AD_FLOW: Flow = {
   ...HOME_FLOW,
   steps: [HOME_FLOW.steps[0], EXISTING_STEP, ...HOME_FLOW.steps.slice(1)],
@@ -337,10 +374,11 @@ export function buildSummary(segment: Segment, picks: readonly string[], flow: F
   const rest = segment === 'home' ? [] : [PRICE_TERM_TO_CHECK];
   for (const t of [...head, ...selected, ...rest, ...tail]) if (!toCheck.includes(t)) toCheck.push(t);
   // 핵심 비교점 규칙은 기본 흐름의 답 순서를 쓴다(광고 연결 흐름에만 있는 '쓰는 인터넷' 답은 뺀다)
-  const base = flow.steps.map((st, i) => [st.id, picks[i]] as const).filter(([id]) => id !== 'existing').map(([, v]) => v as string);
+  const base = flow.steps.map((st, i) => [st.id, picks[i]] as const).filter(([id]) => id !== 'existing' && id !== 'remaining').map(([, v]) => v as string);
   // 광고 연결 흐름: 쓰는 인터넷 답에 맞춰 요약 맨 위 첫 문장을 정한다(다른 규칙보다 먼저)
   const existing = picks[flow.steps.findIndex((st) => st.id === 'existing')];
-  const kp = existing === 'has' ? EXISTING_HAS_KEYPOINT : existing === 'none' ? EXISTING_NONE_KEYPOINT : existing === 'unsure' ? EXISTING_UNSURE_KEYPOINT : keyPoint(segment, base);
+  const remaining = picks[flow.steps.findIndex((st) => st.id === 'remaining')];
+  const kp = remaining === 'month' ? REMAINING_MONTH_KEYPOINT : remaining === 'days' ? REMAINING_DAYS_KEYPOINT : existing === 'has' ? EXISTING_HAS_KEYPOINT : existing === 'none' ? EXISTING_NONE_KEYPOINT : existing === 'unsure' ? EXISTING_UNSURE_KEYPOINT : keyPoint(segment, base);
   return { keyPoint: kp, conditions, general, toCheck, costs: COST_ROWS };
 }
 

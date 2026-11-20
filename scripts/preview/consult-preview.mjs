@@ -422,10 +422,10 @@ for (const width of [320, 390]) {
 for (const width of [320, 390]) {
   const tag = `[${width}px 이사 광고→상담]`;
   const { page, context, external, errors } = await openPage(width, NOW_THU);
-  check(`${tag} 시작 화면에 광고 시안(미게시 초안)과 '이사 전 확인 목록 보기' 버튼, 입력칸·링크 없음`, (await page.locator('[data-ad-draft="moving"] .cp-ad-cta').innerText()) === '이사 전 확인 목록 보기' && (await page.locator('[data-ad-draft]').innerText()).includes('미게시 초안') && (await page.locator('.cp-ad-title').innerText()) === '이사할 때 인터넷, 옮길까 새로 가입할까?' && (await page.locator('.cp-ad-desc').innerText()).includes('남은 약정과 이전 설치비부터') && (await noOverflow(page)) && (await page.locator('.cp-ad-cta').evaluate((e) => e.scrollWidth <= e.clientWidth + 1)) && (await page.locator('input, textarea, a[href]').count()) === 0);
-  await page.locator('.cp-ad').scrollIntoViewIfNeeded();
+  check(`${tag} 시작 화면에 광고 시안(미게시 초안)과 '이사 전 확인 목록 보기' 버튼, 입력칸·링크 없음`, (await page.locator('[data-ad-draft="moving"] .cp-ad-cta').innerText()) === '이사 전 확인 목록 보기' && (await page.locator('[data-ad-draft="moving"]').innerText()).includes('미게시 초안') && (await page.locator('[data-ad-draft="moving"] .cp-ad-title').innerText()) === '이사할 때 인터넷, 옮길까 새로 가입할까?' && (await page.locator('[data-ad-draft="moving"] .cp-ad-desc').innerText()).includes('남은 약정과 이전 설치비부터') && (await noOverflow(page)) && (await page.locator('.cp-ad-cta').evaluateAll((els) => els.every((e) => e.scrollWidth <= e.clientWidth + 1))) && (await page.locator('input, textarea, a[href]').count()) === 0);
+  await page.locator('[data-ad-draft="moving"]').scrollIntoViewIfNeeded();
   await shot(page, path.join(OUT, `10-ad-card-${width}.png`));
-  await page.locator('.cp-ad-cta').focus();
+  await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus();
   await page.keyboard.press('Enter');
   const step = await page.locator('.cp-current').getAttribute('data-step');
   const act = await page.evaluate(() => document.activeElement.className);
@@ -499,6 +499,40 @@ for (const width of [320, 390]) {
   await click(page, '이사해서 새로 알아봐요');
   check(`${tag} 일반 상담으로 다시 시작하면 질문 3개 흐름 그대로(쓰는 인터넷 질문 없음)`, (await page.locator('.cp-progress').innerText()).includes('질문 2/3') && (await page.locator('.cp-current[data-step="devices"]').count()) === 1);
   check(`${tag} 가로 넘침 없음·외부 요청 0·저장소 0·입력칸 0·오류 0`, (await noOverflow(page)) && external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0, `외부 ${external.length}`);
+  await context.close();
+}
+
+// ── G7. 약정 만료 광고 → 상담: 갱신 선택 상태로 시작, '한 달쯤'·'며칠' 첫 안내, 답 변경 시 요약 갱신 ──
+for (const width of [320, 390]) {
+  const tag = `[${width}px 약정 만료 광고→상담]`;
+  const { page, context, external, errors } = await openPage(width, NOW_THU);
+  const card = page.locator('[data-ad-draft="renewal"]');
+  check(`${tag} 약정 만료 광고 카드(기존 초안 문구)와 '약정 끝나기 전 비교하기' 버튼, 가로 넘침 없음`, (await card.locator('.cp-ad-cta').innerText()) === '약정 끝나기 전 비교하기' && (await card.locator('.cp-ad-title').innerText()) === '약정 만료 전 인터넷·TV' && (await card.locator('.cp-ad-desc').innerText()).includes('해지 비용은 신청 전 확인합니다') && (await noOverflow(page)));
+  await card.scrollIntoViewIfNeeded();
+  await shot(page, path.join(OUT, `15-renewal-card-${width}.png`));
+  await card.locator('.cp-ad-cta').focus();
+  await page.keyboard.press('Enter');
+  check(`${tag} [키보드 Enter] 가정용·약정 비교가 선택된 채 "약정이 끝나기까지 얼마나 남았나요?"부터 묻고 초점이 질문으로`, (await page.locator('.cp-current').getAttribute('data-step')) === 'remaining' && (await active(page)).cls.includes('cp-question') && (await page.locator('details.cp-history').evaluate((e) => e.textContent)).includes('쓰던 약정이 끝나서 비교해요'));
+  const runRem = async (label, expectPoint, forbid) => {
+    await page.locator('.cp-current .cp-choice', { hasText: label }).focus();
+    await page.keyboard.press('Enter');
+    for (const t of ['3~4대', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
+    const first = await summaryFirstLine(page);
+    const sum = await summaryText(page);
+    return !!sum && first.includes(expectPoint) && forbid.every((f) => !sum.includes(f)) && (await noOverflow(page));
+  };
+  const okMonth = await runRem('한 달쯤 남았어요', '재약정 제안과 변경 비용 비교', ['며칠 남았어요', '희망 변경일', '정확한 종료일']);
+  await settle(page);
+  const mc = await contrastOf(page, '.cp-summary .cp-keypoint strong, .cp-summary .cp-keypoint-reason, .cp-summary li');
+  check(`${tag} "한 달쯤" 요약 맨 위: 재약정 제안과 변경 비용 비교(며칠 남음 안내 없음), 글자 대비 ≥4.5:1`, okMonth && mc.every((x) => x.ratio >= 4.5 && x.op === 1));
+  await shot(page, path.join(OUT, `16-renewal-month-${width}.png`));
+  await page.locator('details.cp-history > summary').click();
+  await page.locator('.cp-history-list li', { hasText: '약정이 끝나기까지' }).locator('.cp-edit').click();
+  check(`${tag} 답을 고치면 낡은 요약이 먼저 사라짐`, (await summaryText(page)) === null && (await page.locator('.cp-current[data-step="remaining"]').count()) === 1);
+  const okDays = await runRem('며칠 남았어요', '정확한 종료일·희망 변경일과 예상 해지 비용 확인', ['한 달쯤 남았어요', '재약정 제안']);
+  check(`${tag} "며칠" 요약 맨 위: 정확한 종료일·희망 변경일·예상 해지 비용 확인, 이전 "한 달쯤" 안내 사라짐`, okDays);
+  await shot(page, path.join(OUT, `17-renewal-days-${width}.png`));
+  check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0);
   await context.close();
 }
 
