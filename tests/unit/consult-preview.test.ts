@@ -31,6 +31,7 @@ import {
   PRICE_TERM_TO_CHECK,
   QUICK_BUNDLE,
   QUICK_MOVING,
+  QUICK_RETURN,
   QUICK_SPEED,
   INSTALL_TO_CHECK,
   GIFT_TO_CHECK,
@@ -588,4 +589,11 @@ test('CP31 가정용 가족 결합 바로 질문: 정확한 응답, 추가 가�
   assert.equal(QUICK_BUNDLE.reply, '인터넷을 더 묶을 수 있는지는 결합상품과 이미 묶인 회선 수에 따라 달라요. 지금 쓰는 결합상품 이름을 알고 계세요?');
   assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|가능해요|무조건|보장/.test(QUICK_BUNDLE.label.replace('추가할 수 있나요','') + QUICK_BUNDLE.reply));
   assert.match(COMPONENT, /data-quick-btn="bundle"/);
+});
+
+test('CP32 약정 만기 장비 반납 바로 질문: 정확한 응답, 약정 만기 경로에서만, 반납 방법을 정해 주지 않음', () => {
+  assert.equal(QUICK_RETURN.label, '쓰던 공유기랑 셋톱박스는 어떻게 돌려줘요?');
+  assert.equal(QUICK_RETURN.reply, '기존 통신사에 반납할 장비 목록과 반납 방법을 확인해 주세요. 수거 일정이 잡힐 때까지 공유기와 셋톱박스, 전원 어댑터는 함께 보관해 주세요.');
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(QUICK_RETURN.label + QUICK_RETURN.reply));
+  assert.match(COMPONENT, /picks\[0\] === 'renewal' \? \(\s*<button[^>]*data-quick-btn="return"/);
 });

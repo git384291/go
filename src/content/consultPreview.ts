@@ -271,6 +271,12 @@ export const QUICK_BUNDLE = {
   reply: '인터넷을 더 묶을 수 있는지는 결합상품과 이미 묶인 회선 수에 따라 달라요. 지금 쓰는 결합상품 이름을 알고 계세요?',
 } as const;
 
+// 약정 만기 상담에서 바로 고를 수 있는 질문(반납 방법을 정해 주지 않고 기존 통신사 확인을 안내)
+export const QUICK_RETURN = {
+  label: '쓰던 공유기랑 셋톱박스는 어떻게 돌려줘요?',
+  reply: '기존 통신사에 반납할 장비 목록과 반납 방법을 확인해 주세요. 수거 일정이 잡힐 때까지 공유기와 셋톱박스, 전원 어댑터는 함께 보관해 주세요.',
+} as const;
+
 // ── 약정 만료 광고 → 상담: 약정이 끝나기까지 얼마나 남았는지에 따라 먼저 안내할 것이 다르다 ──
 export const AD_RENEWAL_LABEL = '약정 끝나기 전 비교하기';
 export const AD_RENEWAL_TITLE = '약정 만료 전 인터넷·TV';

@@ -632,6 +632,41 @@ for (const width of [320, 390]) {
   }
 }
 
+// ── G11. 약정 만기 장비 반납 바로 질문(PM 7038004227): 만기 두 경로에서만, 선택 시 응답 하나만 ──
+const RREPLY = '기존 통신사에 반납할 장비 목록과 반납 방법을 확인해 주세요. 수거 일정이 잡힐 때까지 공유기와 셋톱박스, 전원 어댑터는 함께 보관해 주세요.';
+for (const width of [320, 390]) {
+  for (const route of ['일반 가정용 약정 만기', '광고에서 약정 만기']) {
+    const tag = `[${width}px 장비 반납 바로 질문·${route}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    if (route === '일반 가정용 약정 만기') { await click(page, '가정용'); await click(page, '쓰던 약정이 끝나서 비교해요'); }
+    else { await page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    const btn = page.locator('[data-quick-btn="return"]');
+    check(`${tag} 버튼 표시, 처음엔 응답 없음`, (await btn.count()) === 1 && (await btn.innerText()) === '쓰던 공유기랑 셋톱박스는 어떻게 돌려줘요?' && (await page.locator('[data-quick-reply]').count()) === 0 && (await noOverflow(page)));
+    await btn.focus();
+    await page.keyboard.press('Enter');
+    const rep = await page.locator('[data-quick-reply]').innerText();
+    check(`${tag} [키보드 Enter] 정확한 응답 하나만·금칙어 없음·가로 넘침 없음`, rep.trim() === RREPLY && !SBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await noOverflow(page)));
+    let only = true;
+    for (const k of ['bundle', 'return', 'speed', 'return']) {
+      await page.locator(`[data-quick-btn="${k}"]`).focus(); await page.keyboard.press('Space');
+      if ((await page.locator('[data-quick-reply]').count()) !== 1 || (await page.locator('[data-quick-reply]').getAttribute('data-quick-reply')) !== k) only = false;
+    }
+    check(`${tag} 다른 바로 질문과 번갈아 눌러도 응답은 눌린 것 하나만`, only);
+    if (width === 390 && route === '광고에서 약정 만기') await shot(page, path.join(OUT, '21-quick-return-390.png'));
+    check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    await context.close();
+  }
+  const o = await openPage(width, NOW_THU);
+  await click(o.page, '가정용'); await click(o.page, '이사해서 새로 알아봐요');
+  const m = await o.page.locator('[data-quick-btn="return"]').count();
+  await o.context.close();
+  const o2 = await openPage(width, NOW_THU);
+  await click(o2.page, '매장·사무실용');
+  const n = await o2.page.locator('[data-quick-btn="return"]').count();
+  await o2.context.close();
+  check(`[${width}px 장비 반납 바로 질문] 이사·사업장 흐름에는 표시 안 됨`, m === 0 && n === 0);
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',
