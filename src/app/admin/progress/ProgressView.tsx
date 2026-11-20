@@ -38,6 +38,14 @@ export function ProgressView({ snapshot, now }: { snapshot: ProgressSnapshot; no
           <h2>영업 실적 (개발 진행과 별개)</h2>
           <p>{snapshot.sales.label}: <b>{snapshot.sales.value === null ? '미확인' : `${snapshot.sales.value}건`}</b></p>
         </section>
+        {snapshot.rehearsal ? (
+          <section aria-label="가상 연습 집계">
+            <h2>{snapshot.rehearsal.label}</h2>
+            <p>총판 확인 절차를 가상 데이터로 연습한 결과입니다. 실제 접수나 영업 실적이 아닙니다.</p>
+            <p>확인된 가상 접수: <b>{snapshot.rehearsal.total}건</b></p>
+            <ul>{snapshot.rehearsal.byDay.map((d) => <li key={d.day}>{d.day}(한국시간): {d.count}건</li>)}</ul>
+          </section>
+        ) : null}
       </main>
     </div>
   );

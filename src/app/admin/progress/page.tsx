@@ -11,7 +11,7 @@ export default async function ProgressPage() {
   const result = await renderProgress({
     mode: () => adminAuthMode(),
     requireStaff,
-    loadSnapshot: async () => (await import('@/server/admin/progressSnapshot')).PROGRESS_SNAPSHOT,
+    loadSnapshot: async () => (await import('@/server/admin/progressLedger')).loadProgressSnapshot(),
     now: () => new Date(),
   });
   if ('redirect' in result) {
