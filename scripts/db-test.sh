@@ -44,6 +44,7 @@ for f in db/migrations/0*.sql db/migrations/zz_grants.sql; do
 done
 echo "== seed (virtual data)"
 "${PSQL[@]}" -d "$DB" -f db/seed/test_seed.sql >/dev/null
+"${PSQL[@]}" -d "$DB" -f db/seed/test_notices.sql >/dev/null
 "${PSQL[@]}" -d "$DB" -f db/tests/00_helpers.sql >/dev/null
 
 echo "== permission report + tests"
@@ -53,6 +54,7 @@ run db/tests/20_staff_auth.sql >/dev/null
 run db/tests/30_leads_pii.sql >/dev/null
 run db/tests/40_product_scope.sql >/dev/null   # PHASE 1 상품 상태·2인 승인
 run db/tests/45_product_scope_hardening.sql >/dev/null   # PHASE 1 보완: 승인 서명 재사용 방지
+run db/tests/50_required_notices.sql >/dev/null   # 필수 고지 문구·버전·노출 기록(0007)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -259,8 +261,8 @@ apply_sql_file() { # $1 SQL 파일(비어 있으면 실패)
   [ -s "$1" ] || { echo "FAIL | 적용할 SQL이 비어 있음: $1" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
   "${PSQL[@]}" -d "$DB" -f "$1" >/dev/null
 }
-restore_create_lead() { # 0004 검수본으로 복원하고, 실제 본문이 고정 해시와 같은지 확인
-  extract_create_lead db/migrations/0004_product_scope.sql > "$LOG_DIR/fn-create_lead.sql"
+restore_create_lead() { # 0007 검수본(필수 고지 반영)으로 복원하고, 실제 본문이 고정 해시와 같은지 확인
+  extract_create_lead db/migrations/0007_required_notices.sql > "$LOG_DIR/fn-create_lead.sql"
   apply_sql_file "$LOG_DIR/fn-create_lead.sql"; rm -f "$LOG_DIR/fn-create_lead.sql"
   [ "$(fn_md5)" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | $1 create_lead 복원 실패(본문이 검수본과 다름)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 }
@@ -399,6 +401,33 @@ else
 fi
 SQL "drop table core.commissions_probe, core.settlement_ledger_probe"
 rm -f "$LOG_DIR/probe.err"
+
+echo "== migration drill: 0007 적용(기존 데이터 보존) → 롤백 → 재적용 (별도 가상 DB)"
+DRILL=fideon_drill
+"${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" -c "create database $DRILL" >/dev/null
+for f in db/migrations/000[1-6]_*.sql db/migrations/zz_grants.sql; do "${PSQL[@]}" -d "$DRILL" -f "$f" >/dev/null; done
+"${PSQL[@]}" -d "$DRILL" -f db/seed/test_seed.sql >/dev/null
+d_before=$("${PSQL[@]}" -d "$DRILL" -At -c "select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)")
+"${PSQL[@]}" -d "$DRILL" -f db/migrations/0007_required_notices.sql >/dev/null
+"${PSQL[@]}" -d "$DRILL" -f db/migrations/zz_grants.sql >/dev/null 2>&1
+d_after=$("${PSQL[@]}" -d "$DRILL" -At -c "select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)")
+[ "$d_before" = "$d_after" ] || { echo "FAIL | M1 0007 적용 뒤 기존 데이터 건수 변화 $d_before → $d_after" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M1 0007 적용 뒤 기존 리드·고객·동의 건수 그대로 ($d_after)" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DRILL" -f db/rollback/0007_down.sql >/dev/null
+"${PSQL[@]}" -d "$DRILL" -f db/migrations/zz_grants.sql >/dev/null 2>&1
+d_down=$("${PSQL[@]}" -d "$DRILL" -At -c "select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from pii.consents)")
+[ "$d_before" = "$d_down" ] || { echo "FAIL | M2 롤백 뒤 기존 데이터 건수 변화 $d_before → $d_down" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+gone=$("${PSQL[@]}" -d "$DRILL" -At -c "select (to_regclass('core.notice_texts') is null and to_regclass('pii.notice_exposures') is null)::text")
+[ "$gone" = true ] || { echo "FAIL | M3 롤백 뒤 새 테이블이 남음" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+d_md5=$("${PSQL[@]}" -d "$DRILL" -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
+[ "$d_md5" = "a99eddfc2884a4e7e588925a5664c811" ] || { echo "FAIL | M4 롤백 뒤 create_lead가 0004 본문이 아님 ($d_md5)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M2~M4 롤백: 데이터 보존, 새 테이블 제거, create_lead 0004 본문 복원" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DRILL" -f db/migrations/0007_required_notices.sql >/dev/null
+"${PSQL[@]}" -d "$DRILL" -f db/migrations/zz_grants.sql >/dev/null 2>&1
+d_re=$("${PSQL[@]}" -d "$DRILL" -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
+[ "$d_re" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | M5 재적용 뒤 create_lead 본문이 고정 해시와 다름" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M5 롤백 뒤 0007 재적용 정상" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"
 # 앱과 같은 TypeScript 배선을 실제 가상 DB에 실행한다. postgres 드라이버가 없으면 통과로 처리하지 않고 실패한다.

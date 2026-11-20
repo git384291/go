@@ -27,16 +27,16 @@ function lastBody(qualified: string): { file: string; body: string } {
   return found;
 }
 
-test('V13 고정 해시 = 마이그레이션의 마지막 함수 본문 md5 (5개 함수 모두)', () => {
+test('V13 고정 해시 = 마이그레이션의 마지막 함수 본문 md5 (6개 함수 모두)', () => {
   const rows = [...AUDIT.matchAll(/\('(api|core)', '([a-z_]+)', '([^']*)', '([0-9a-f]{32})'\)/g)];
-  assert.equal(rows.length, 5, 'pinned_funcs 5행');
+  assert.equal(rows.length, 6, 'pinned_funcs 6행');
   for (const [, nsp, fname, , md5] of rows) {
     const { file, body } = lastBody(`${nsp}.${fname}`);
     assert.equal(createHash('md5').update(body, 'utf8').digest('hex'), md5, `${nsp}.${fname} (${file})`);
   }
   // 상품 차단에 관여하는 함수가 빠지지 않았는지
   const names = rows.map((r) => `${r[1]}.${r[2]}`).sort();
-  assert.deepEqual(names, ['api.create_lead', 'api.release_probe_product_scope', 'core.block_truncate', 'core.product_approval_guard', 'core.product_catalog_guard']);
+  assert.deepEqual(names, ['api.create_lead', 'api.release_probe_product_scope', 'core.block_truncate', 'core.notice_texts_guard', 'core.product_approval_guard', 'core.product_catalog_guard']);
 });
 
 test('점검 함수의 기준값 = 코드 상품 상태(catalog.ts)', () => {

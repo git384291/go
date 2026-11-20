@@ -45,7 +45,8 @@ required_triggers(tbl, tgname) as (
 -- 점검 계정은 core 스키마 USAGE가 없으므로 이름 해석(to_regprocedure) 대신 시스템 카탈로그를 직접 조인한다(인자는 타입 목록으로 비교).
 pinned_funcs(nsp, fname, args, body_md5) as (
   values
-    ('api', 'create_lead', 'text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text', 'a99eddfc2884a4e7e588925a5664c811'),
+    ('api', 'create_lead', 'text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text', '684c04bb7dc8d75721ecb0f82a2c09c0'),  -- 0007 필수 고지 반영본(롤백 시 이전 a99eddfc2884a4e7e588925a5664c811로 되돌린다)
+    ('core', 'notice_texts_guard', '', '1f63bb70b44a56550fec3c6a2c6cd866'),
     ('core', 'product_catalog_guard', '', '197931d02b9aa30e9fe7406aba652784'),
     ('core', 'product_approval_guard', '', '9ef087dbd466ef5e1c2f57836a2fff7e'),
     ('core', 'block_truncate', '', '21175b027aefee1a01758c8feb061da8'),
