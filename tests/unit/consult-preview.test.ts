@@ -30,6 +30,7 @@ import {
   PHONE_VS_VISIT_NOTE,
   PRICE_TERM_TO_CHECK,
   QUICK_MOVING,
+  QUICK_SPEED,
   INSTALL_TO_CHECK,
   GIFT_TO_CHECK,
   PRIVACY_FAQ,
@@ -569,5 +570,14 @@ test('CP29 이사 상담 바로 질문 "이삿날 바로 설치돼요?": 정확�
   assert.equal(QUICK_MOVING.reply, '이삿날 설치가 가능한지는 새 주소와 기사님 일정에 따라 달라요. 이사 날짜가 언제예요?');
   assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료/.test(QUICK_MOVING.label + QUICK_MOVING.reply));
   assert.match(COMPONENT, /picks\[0\] === 'moving' && fromAd !== 'renewal'/);
+  assert.match(COMPONENT, /data-quick-btn="moving"/);
   assert.match(COMPONENT, /data-quick-reply/);
+});
+
+test('CP30 가정용 속도 바로 질문: 정확한 응답, 가정용 흐름에서 표시, 속도·금액을 정해 주지 않음', () => {
+  assert.equal(QUICK_SPEED.label, '100메가와 500메가 중 뭘 쓰면 돼요?');
+  assert.equal(QUICK_SPEED.reply, '주로 웹서핑이나 영상을 보시면 100메가도 후보예요. 여러 기기에서 동시에 큰 파일을 내려받는다면 500메가가 더 편할 수 있어요. 집에서는 인터넷을 주로 어떻게 쓰세요?');
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|최고|무조건|보장/.test(QUICK_SPEED.label + QUICK_SPEED.reply));
+  assert.match(COMPONENT, /data-quick-btn="speed"/);
+  assert.match(COMPONENT, /segment === 'home' \? \(\s*<section className="cp-quick"/);
 });

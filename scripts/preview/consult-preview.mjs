@@ -548,12 +548,12 @@ for (const width of [320, 390]) {
     const { page, context, external, errors } = await openPage(width, NOW_THU);
     if (route === '광고에서 이사') { await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
     else { await click(page, '가정용'); await click(page, '이사해서 새로 알아봐요'); }
-    const btn = page.locator('.cp-quick-btn');
+    const btn = page.locator('[data-quick-btn="moving"]');
     check(`${tag} 버튼 "이삿날 바로 설치돼요?" 표시, 처음엔 응답 없음`, (await btn.count()) === 1 && (await btn.innerText()) === '이삿날 바로 설치돼요?' && (await page.locator('[data-quick-reply]').count()) === 0);
     await btn.focus();
     await page.keyboard.press('Enter');
     const rep = await page.locator('[data-quick-reply]').innerText();
-    check(`${tag} [키보드 Enter] 정확한 응답 표시·금칙어 없음·응답 하나만`, rep.trim() === QREPLY && !QBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await noOverflow(page)) && (await btn.getAttribute('aria-pressed')) === 'true');
+    check(`${tag} [키보드 Enter] 정확한 응답 표시·금칙어 없음·응답 하나만`, rep.trim() === QREPLY && !QBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await page.locator('[data-quick-reply]').getAttribute('data-quick-reply')) === 'moving' && (await noOverflow(page)) && (await btn.getAttribute('aria-pressed')) === 'true');
     await page.keyboard.press('Space');
     check(`${tag} 다시 눌러도 응답 하나만`, (await page.locator('[data-quick-reply]').count()) === 1);
     if (width === 390 && route === '광고에서 이사') await shot(page, path.join(OUT, '18-quick-moving-390.png'));
@@ -566,13 +566,43 @@ for (const width of [320, 390]) {
   const tag = `[${width}px 약정 만기 두 경로]`;
   const { page, context } = await openPage(width, NOW_THU);
   await click(page, '가정용'); await click(page, '쓰던 약정이 끝나서 비교해요');
-  const a = await page.locator('.cp-quick-btn').count();
+  const a = await page.locator('[data-quick-btn="moving"]').count();
   await context.close();
   const o2 = await openPage(width, NOW_THU);
   await o2.page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await o2.page.keyboard.press('Enter');
-  const b = await o2.page.locator('.cp-quick-btn').count();
+  const b = await o2.page.locator('[data-quick-btn="moving"]').count();
   await o2.context.close();
   check(`${tag} 이사가 아닌 약정 만기 흐름에는 바로 질문 버튼 없음`, a === 0 && b === 0);
+}
+
+// ── G9. 가정용 속도 바로 질문 "100메가와 500메가 중 뭘 쓰면 돼요?"(PM 7037263637): 가정용 흐름 전체에 표시, 응답 한 번, 사업장에는 없음 ──
+const SREPLY = '주로 웹서핑이나 영상을 보시면 100메가도 후보예요. 여러 기기에서 동시에 큰 파일을 내려받는다면 500메가가 더 편할 수 있어요. 집에서는 인터넷을 주로 어떻게 쓰세요?';
+const SBAN = /\d[\d,]*\s*원|할인|무료|혜택|지원금|확정됩니다|확정돼요|접수|가입 완료|예약|연결 완료|전화번호|휴대폰|무조건|보장/;
+for (const width of [320, 390]) {
+  for (const route of ['일반 가정용', '광고에서 이사', '광고에서 약정 만기']) {
+    const tag = `[${width}px 속도 바로 질문·${route}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    if (route === '일반 가정용') await click(page, '가정용');
+    else if (route === '광고에서 이사') { await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    else { await page.locator('[data-ad-draft="renewal"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    const btn = page.locator('[data-quick-btn="speed"]');
+    check(`${tag} 버튼 표시, 처음엔 응답 없음`, (await btn.count()) === 1 && (await btn.innerText()) === '100메가와 500메가 중 뭘 쓰면 돼요?' && (await page.locator('[data-quick-reply]').count()) === 0);
+    await btn.focus();
+    await page.keyboard.press('Enter');
+    const rep = await page.locator('[data-quick-reply]').innerText();
+    check(`${tag} [키보드 Enter] 정확한 응답 한 번·금칙어 없음·가로 넘침 없음`, rep.trim() === SREPLY && !SBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await noOverflow(page)));
+    if (route === '광고에서 이사') {
+      await page.locator('[data-quick-btn="moving"]').focus(); await page.keyboard.press('Enter');
+      check(`${tag} 다른 바로 질문을 누르면 응답은 그것 하나만`, (await page.locator('[data-quick-reply]').count()) === 1 && (await page.locator('[data-quick-reply]').getAttribute('data-quick-reply')) === 'moving');
+    }
+    if (width === 390 && route === '일반 가정용') await shot(page, path.join(OUT, '19-quick-speed-390.png'));
+    check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    await context.close();
+  }
+  const o = await openPage(width, NOW_THU);
+  await click(o.page, '매장·사무실용');
+  check(`[${width}px 속도 바로 질문·사업장] 사업장 흐름에는 표시 안 됨`, (await o.page.locator('[data-quick-btn]').count()) === 0);
+  await o.context.close();
 }
 
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
