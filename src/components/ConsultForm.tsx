@@ -18,6 +18,7 @@ import {
 } from './consultSubmit';
 import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './TurnstileWidget';
 import { KAKAO_INQUIRY_LABEL, KAKAO_INQUIRY_NOTES } from '../content/channels';
+import { resolveAttribution } from '../content/attribution';
 
 // REV-004: 실제 고객정보 수집은 재검수 통과 전까지 비활성. 화면만 제공한다.
 const FORM_ENABLED = process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED === 'true';
@@ -182,6 +183,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
             privacyVersion: PRIVACY_VERSION,
             idempotencyKey,
             turnstileToken: token,
+            ...currentAttribution(),
           }),
         });
         result = classifyResponse(res.status, await readResponseBody(res));
@@ -333,4 +335,9 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       )}
     </form>
   );
+}
+
+/** 접수 시점의 첫 유입 출처. 저장소 접근이 막혀도 접수는 그대로 진행한다 */
+function currentAttribution() {
+  try { return resolveAttribution(window.location.search, window.sessionStorage); } catch { return {}; }
 }

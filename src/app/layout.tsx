@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import { AttributionCapture } from '../components/AttributionCapture';
 
 export const metadata: Metadata = {
   title: { default: 'FIDEON · 인터넷 + TV 가입 상담', template: '%s · FIDEON' },
@@ -13,7 +14,10 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, them
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        <AttributionCapture />
+        {children}
+      </body>
     </html>
   );
 }
