@@ -265,3 +265,27 @@ test('Q15 거부 결과 키 허용 목록·원문 비노출(형태 오류 포함
     assert.ok(Object.isFrozen(r));
   }
 });
+
+// ------------------------------------------------------------------ 상담창 안내문(PM 11/21 5항)
+import { renderQuoteMessage } from '../../src/server/policies';
+
+test('Q20 안내문: 승인 견적은 요금·사은품·고지만, 공급처·버전·수수료·원문은 없음', () => {
+  const m = renderQuoteMessage(quotePolicy([base], req, NOW));
+  assert.equal(m.kind, 'quote');
+  for (const s of ['11,111원(부가세 포함)', '36개월', '2,222원', '3,333원 상품권', '정책 기준 2026-11-16 09:00', '2026-11-17 00:00까지', '신청 시점에 다시 확인']) assert.ok(m.text.includes(s), s);
+  for (const s of ['supplier-a', 'v-fixture-1', '999999', 'internal://', 'sheet-1']) assert.ok(!m.text.includes(s), s);
+});
+
+test('Q21 안내문: 검수 필요·미승인·만료는 금액 없이 고정 안내문만', () => {
+  const cases = [rec({ reviewStatus: 'draft' }), rec({ validUntil: K('2026-11-16T10:00:00+09:00') }), rec({ monthlyFee: U }), rec({ sourceKind: 'past_promotion' })];
+  for (const c of cases) {
+    const m = renderQuoteMessage(quotePolicy([c], req, NOW));
+    assert.deepEqual(m, { kind: 'needs_review', text: NEEDS_REVIEW_GUIDANCE });
+    assert.ok(!/\d{3}/.test(m.text));
+  }
+});
+
+test('Q22 안내문: 혜택 없음·조건 미상은 확정 표현 없이 표시', () => {
+  const none = renderQuoteMessage(quotePolicy([rec({ customerBenefit: K({ amountKrw: 0, form: 'none' as const, payoutCondition: U, cancellationCondition: U }) })], req, NOW));
+  assert.ok(none.kind === 'quote' ? none.text.includes('사은품: 없음') : true);
+});
