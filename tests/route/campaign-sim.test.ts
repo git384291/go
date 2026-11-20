@@ -60,3 +60,57 @@ test('CS5 정적: 네트워크·환경·저장·로그·타이머·SDK 없음, �
   assert.ok(!/campaignDraft|adDrafts|server\/advertising/.test(src));
   assert.ok(!/\b(approve|schedule|publish|charge|submit|execute)\w*\s*\(/i.test(src));
 });
+
+// ── PM 7041019751: 실제 생성기 DTO 직접 전달 ──
+import { generateAdCopy, type AdCopyGenerator } from '../../src/server/advertising/adGeneration';
+import { CAMPAIGN_BLOCKERS } from '../../src/server/advertising/campaignDraft';
+import { computeMetrics } from '../../src/content/adMetrics';
+
+const GOOD = { title: '이사 전 인터넷·TV 확인', description: '새집 인터넷·TV 조건을 확인하세요. 설치 가능 여부는 별도 확인이 필요합니다.' };
+const fakeGen = () => { let calls = 0; const g: AdCopyGenerator = { generate: async () => { calls += 1; return { kind: 'ok', data: { ...GOOD }, called: true }; } }; return { g, calls: () => calls }; };
+
+test('CS6 실제 생성기 DTO 그대로 → 모의 시작→조회→중단(재시도)→성과, 외부 호출·청구 0', async () => {
+  const { g, calls } = fakeGen();
+  const gen = await generateAdCopy({ situationId: 'moving', product: 'internet-tv' }, { generator: g });
+  assert.equal(gen.ok, true);
+  assert.equal(calls(), 1, '가짜 생성기 1회(실제 호출 아님)');
+  const s = createSimStore();
+  const st = s.start(gen, 'gen1');
+  assert.ok(st.ok); if (!st.ok) return;
+  assert.equal(st.value.copySource, 'model'); assert.equal(st.value.draftId, 'moving'); assert.equal(st.value.status, 'SIM_RUNNING');
+  assert.deepEqual([st.value.liveDelivery, st.value.billedKrw, st.value.externalCalls], [false, 0, 0]);
+  assert.equal(s.start(gen, 'gen1').ok && (s.start(gen, 'gen1') as { replayed: boolean }).replayed, true);
+  const q = s.status(st.value.simId); assert.ok(q.ok && q.value.status === 'SIM_RUNNING');
+  const a = s.stop(st.value.simId), b = s.stop(st.value.simId);
+  assert.ok(a.ok && b.ok && !a.replayed && b.replayed);
+  if (b.ok) assert.equal(b.value.events.length, 2);
+  assert.ok(s.report(st.value.simId).ok);
+  assert.equal(calls(), 1, '모의 흐름이 생성기를 다시 부르지 않음');
+});
+
+test('CS7 생성기 DTO의 blocker는 초안 모듈 목록과 같고, 실패 DTO·승인 위조는 거부', async () => {
+  const { g } = fakeGen();
+  const gen = await generateAdCopy({ situationId: 'contract_end', product: 'internet-tv' }, { generator: g });
+  const s = createSimStore();
+  const st = s.start(gen, 'g2'); assert.ok(st.ok);
+  if (st.ok) assert.deepEqual([...st.value.blockers], [...CAMPAIGN_BLOCKERS]);
+  const bad = await generateAdCopy({ situationId: 'moving', product: 'internet-tv' }, { generator: null });
+  assert.deepEqual(s.start(bad, 'g3'), { ok: false, error: 'INVALID_INPUT' });
+  assert.deepEqual(s.start({ ...(gen as object), executionAllowed: true }, 'g4'), { ok: false, error: 'INVALID_INPUT' });
+  assert.deepEqual(s.start({ ...(gen as object), blockers: [] }, 'g5'), { ok: false, error: 'INVALID_INPUT' });
+});
+
+test('CS8 실적 집계와 분리: 성과는 표본 표지·지출 0, 저장소끼리 상태 공유 없음, 실데이터 입력 경로 없음', () => {
+  const a = createSimStore(), b = createSimStore();
+  const x = a.start(mk(), 'k'); assert.ok(x.ok); if (!x.ok) return;
+  assert.deepEqual(b.status(x.value.simId), { ok: false, error: 'NOT_FOUND' });
+  const r = a.report(x.value.simId); assert.ok(r.ok);
+  if (r.ok) {
+    assert.equal(r.value.sample, true); assert.equal(r.value.spendKrw, 0);
+    assert.deepEqual(r.value.metrics, computeMetrics({ model: 'cohort', period: { from: '2026-11-17', to: '2026-11-23' }, windowDays: 30, source: 'sample', traffic: 'paid', format: 'search', spendKrw: 0, spendIncludesVat: false, impressions: 0, clicks: 0, visits: 0, conversions: { consult_request: 0 }, recognizedRevenueKrw: null }));
+  }
+  const src = readFileSync('src/server/advertising/campaignSim.ts', 'utf8');
+  assert.deepEqual(src.match(/^import .+$/gm), ["import 'server-only';", "import { computeMetrics, type Metrics } from '@/content/adMetrics';"]);
+  assert.match(src, /source: 'sample'/);
+  assert.equal(a.report.length, 1, 'report는 simId만 받는다(지출·노출 입력 매개변수 없음)');
+});

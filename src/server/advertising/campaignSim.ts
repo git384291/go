@@ -13,6 +13,8 @@ export type SimCampaign = {
   readonly simId: string;
   readonly mode: 'SIMULATION';
   readonly draftId: string;
+  /** 소재 출처: 고정 초안(fixed) 또는 AI 생성 초안(model). 어느 쪽이든 집행 불가·blocker 유지 */
+  readonly copySource: 'fixed' | 'model';
   readonly status: SimStatus;
   readonly liveDelivery: false;
   readonly billedKrw: 0;
@@ -23,6 +25,8 @@ export type SimCampaign = {
 export type SimError = 'INVALID_INPUT' | 'NOT_FOUND';
 export type SimResult<T> = { readonly ok: true; readonly value: T; readonly replayed: boolean } | { readonly ok: false; readonly error: SimError };
 
+// 생성기 DTO에는 blocker 목록이 없다. 생성 성공은 집행 승인이 아니므로 고정 7개를 그대로 적용한다(시험 CS7이 초안 모듈 목록과 일치를 검증)
+const GENERATED_BLOCKERS = Object.freeze(['CAP_NOT_VERIFIED', 'ACCOUNT_NOT_VERIFIED', 'INDUSTRY_ELIGIBILITY_NOT_VERIFIED', 'DESTINATION_NOT_SET', 'ATTRIBUTION_NOT_VERIFIED', 'PRIVACY_ROLE_NOT_VERIFIED', 'MEDIA_REVIEW_NOT_PASSED']);
 const KEY = /^[A-Za-z0-9_-]{1,40}$/;
 const fail = (error: SimError): SimResult<never> => Object.freeze({ ok: false, error });
 const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -41,11 +45,19 @@ export function createSimStore() {
       const prior = byKey.get(simKey);
       if (prior) return Object.freeze({ ok: true, value: get(prior) as SimCampaign, replayed: true });
       if (!isRec(draft) || draft.status !== 'DRAFT_UNPUBLISHED' || draft.executionAllowed !== false) return fail('INVALID_INPUT');
-      if (typeof draft.draftId !== 'string' || !Array.isArray(draft.blockers) || draft.blockers.length < 1 || !draft.blockers.every((b) => typeof b === 'string')) return fail('INVALID_INPUT');
+      const generated = draft.ok === true && draft.source === 'model';
+      const draftId = generated ? draft.situationId : draft.draftId;
+      if (typeof draftId !== 'string') return fail('INVALID_INPUT');
+      let blockers: readonly string[];
+      if (Array.isArray(draft.blockers)) {
+        if (draft.blockers.length < 1 || !draft.blockers.every((b) => typeof b === 'string')) return fail('INVALID_INPUT');
+        blockers = draft.blockers as string[];
+      } else if (generated && draft.blockers === undefined) blockers = GENERATED_BLOCKERS;
+      else return fail('INVALID_INPUT');
       n += 1;
       const simId = `sim-${n}`;
       byKey.set(simKey, simId);
-      const c = put({ simId, mode: 'SIMULATION', draftId: draft.draftId, status: 'SIM_RUNNING', liveDelivery: false, billedKrw: 0, externalCalls: 0, blockers: Object.freeze([...(draft.blockers as string[])]), events: Object.freeze([{ seq: 1, type: 'SIM_STARTED' }]) });
+      const c = put({ simId, mode: 'SIMULATION', draftId, copySource: generated ? 'model' : 'fixed', status: 'SIM_RUNNING', liveDelivery: false, billedKrw: 0, externalCalls: 0, blockers: Object.freeze([...blockers]), events: Object.freeze([{ seq: 1, type: 'SIM_STARTED' }]) });
       return Object.freeze({ ok: true, value: c, replayed: false });
     },
     status(simId: unknown): SimResult<SimCampaign> {
