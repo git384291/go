@@ -326,6 +326,40 @@ try {
         await ctx.close().catch(() => {});
       }
     };
+    // 담당자 연결 모의 예시(PM 7029405014): 실제 서버·실제 브라우저, 320/390폭, 키보드로 사례 전환·반복 선택, 한 번에 안내 하나만
+    const HX = { off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요', unavailable: '현재 담당자 연결을 확인할 수 없어요', unknown: '담당자에게 전달됐는지 확인하지 못했어요', confirmed: '담당자가 이 문의를 확인했어요' };
+    const runHandoff = async (browser, width) => {
+      const ctx = await browser.newContext({ viewport: { width, height: 800 }, timezoneId: 'Asia/Seoul' });
+      const external = [];
+      await ctx.route('**/*', (route) => { const u = route.request().url(); if (u.startsWith(base + '/') || u === base) return route.continue(); external.push(u); return route.abort(); });
+      const page = await ctx.newPage();
+      const errs = [];
+      page.on('pageerror', (e) => errs.push(String(e)));
+      try {
+        await page.goto(base + '/preview/consult-chat', { waitUntil: 'networkidle', timeout: 20_000 });
+        await page.locator('details[data-aux="examples"] > summary').click();
+        await page.locator('details[data-handoff-fold] > summary').click();
+        const start0 = (await page.locator('[data-handoff-result]').count()) === 0 && (await page.locator('.cp-handoff-case').count()) === 4;
+        let ok = start0; const bad = [];
+        for (const [i, id] of ['off', 'unavailable', 'unknown', 'confirmed', 'confirmed', 'off', 'confirmed', 'unknown'].entries()) {
+          await page.locator(`[data-case="${id}"]`).focus();
+          await page.keyboard.press(i % 2 === 0 ? 'Enter' : 'Space');
+          const cnt = await page.locator('[data-handoff-result]').count();
+          const txt = cnt === 1 ? await page.locator('[data-handoff-result]').innerText() : '';
+          const only = Object.entries(HX).every(([k, v]) => (k === id) === txt.includes(v));
+          const badge = await page.locator('.cp-handoff-mock').count();
+          const clip = await page.$$eval('[data-handoff-result], [data-handoff-result] p, .cp-handoff-mock', (els) => els.every((e) => e.scrollWidth <= e.clientWidth + 1 && e.getBoundingClientRect().right <= window.innerWidth + 0.5));
+          const pass = cnt === 1 && only && badge === (id === 'confirmed' ? 1 : 0) && clip;
+          if (!pass) { ok = false; bad.push(`${i}:${id}`); }
+        }
+        const noOver = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+        const noInput = (await page.locator('input, textarea').count()) === 0;
+        const stor = await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length);
+        return { ok: ok && noOver && noInput && stor === 0 && external.length === 0 && errs.length === 0, note: `사례 8회 선택 ${ok}${bad.length ? ' 실패 ' + bad.join(',') : ''}, 가로 넘침 없음 ${noOver}, 외부 요청 ${external.length}, 오류 ${errs.length}` };
+      } finally {
+        await ctx.close().catch(() => {});
+      }
+    };
     const flows = [
       { name: '가정용(이사·3~4개·매일 → 이유 고치기 → 약정 종료 비교·거의 안 봐요)', first: ['가정용', '이사해서 새로 알아봐요', '3~4개', '매일 봐요'], editQuestion: '어떤 이유로',
         again: ['쓰던 약정이 끝나서 비교해요', '3~4개', '거의 안 봐요'], sum1: ['가장 먼저 비교할 점', '동시 사용과 셋톱박스 임대료'],
@@ -342,6 +376,11 @@ try {
         let res;
         try { res = await runFlow(browser, f); } catch (e) { res = { ok: false, note: `브라우저 단계 실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})` }; }
         report(`S3 실제 서버 390폭 ${f.name}: 요약·고치기·낡은 요약 제거·새 요약`, res.ok, res.note);
+      }
+      for (const w of [320, 390]) {
+        let res;
+        try { res = await runHandoff(browser, w); } catch (e) { res = { ok: false, note: `브라우저 단계 실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})` }; }
+        report(`S3 실제 서버 ${w}폭 담당자 연결 모의 예시: 키보드 사례 전환·반복 선택, 안내 하나만, 모의 표시, 잘림 없음`, res.ok, res.note);
       }
     } catch (e) {
       report('S3 실제 서버 브라우저 시작', false, `실패(${e instanceof Error ? e.message.split('\n')[0].slice(0, 80) : '알 수 없음'})`);

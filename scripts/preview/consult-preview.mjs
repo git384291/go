@@ -408,6 +408,53 @@ for (const width of [320, 390]) {
   }
 }
 
+// ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
+const HANDOFF_EXPECT = {
+  off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',
+  unavailable: '현재 담당자 연결을 확인할 수 없어요',
+  unknown: '담당자에게 전달됐는지 확인하지 못했어요',
+  confirmed: '담당자가 이 문의를 확인했어요',
+};
+const HANDOFF_SEQ = ['off', 'unavailable', 'unknown', 'confirmed', 'confirmed', 'unknown', 'off', 'confirmed'];
+for (const width of [320, 390]) {
+  const tag = `[${width}px 담당자 연결 모의 예시]`;
+  const { page, context, external, errors } = await openPage(width, NOW_THU);
+  await page.locator('details[data-aux="examples"] > summary').click();
+  const foldClosed = !(await page.locator('details[data-handoff-fold]').evaluate((e) => e.open));
+  check(`${tag} 기존 질문 예시 안에 접힌 상태로 있음`, foldClosed && (await page.locator('details[data-aux="examples"] details[data-handoff-fold]').count()) === 1);
+  await page.locator('details[data-handoff-fold] > summary').click();
+  check(`${tag} 펼치면 안내문(실제 전송 없음)·고객 질문·사례 버튼 4개, 사례를 고르기 전엔 결과 0`, (await page.locator('.cp-handoff-note').innerText()).includes('실제로 전송되지 않아요') && (await page.locator('.cp-handoff-case').count()) === 4 && (await page.locator('[data-handoff-result]').count()) === 0);
+  const sp = await spacing(page, '.cp-handoff-case');
+  check(`${tag} 사례 버튼 높이 ≥44px·간격 ≥8px`, sp.minH >= 44 && sp.minGap >= 8, `높이 ${Math.round(sp.minH)}, 간격 ${sp.minGap}`);
+  // 키보드: 첫 사례에 초점을 두고 Tab 순서가 네 사례 순서인지
+  await page.locator('.cp-handoff-case').first().focus();
+  const order = [await page.evaluate(() => document.activeElement.dataset.case)];
+  for (let i = 0; i < 3; i++) { await page.keyboard.press('Tab'); order.push(await page.evaluate(() => document.activeElement.dataset.case)); }
+  check(`${tag} [키보드] Tab 순서: 경로 꺼짐 → 연결 확인 불가 → 전달 결과 불명 → 모의 확인`, order.join('>') === 'off>unavailable>unknown>confirmed', order.join('>'));
+  let allOk = true; const notes = [];
+  for (const [i, id] of HANDOFF_SEQ.entries()) {
+    await page.locator(`[data-case="${id}"]`).focus();
+    await page.keyboard.press(i % 2 === 0 ? 'Enter' : 'Space');
+    const count = await page.locator('[data-handoff-result]').count();
+    const which = await page.locator('[data-handoff-result]').getAttribute('data-handoff-result');
+    const text = await page.locator('[data-handoff-result]').innerText();
+    const others = Object.entries(HANDOFF_EXPECT).filter(([k]) => k !== id).some(([, v]) => text.includes(v));
+    const badge = await page.locator('.cp-handoff-mock').count();
+    const badgeOk = id === 'confirmed' ? badge === 1 && (await page.locator('.cp-handoff-mock').innerText()) === '모의 결과 · 실제 문의 전송 없음' && (await page.locator('.cp-handoff-mock').evaluate((e) => e.parentElement.textContent.includes('담당자가 이 문의를 확인했어요'))) : badge === 0;
+    const pressed = await page.$$eval('.cp-handoff-case', (els) => els.filter((e) => e.getAttribute('aria-pressed') === 'true').map((e) => e.dataset.case));
+    const clip = await page.$$eval('[data-handoff-result], [data-handoff-result] p, .cp-handoff-mock', (els) => els.every((e) => e.scrollWidth <= e.clientWidth + 1 && e.getBoundingClientRect().right <= window.innerWidth + 0.5 && e.getBoundingClientRect().left >= -0.5));
+    const ok = count === 1 && which === id && text.includes(HANDOFF_EXPECT[id]) && !others && badgeOk && pressed.length === 1 && pressed[0] === id && clip && (await noOverflow(page));
+    if (!ok) { allOk = false; notes.push(`${i}:${id} count=${count} which=${which} others=${others} badge=${badge} pressed=${pressed} clip=${clip}`); }
+  }
+  check(`${tag} [키보드 Enter/Space] 사례 전환·반복 선택(8회): 매번 해당 안내 하나만, 모의 확인에만 표시(같은 문단), 문구 잘림·가로 넘침 0`, allOk, notes.join(' | '));
+  await page.locator('[data-case="confirmed"]').focus();
+  await page.keyboard.press('Enter');
+  await page.locator('[data-handoff-result]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, `10-handoff-confirmed-${width}.png`), fullPage: true });
+  check(`${tag} 선택으로 발생한 외부 요청 0·저장소 0·입력칸 0·링크 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.locator('a[href]').count()) === 0, `외부 ${external.length}건`);
+  await context.close();
+}
+
 // ── D. 보조 FAQ는 접어서 읽는다(펼치면 보임) ──
 {
   const { page, context } = await openPage(390, NOW_THU);

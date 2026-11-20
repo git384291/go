@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ConsultHandoffDemo } from './ConsultHandoffDemo';
 import {
   AI_NOTICE,
   buildSummary,
@@ -251,6 +252,10 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
             <p className="cp-example-ans">AI 도우미: {ex.answer}</p>
           </div>
         ))}
+        <details className="cp-fold cp-handoff-fold" data-handoff-fold="">
+          <summary>담당자 연결 모의 예시 (4)</summary>
+          <ConsultHandoffDemo />
+        </details>
       </details>
 
       <details className="cp-fold cp-aux" data-aux="faq">

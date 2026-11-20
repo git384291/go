@@ -164,11 +164,12 @@ test('CP11 AI 도우미·가상 대화 표시와 개인정보 FAQ가 구체적�
 });
 
 const COMPONENT = readFileSync('src/components/ConsultPreviewChat.tsx', 'utf8');
+const DEMO_COMPONENT = readFileSync('src/components/ConsultHandoffDemo.tsx', 'utf8');
 const PAGE = readFileSync('src/app/preview/consult-chat/page.tsx', 'utf8');
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
 test('CP12 화면 코드: 입력칸·외부 전송·저장·분석·전화 링크가 없다', () => {
-  const src = stripComments(COMPONENT);
+  const src = stripComments(COMPONENT + '\n' + DEMO_COMPONENT);
   for (const re of [/<input/i, /<textarea/i, /<select/i, /contentEditable/i, /\bfetch\(/, /XMLHttpRequest/, /sendBeacon/, /WebSocket/, /EventSource/, /localStorage/, /sessionStorage/, /indexedDB/, /document\.cookie/, /tel:/, /href=/, /<form/i, /<a\s/i, /process\.env/, /gtag|dataLayer|analytics|pixel/i]) {
     assert.ok(!re.test(src), String(re));
   }
@@ -446,4 +447,32 @@ test('CP25 확인할 항목: 가정용은 월 요금·약정이 먼저, 설치 �
   const b = buildSummary('home', ['renewal', 'many', 'rare']).toCheck;
   assert.ok(a.includes('집에서 와이파이가 약한 방이 있는지') && !b.includes('집에서 와이파이가 약한 방이 있는지'));
   assert.ok(b.includes('공유기 구성(추가 장비 필요 여부)') && !a.includes('공유기 구성(추가 장비 필요 여부)'));
+});
+
+// PM 7029405014: 담당자 연결 모의 예시(검수한 판정 함수 재사용)
+test('CP26 담당자 연결 모의 예시: 네 사례가 각각 하나의 안내, 모의 확인에만 "모의 결과 · 실제 문의 전송 없음" 표시, 고정 가상 값만 사용', async () => {
+  const { DEMO_CASES, MOCK_BADGE, DEMO_NOTE, runDemoCase } = await import('../../src/content/consultHandoffDemo');
+  const { REPLIES } = await import('../../src/content/consultHandoff');
+  assert.deepEqual(DEMO_CASES.map((c) => c.id), ['off', 'unavailable', 'unknown', 'confirmed']);
+  assert.deepEqual(DEMO_CASES.map((c) => c.label), ['경로 꺼짐', '연결 확인 불가', '전달 결과 불명', '모의 확인']);
+  assert.equal(MOCK_BADGE, '모의 결과 · 실제 문의 전송 없음');
+  assert.ok(DEMO_NOTE.includes('실제로 전송되지 않아요'));
+  for (const c of DEMO_CASES) {
+    const a = runDemoCase(c.id);
+    assert.equal(a.state, c.expectState, c.id);
+    assert.equal(a.text, REPLIES[c.expectState], c.id);
+    assert.equal(a.mock, c.id === 'confirmed', c.id);
+    assert.deepEqual(runDemoCase(c.id), a, '같은 사례는 항상 같은 결과');
+    assert.ok(c.events.length > 10);
+  }
+  // 모의 확인 문구와 표시는 화면 코드에서 같은 문단 안에 붙어 있다
+  assert.match(DEMO_COMPONENT, /\{result\.text\}\s*\n?\s*\{result\.mock \? <span className="cp-handoff-mock">\{MOCK_BADGE\}<\/span> : null\}/);
+  const src = readFileSync('src/content/consultHandoffDemo.ts', 'utf8');
+  assert.ok(!/fetch\(|process\.env|Date\.now|new Date|setTimeout|setInterval|Math\.random|localStorage/.test(src), '시계·난수·저장·전송 없음');
+  // 일반 예시 영역 안에 접힌 상태로 들어 있다
+  assert.match(COMPONENT, /<details className="cp-fold cp-handoff-fold" data-handoff-fold="">/);
+  assert.ok(COMPONENT.indexOf('data-aux="examples"') < COMPONENT.indexOf('data-handoff-fold'));
+  assert.ok(COMPONENT.indexOf('data-handoff-fold') < COMPONENT.indexOf('data-aux="faq"'));
+  assert.ok(!/<details[^>]*cp-handoff-fold[^>]*\bopen\b/.test(COMPONENT));
+  assert.ok(!/MOCK_BADGE|모의 결과/.test(COMPONENT), '배지 문구는 별도 컴포넌트·콘텐츠에서만');
 });
