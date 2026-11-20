@@ -34,6 +34,18 @@ async function bundle({ enabled, siteKey, privacy = 'privacy-test-v1', dev = fal
     platform: 'browser',
     jsx: 'automatic',
     logLevel: 'silent',
+    // 시험 전용 확정 고지 설정으로 바꿔 끼운다(실제 설정은 미확정이라 접수를 막는다. 실제 문구 아님)
+    plugins: [{
+      name: 'test-notices',
+      setup(b) {
+        b.onResolve({ filter: /content\/requiredNotices$/ }, (a) => (a.importer.endsWith('ConsultForm.tsx') ? { path: 'test-notices', namespace: 'tn' } : undefined));
+        b.onLoad({ filter: /.*/, namespace: 'tn' }, () => ({
+          loader: 'ts',
+          contents: `export const REQUIRED_NOTICES = { version: ${JSON.stringify(privacy)}, confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: '시험용 문구' }] };
+export function noticeReadiness(cfg, v) { return cfg.confirmed && cfg.version === v && v !== '' ? { ready: true } : { ready: false, reason: 'X' }; }`,
+        }));
+      },
+    }],
     define: {
       'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'),
       'process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED': JSON.stringify(enabled ? 'true' : 'false'),
@@ -109,6 +121,8 @@ async function fill(page, { name = '테스트', phone = '010-0000-0001', contact
   await page.fill('input[name=contactTime]', contact);
   const box = page.locator('.consent-box input[type=checkbox]').first();
   if ((await box.isChecked()) !== consent) await box.click();
+  const notice = page.locator('.consent-box[aria-label="필수 고지"] input[type=checkbox]');
+  for (let i = 0; i < (await notice.count()); i++) if (!(await notice.nth(i).isChecked())) await notice.nth(i).click();
 }
 /** 제출 후 요청이 실제로 나가고(응답 처리까지) 폼이 결과 상태로 정착할 때까지 기다린다(이전 결과 문구에 속지 않게) */
 async function submitAndSettle(page, seen, how = () => page.click('button[type=submit]')) {
