@@ -30,6 +30,7 @@ import {
   PHONE_VS_VISIT_NOTE,
   PRICE_TERM_TO_CHECK,
   QUICK_BUNDLE,
+  QUICK_MOVING_UNDECIDED,
   DATE_UNKNOWN,
   QUICK_BUNDLE_UNKNOWN,
   QUICK_MOVING,
@@ -613,4 +614,12 @@ test('CP34 약정 만기 "만기일을 모르겠어요": 정확한 안내, 한 �
   assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(DATE_UNKNOWN.label + DATE_UNKNOWN.reply));
   assert.match(COMPONENT, /lastStep\?\.id === 'remaining' && lastChoice\?\.id === 'month'/);
   assert.ok(HOME_RENEWAL_AD_FLOW.steps[1].choices[0].reply.endsWith('기존 약정은 언제 끝나세요?'));
+});
+
+test('CP35 이사 날짜 후속 "날짜가 아직 안 정해졌어요": 정확한 안내, 이사 질문 뒤에만, 확정 표현 없음', () => {
+  assert.equal(QUICK_MOVING_UNDECIDED.label, '날짜가 아직 안 정해졌어요');
+  assert.equal(QUICK_MOVING_UNDECIDED.reply, '날짜가 정해지면 새집에서 인터넷이 필요한 날을 기준으로 설치 가능한 일정을 확인해 보세요. 지금은 기존 인터넷의 약정 종료일을 먼저 확인해 두시면 돼요.');
+  assert.ok(QUICK_MOVING.reply.endsWith('이사 날짜가 언제예요?'));
+  assert.ok(!/\d[\d,]*\s*원|할인|무료|혜택|확정됩니다|확정돼요|접수|예약|전화번호|휴대폰|연결 완료|무조건|보장/.test(QUICK_MOVING_UNDECIDED.label + QUICK_MOVING_UNDECIDED.reply));
+  assert.match(COMPONENT, /quick === 'moving' \|\| quick === 'moving_undecided' \? \(\s*<button[^>]*data-quick-btn="moving-undecided"/);
 });

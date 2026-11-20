@@ -28,6 +28,7 @@ import {
   QUICK_BUNDLE,
   QUICK_BUNDLE_UNKNOWN,
   QUICK_MOVING,
+  QUICK_MOVING_UNDECIDED,
   QUICK_RETURN,
   QUICK_SPEED,
   PRIVACY_FAQ,
@@ -50,7 +51,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
   // 이사 상담에서 고른 바로 질문(답을 하나만 보여 주고, 다음 선택·고치기를 하면 지운다)
   // '기존 약정은 언제 끝나세요?' 뒤의 '만기일을 모르겠어요' 안내(하나만, 다음 선택·고치기를 하면 지운다)
   const [dateUnknown, setDateUnknown] = useState(false);
-  const [quick, setQuick] = useState<'moving' | 'speed' | 'bundle' | 'bundle_unknown' | 'return' | null>(null);
+  const [quick, setQuick] = useState<'moving' | 'moving_undecided' | 'speed' | 'bundle' | 'bundle_unknown' | 'return' | null>(null);
   const [fromAd, setFromAd] = useState<'moving' | 'renewal' | null>(null);
   const [clock, setClock] = useState<Date | null>(now ?? null);
   const [mockCalled, setMockCalled] = useState(false);
@@ -306,8 +307,13 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
               ) : null}
               {quick ? (
                 <div className="cp-bubble cp-bot" data-quick-reply={quick} role="status">
-                  <p>{quick === 'moving' ? QUICK_MOVING.reply : quick === 'speed' ? QUICK_SPEED.reply : quick === 'return' ? QUICK_RETURN.reply : quick === 'bundle_unknown' ? QUICK_BUNDLE_UNKNOWN.reply : QUICK_BUNDLE.reply}</p>
+                  <p>{quick === 'moving' ? QUICK_MOVING.reply : quick === 'moving_undecided' ? QUICK_MOVING_UNDECIDED.reply : quick === 'speed' ? QUICK_SPEED.reply : quick === 'return' ? QUICK_RETURN.reply : quick === 'bundle_unknown' ? QUICK_BUNDLE_UNKNOWN.reply : QUICK_BUNDLE.reply}</p>
                 </div>
+              ) : null}
+              {quick === 'moving' || quick === 'moving_undecided' ? (
+                <button type="button" className="btn btn-ghost btn-block cp-quick-btn" data-quick-btn="moving-undecided" aria-pressed={quick === 'moving_undecided'} onClick={() => setQuick('moving_undecided')}>
+                  {QUICK_MOVING_UNDECIDED.label}
+                </button>
               ) : null}
               {quick === 'bundle' || quick === 'bundle_unknown' ? (
                 <button type="button" className="btn btn-ghost btn-block cp-quick-btn" data-quick-btn="bundle-unknown" aria-pressed={quick === 'bundle_unknown'} onClick={() => setQuick('bundle_unknown')}>

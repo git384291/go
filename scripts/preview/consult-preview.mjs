@@ -721,6 +721,32 @@ for (const width of [320, 390]) {
   await context.close();
 }
 
+// ── G14. 이사 날짜 후속 "날짜가 아직 안 정해졌어요"(PM 7038857453): 광고·일반 이사 모두, 안내 한 번, 다른 질문으로 전환하면 사라짐 ──
+const MREPLY = '날짜가 정해지면 새집에서 인터넷이 필요한 날을 기준으로 설치 가능한 일정을 확인해 보세요. 지금은 기존 인터넷의 약정 종료일을 먼저 확인해 두시면 돼요.';
+for (const width of [320, 390]) {
+  for (const route of ['광고에서 이사', '일반 가정용 이사']) {
+    const tag = `[${width}px 이사 날짜 미정·${route}]`;
+    const { page, context, external, errors } = await openPage(width, NOW_THU);
+    if (route === '광고에서 이사') { await page.locator('[data-ad-draft="moving"] .cp-ad-cta').focus(); await page.keyboard.press('Enter'); }
+    else { await click(page, '가정용'); await click(page, '이사해서 새로 알아봐요'); }
+    check(`${tag} 이사 질문 전에는 후속 선택 없음`, (await page.locator('[data-quick-btn="moving-undecided"]').count()) === 0);
+    await page.locator('[data-quick-btn="moving"]').focus(); await page.keyboard.press('Enter');
+    const ask = await page.locator('[data-quick-reply]').innerText();
+    const u = page.locator('[data-quick-btn="moving-undecided"]');
+    check(`${tag} "이사 날짜가 언제예요?" 뒤에 "날짜가 아직 안 정해졌어요" 선택이 이어짐`, ask.includes('이사 날짜가 언제예요?') && (await u.count()) === 1 && (await u.innerText()) === '날짜가 아직 안 정해졌어요');
+    await u.focus(); await page.keyboard.press('Enter');
+    const rep = await page.locator('[data-quick-reply]').innerText();
+    check(`${tag} [키보드 Enter] 안내 하나만 표시·금칙어 없음·가로 넘침 없음`, rep.trim() === MREPLY && !SBAN.test(rep) && (await page.locator('[data-quick-reply]').count()) === 1 && (await noOverflow(page)));
+    await page.keyboard.press('Space');
+    check(`${tag} 다시 눌러도 안내 하나만`, (await page.locator('[data-quick-reply]').count()) === 1);
+    if (width === 390 && route === '광고에서 이사') await shot(page, path.join(OUT, '24-moving-undecided-390.png'));
+    await page.locator('[data-quick-btn="speed"]').focus(); await page.keyboard.press('Enter');
+    check(`${tag} 다른 질문으로 전환하면 이 안내와 후속 선택이 사라짐`, (await page.locator('[data-quick-btn="moving-undecided"]').count()) === 0 && (await page.locator('[data-quick-reply]').getAttribute('data-quick-reply')) === 'speed' && !(await page.locator('[data-quick-reply]').innerText()).includes('약정 종료일'));
+    check(`${tag} 외부 요청 0·저장소 0·입력칸 0·오류 0`, external.length === 0 && errors.length === 0 && (await page.locator('input, textarea').count()) === 0 && (await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)) === 0);
+    await context.close();
+  }
+}
+
 // ── G5. 담당자 연결 모의 예시(PM 7029405014): 접힌 예시 안에서 네 사례를 키보드로 전환·반복 선택, 한 번에 안내 하나만, 모의 확인 옆 표시 ──
 const HANDOFF_EXPECT = {
   off: '토요일 설치 가능 여부는 지금 확인해 드릴 수 없어요',
