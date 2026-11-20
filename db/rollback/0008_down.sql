@@ -3,6 +3,10 @@
 -- 복구: 0008을 다시 적용한 뒤 db/rollback/0008_restore.sql 실행. 롤백 뒤 zz_grants.sql도 이 변경 이전 버전으로 되돌려 실행한다.
 begin;
 create table core.policy_versions_rollback_archive as table core.policy_versions;
+alter table core.policy_versions_rollback_archive enable row level security;
+alter table core.policy_versions_rollback_archive force row level security;
+create policy fideon_api_all on core.policy_versions_rollback_archive to fideon_api using (true) with check (true);
+revoke all on core.policy_versions_rollback_archive from public;
 drop function if exists api.policy_published();
 drop function if exists api.policy_reject(uuid, uuid, text, uuid, text);
 drop function if exists api.policy_approve(uuid, uuid, text, uuid, text, jsonb);

@@ -403,6 +403,35 @@ fi
 SQL "drop table core.commissions_probe, core.settlement_ledger_probe"
 rm -f "$LOG_DIR/probe.err"
 
+echo "== concurrency: 정책 교체는 원자적(승인 커밋 전후로 게시 결과가 0건·2건이 되지 않음)"
+ADM() { "${PSQL[@]}" -d "$DB" -At -c "$1"; }
+as_role() { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role $1" -c "$2" -c "commit" >/dev/null; }
+pub() { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_public" -c "select count(*) || ':' || coalesce(string_agg(p->>'version', ','), '') from api.policy_published() p where p->>'productId' = 'p5'" -c "commit" | grep -E '^[0-9]+:' | head -1; }
+as_role app_staff "$(ADM "select test.pdraft('owner', p_product => 'p5')")"
+ID1=$(ADM "select id from core.policy_versions where product_id = 'p5' and revision = 1")
+as_role app_staff "$(ADM "select test.pcall('owner', 'policy_submit', '$ID1')")"
+as_role app_staff "$(ADM "select test.pcall('owner', 'policy_approve', '$ID1', test.allchecks())")"
+as_role app_staff "$(ADM "select test.pdraft('owner', p_product => 'p5')")"
+ID2=$(ADM "select id from core.policy_versions where product_id = 'p5' and revision = 2")
+as_role app_staff "$(ADM "select test.pcall('owner', 'policy_submit', '$ID2')")"
+[ "$(pub)" = "1:r1" ] || { echo "FAIL | K5 준비: 교체 전 게시가 r1 한 건이 아님 ($(pub))" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+APPROVE2=$(ADM "select test.pcall('owner', 'policy_approve', '$ID2', test.allchecks())")
+( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_staff" -c "$APPROVE2" -c "select pg_sleep(2)" -c "commit" > "$LOG_DIR/k5-approve.out" 2>&1 ) &
+K5PID=$!
+seen=""; bad=0
+for n in $(seq 1 14); do
+  r=$(pub); seen="$seen $r"
+  case "$r" in 1:r1|1:r2) ;; *) bad=$((bad+1));; esac
+  sleep 0.25
+done
+wait "$K5PID" || { echo "FAIL | K5 승인 세션 실패: $(cat "$LOG_DIR/k5-approve.out")" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+final=$(pub)
+if [ "$bad" = 0 ] && [ "$final" = "1:r2" ] && printf '%s' "$seen" | grep -q "1:r1"; then
+  echo "NOTICE:  PASS | K5 정책 교체 중 게시 결과는 항상 1건(r1 → r2), 최종 r2. 관찰:$seen" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | K5 bad=$bad final=$final seen=$seen" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+
 echo "== migration drill: 0007·0008 적용(기존 데이터 보존) → 롤백(고지·정책 보관) → 복구 → 재적용 (별도 가상 DB)"
 DRILL=fideon_drill
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" -c "create database $DRILL" >/dev/null
@@ -436,6 +465,14 @@ d_md5=$(D -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'
 a_exp=$(D -At -c "select count(*) from pii.notice_exposures_rollback_archive"); a_pol=$(D -At -c "select count(*) from core.policy_versions_rollback_archive")
 [ "$a_exp" = "$n_exp" ] && [ "$a_pol" = "$n_pol" ] && [ "$n_exp" -gt 0 ] || { echo "FAIL | M6 롤백 보관본 건수 불일치 exp $n_exp/$a_exp pol $n_pol/$a_pol" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M2~M4·M6 롤백: 기존 데이터 보존, 새 테이블 제거, create_lead 0004 본문, 고지 노출 $a_exp건·정책 $a_pol건 보관" >> "$LOG_DIR/db-test.log"
+prot=$(D -At -c "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where (n.nspname, c.relname) in (('core', 'notice_texts_rollback_archive'), ('pii', 'notice_exposures_rollback_archive'), ('core', 'policy_versions_rollback_archive'))
+    and c.relrowsecurity and c.relforcerowsecurity")
+open_priv=$(D -At -c "select count(*) from (values ('core.notice_texts_rollback_archive'), ('pii.notice_exposures_rollback_archive'), ('core.policy_versions_rollback_archive')) t(r)
+  cross join (values ('public'), ('app_public'), ('app_staff'), ('app_server')) g(role)
+  where has_table_privilege(g.role, t.r, 'SELECT')")
+[ "$prot" = 3 ] && [ "$open_priv" = 0 ] || { echo "FAIL | M9 보관 테이블 보호 RLS=$prot/3 앱 역할 조회 가능=$open_priv" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M9 보관 테이블 3개 RLS enable+force, PUBLIC·앱 역할 조회 불가" >> "$LOG_DIR/db-test.log"
 if D -q -f db/rollback/0007_down.sql >/dev/null 2>&1; then echo "FAIL | M7 보관본이 있는데 롤백이 다시 성공(덮어쓰기)" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
 echo "NOTICE:  PASS | M7 보관본이 있으면 롤백이 실패(덮어쓰지 않음)" >> "$LOG_DIR/db-test.log"
 D -f db/migrations/0007_required_notices.sql >/dev/null

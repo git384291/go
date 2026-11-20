@@ -8,14 +8,14 @@ import type { QuoteRequest } from '@/server/policies';
  * - 공급자 오류·형식 오류는 모두 같은 안내로 닫는다(fail-closed). 오류 내용은 고객에게 내보내지 않는다.
  * - guardAiReply: AI가 쓴 문장 안의 금액은 승인 견적 문장에 있는 금액과 일치해야 한다. 하나라도 벗어나면 답 전체를 안내문으로 바꾼다.
  */
-export type ApprovedPolicyProvider = (now: Date) => readonly unknown[];
+export type ApprovedPolicyProvider = (now: Date) => readonly unknown[] | Promise<readonly unknown[]>;
 export const NO_APPROVED_POLICIES: ApprovedPolicyProvider = () => [];
 
 export type QuoteAnswer = { readonly kind: 'quote' | 'needs_review'; readonly text: string };
 
-export function answerQuote(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): QuoteAnswer {
+export async function answerQuote(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): Promise<QuoteAnswer> {
   try {
-    const records = provider(now);
+    const records = await provider(now);
     if (!Array.isArray(records)) return closed();
     return renderQuoteMessage(quotePolicy(records, request, now));
   } catch {

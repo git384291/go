@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { answerQuote, NO_APPROVED_POLICIES } from '@/server/consult/quoteAnswer';
+import { answerQuote } from '@/server/consult/quoteAnswer';
+import { dbPolicyProvider } from '@/server/consult/publishedPolicies';
+import { withRole } from '@/server/db/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,7 +9,8 @@ export const dynamic = 'force-dynamic';
 const CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const noStore = { 'Cache-Control': 'private, no-store' };
 
-// 승인된 정책 저장소가 연결되기 전까지 공급자는 빈 목록이다 → 항상 '담당자 확인' 안내. 스위치가 켜져도 금액은 나가지 않는다
+// 기본 꺼짐(CONSULT_QUOTE_ENABLED). 켜져도 DB의 게시 함수(승인·유효·policy_publish 스위치)를 통과한 정책만 쓰고, 서버가 견적 판정에서 다시 검사한다.
+// 조회 실패·정책 없음은 모두 '담당자 확인' 안내다.
 export async function POST(req: Request) {
   if (process.env.CONSULT_QUOTE_ENABLED !== 'true') return NextResponse.json({ ok: false, code: 'DISABLED' }, { status: 503, headers: noStore });
   let body: unknown;
@@ -24,7 +27,11 @@ export async function POST(req: Request) {
   if (!ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode)) return NextResponse.json({ ok: false, code: 'INVALID_INPUT' }, { status: 400, headers: noStore });
   const supplierId = process.env.QUOTE_SUPPLIER_ID ?? '';
   if (!CODE.test(supplierId)) return NextResponse.json({ ok: false, code: 'SERVICE_NOT_READY' }, { status: 503, headers: noStore });
-  const answer = answerQuote(NO_APPROVED_POLICIES, {
+  const published = dbPolicyProvider(async () => {
+    const rows = await withRole('public', (tx) => tx`select api.policy_published() as p`);
+    return (rows as unknown as { p: unknown }[]).map((r) => r.p);
+  });
+  const answer = await answerQuote(published, {
     supplierId, segment: 'household', carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, confirmedBundles: { known: false },
   }, new Date());
   return NextResponse.json({ ok: true, kind: answer.kind, text: answer.text }, { status: 200, headers: noStore });

@@ -9,6 +9,15 @@ begin;
 
 create table core.notice_texts_rollback_archive as table core.notice_texts;
 create table pii.notice_exposures_rollback_archive as table pii.notice_exposures;
+-- 보관본도 일반 테이블과 같은 보호(RLS enable+force, PUBLIC 권한 없음)를 바로 건다
+alter table core.notice_texts_rollback_archive enable row level security;
+alter table core.notice_texts_rollback_archive force row level security;
+create policy fideon_api_all on core.notice_texts_rollback_archive to fideon_api using (true) with check (true);
+revoke all on core.notice_texts_rollback_archive from public;
+alter table pii.notice_exposures_rollback_archive enable row level security;
+alter table pii.notice_exposures_rollback_archive force row level security;
+create policy fideon_api_all on pii.notice_exposures_rollback_archive to fideon_api using (true) with check (true);
+revoke all on pii.notice_exposures_rollback_archive from public;
 
 create or replace function api.create_lead(
   p_token text,
