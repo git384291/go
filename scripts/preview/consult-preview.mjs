@@ -458,6 +458,36 @@ for (const width of [320, 390]) {
   check(`${tag} "없어요" 요약 맨 위: 설치 가능일과 설치비 금액·청구 시점 확인, 이전 "있어요" 안내(약정 종료일·이전·해지 비용)는 사라짐`, kpNone.includes('설치 가능일과 설치비 금액·청구 시점 확인') && !kpNone.includes('약정 종료일') && !(await summaryText(page)).includes('이전·해지'), kpNone.replace(/\s+/g, ' ').slice(0, 60));
   check(`${tag} "없어요"로 바꾸면 요약이 갱신: 새 선택 표시, 이전·해지 항목과 "있어요" 문구 사라짐`, !!sNone && sNone.includes('지금은 없어요') && !sNone.includes('지금 쓰는 인터넷이 있어요') && !sNone.includes('이전·해지 조건') && sNone.includes('이사해서 새로 알아봐요'));
   await shot(page, path.join(OUT, `13-ad-moving-none-${width}.png`));
+  // 세 번째 선택 "잘 모르겠어요": 키보드로 선택해 요약까지, 이전 두 선택의 안내는 남지 않음
+  await page.locator('details.cp-history > summary').click();
+  await page.locator('.cp-history-list li', { hasText: '지금 쓰는 인터넷이 있나요' }).locator('.cp-edit').click();
+  check(`${tag} 세 선택지(있어요·없어요·잘 모르겠어요) 표시`, (await page.locator('.cp-current[data-step="existing"] .cp-choice').allInnerTexts()).join('|') === '지금 쓰는 인터넷이 있어요|지금은 없어요|잘 모르겠어요');
+  await page.locator('.cp-current .cp-choice', { hasText: '잘 모르겠어요' }).focus();
+  await page.keyboard.press('Enter');
+  const unsureReply = await page.locator('.cp-current[data-step="devices"]').count();
+  check(`${tag} [키보드 Enter] "잘 모르겠어요" 선택 → 확인 방법 안내가 보이고 다음 질문으로 넘어감(몰라도 진행)`, unsureReply === 1 && (await page.locator('.cp-bubble[data-reply]').innerText()).includes('통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인해 보세요. 지금은 몰라도 다음으로 넘어갈 수 있어요.'));
+  for (const t of ['3~4개', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
+  const kpU = await summaryFirstLine(page);
+  const sU = await summaryText(page);
+  check(`${tag} "잘 모르겠어요" 요약 도달: 맨 위 '기존 인터넷 확인 필요', 확인 항목 표시, 있어요·없어요 안내(약정 종료일·이전·해지, 해지할 조건은 없고) 없음`, !!sU && kpU.includes('가장 먼저 비교할 점') && kpU.includes('기존 인터넷 확인 필요') && sU.includes('통신사 앱이나 최근 청구서') && sU.includes('잘 모르겠어요') && !sU.includes('이전·해지') && !sU.includes('약정 종료일') && !sU.includes('해지할 조건은 없고') && !sU.includes('지금은 없어요'), kpU.replace(/\s+/g, ' ').slice(0, 50));
+  await settle(page);
+  const uc = await contrastOf(page, '.cp-summary .cp-keypoint strong, .cp-summary .cp-keypoint-reason, .cp-summary li');
+  check(`${tag} "잘 모르겠어요" 요약 글자 대비 ≥4.5:1·흐림 없음`, uc.length > 5 && uc.every((x) => x.ratio >= 4.5 && x.op === 1));
+  await shot(page, path.join(OUT, `14-ad-moving-unsure-${width}.png`));
+  // 세 선택 사이를 오가며 바꿔도 안내가 하나만 남음: 모름 → 있어요 → 없어요 → 모름
+  const seqOk = [];
+  for (const [label, only, none] of [['지금 쓰는 인터넷이 있어요', '이전·해지 조건', ['기존 인터넷 확인 필요', '해지할 조건은 없고']], ['지금은 없어요', '해지할 조건은 없고', ['이전·해지', '기존 인터넷 확인 필요']], ['잘 모르겠어요', '기존 인터넷 확인 필요', ['이전·해지', '해지할 조건은 없고']]]) {
+    await page.locator('details.cp-history > summary').click();
+    await page.locator('.cp-history-list li', { hasText: '지금 쓰는 인터넷이 있나요' }).locator('.cp-edit').click();
+    const gone = (await summaryText(page)) === null;
+    await page.locator('.cp-current .cp-choice', { hasText: label }).focus();
+    await page.keyboard.press('Space');
+    for (const t of ['3~4개', '매일 봐요']) { await page.locator('.cp-current .cp-choice', { hasText: t }).focus(); await page.keyboard.press('Enter'); }
+    const sx = await summaryText(page);
+    const hasOnly = !!sx && sx.includes(only) && none.every((n) => !sx.includes(n)) && (await page.locator('.cp-summary').count()) === 1;
+    seqOk.push(gone && hasOnly);
+  }
+  check(`${tag} 세 선택 간 변경(모름→있어요→없어요→모름) 때마다 낡은 요약이 먼저 사라지고 해당 안내만 남음`, seqOk.every(Boolean), seqOk.join());
   // 처음 화면으로 돌아가 일반 가정용 흐름은 그대로(질문 3개, 쓰는 인터넷 질문 없음)
   await page.locator('details.cp-history > summary').click();
   await page.locator('.cp-history-list li', { hasText: '집에서 쓰실 건가요' }).locator('.cp-edit').click();

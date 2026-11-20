@@ -227,6 +227,13 @@ const EXISTING_STEP: Step = {
       general: '쓰는 인터넷이 없으면 해지할 조건은 없고, 새 주소의 설치 조건이 먼저예요.',
       toCheck: [],
     },
+    {
+      id: 'unsure',
+      label: '잘 모르겠어요',
+      reply: '통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인해 보세요. 지금은 몰라도 다음으로 넘어갈 수 있어요.',
+      general: '쓰는 인터넷이 있는지 아직 몰라서, 기존 인터넷 확인이 필요해요.',
+      toCheck: ['기존 인터넷 확인 필요(통신사 앱이나 최근 청구서에서 이용 여부)'],
+    },
   ],
 };
 const EXISTING_HAS_KEYPOINT: KeyPoint = {
@@ -236,6 +243,10 @@ const EXISTING_HAS_KEYPOINT: KeyPoint = {
 const EXISTING_NONE_KEYPOINT: KeyPoint = {
   point: '설치 가능일과 설치비 금액·청구 시점 확인',
   reason: '끝낼 기존 조건이 없으니 새 주소의 설치 가능일부터 확인하세요. 설치비 금액과 청구 시점도 함께 확인해 보세요. 금액과 일정은 확정되지 않았어요.',
+};
+const EXISTING_UNSURE_KEYPOINT: KeyPoint = {
+  point: '기존 인터넷 확인 필요',
+  reason: '통신사 앱이나 최근 청구서에서 인터넷 이용 여부를 확인하면 기존 조건까지 함께 비교할 수 있어요. 지금은 몰라도 요약은 볼 수 있고, 금액과 일정은 확정되지 않았어요.',
 };
 export const HOME_MOVING_AD_FLOW: Flow = {
   ...HOME_FLOW,
@@ -324,7 +335,7 @@ export function buildSummary(segment: Segment, picks: readonly string[], flow: F
   const base = flow.steps.map((st, i) => [st.id, picks[i]] as const).filter(([id]) => id !== 'existing').map(([, v]) => v as string);
   // 광고 연결 흐름: 쓰는 인터넷 답에 맞춰 요약 맨 위 첫 문장을 정한다(다른 규칙보다 먼저)
   const existing = picks[flow.steps.findIndex((st) => st.id === 'existing')];
-  const kp = existing === 'has' ? EXISTING_HAS_KEYPOINT : existing === 'none' ? EXISTING_NONE_KEYPOINT : keyPoint(segment, base);
+  const kp = existing === 'has' ? EXISTING_HAS_KEYPOINT : existing === 'none' ? EXISTING_NONE_KEYPOINT : existing === 'unsure' ? EXISTING_UNSURE_KEYPOINT : keyPoint(segment, base);
   return { keyPoint: kp, conditions, general, toCheck, costs: COST_ROWS };
 }
 
