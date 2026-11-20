@@ -2,16 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildStopRequest, evaluateStop, MAX_STOP_ATTEMPTS, type StopEvaluation } from '../../src/server/advertising/searchAdStop';
+import { buildStopRequest, validateStopRequest, evaluateStop, MAX_STOP_ATTEMPTS, type StopEvaluation } from '../../src/server/advertising/searchAdStop';
 
 const F = 'SYNTHETIC_FIXTURE' as const;
 const PAUSED = { httpStatus: 200, body: { status: 'PAUSED', statusReason: 'CAMPAIGN_PAUSED', userLock: true } };
 const ELIGIBLE = { httpStatus: 200, body: { status: 'ELIGIBLE', statusReason: 'CAMPAIGN_PENDING', userLock: false } };
 const ev = (put: unknown, re: unknown, attempt = 1) => { const r = evaluateStop(put as never, re as never, attempt, F); assert.ok('verdict' in r); return r as StopEvaluation; };
 
-test('SX1 요청 서술: 보내지 않음(sendable false), userLock 본문만, 본문 스키마 UNVERIFIED, 이상 ID 거부', () => {
+test('SX1 요청 서술: 보내지 않음(sendable false), userLock 본문만, 본문 근거 표시, 이상 ID 거부', () => {
   const r = buildStopRequest('cmp-a001-01-000000000001'); assert.ok(r.ok);
-  if (r.ok) assert.deepEqual(r.request, { method: 'PUT', path: '/api/ncc/campaigns/cmp-a001-01-000000000001', fields: 'userLock', body: { userLock: true }, bodySchema: 'UNVERIFIED', sendable: false });
+  if (r.ok) assert.deepEqual(r.request, { method: 'PUT', path: '/api/ncc/campaigns/cmp-a001-01-000000000001', fields: 'userLock', body: { nccCampaignId: 'cmp-a001-01-000000000001', userLock: true }, bodyBasis: { requiredUpdateFields: ['nccCampaignId', 'userLock'], otherFields: 'OMISSION_NOT_ESTABLISHED' }, sendable: false });
+  assert.deepEqual(validateStopRequest(r.request), { ok: true });
   for (const bad of [undefined, '', 'a/b', '../x', 'a b', 'x'.repeat(51), 5]) assert.deepEqual(buildStopRequest(bad), { ok: false, error: 'INVALID_INPUT' });
 });
 
@@ -64,4 +65,18 @@ test('SX7 이상 입력·접근자 예외는 고정 실패, 결과는 동결·�
   const full = readFileSync('src/server/advertising/searchAdStop.ts', 'utf8'); const src = full.replace(/\/\/.*$/gm, '');
   assert.ok(!/process\.env|fetch\(|console\.|setTimeout|setInterval|localStorage|postgres|supabase|openai|anthropic|import\(|require\(|node:/i.test(src));
   assert.deepEqual(full.match(/^import .+$/gm), ["import 'server-only';", "import { mapCampaignStatus, type MappedStatus, type Origin } from './searchAdStatus';"]);
+});
+
+test('SX8 요청 모형 회귀(PM 7043103362): 본문 ID 누락·불일치·userLock 비true·여분 키·경로 이상 거부', () => {
+  const r = buildStopRequest('cmp-1'); assert.ok(r.ok); if (!r.ok) return;
+  const q = r.request;
+  assert.deepEqual(validateStopRequest({ ...q, body: { userLock: true } }), { ok: false, error: 'ID_MISSING' });
+  assert.deepEqual(validateStopRequest({ ...q, body: { nccCampaignId: '', userLock: true } }), { ok: false, error: 'ID_MISSING' });
+  assert.deepEqual(validateStopRequest({ ...q, body: { nccCampaignId: 'cmp-2', userLock: true } }), { ok: false, error: 'ID_MISMATCH' });
+  assert.deepEqual(validateStopRequest({ ...q, body: { nccCampaignId: 'cmp-1', userLock: false } }), { ok: false, error: 'USERLOCK_NOT_TRUE' });
+  assert.deepEqual(validateStopRequest({ ...q, body: { nccCampaignId: 'cmp-1' } }), { ok: false, error: 'USERLOCK_NOT_TRUE' });
+  assert.deepEqual(validateStopRequest({ ...q, body: { nccCampaignId: 'cmp-1', userLock: 'true' } }), { ok: false, error: 'USERLOCK_NOT_TRUE' });
+  assert.deepEqual(validateStopRequest({ ...q, body: { nccCampaignId: 'cmp-1', userLock: true, name: 'x' } }), { ok: false, error: 'INVALID_INPUT' });
+  for (const bad of [null, 5, [], { ...q, path: '/api/ncc/campaigns/cmp-1/x' }, { ...q, method: 'GET' }, { ...q, fields: 'status' }, { ...q, sendable: true }, { ...q, body: null }]) assert.deepEqual(validateStopRequest(bad), { ok: false, error: 'INVALID_INPUT' });
+  assert.deepEqual(validateStopRequest(q), { ok: true });
 });
