@@ -60,7 +60,7 @@ export async function POST(req: Request) {
                              ${a.idempotencyKey}, ${a.privacyVersion}, ${a.consentCollection}, ${a.marketingOptIn}, ${a.ipHash})`);
     return accepted();
   } catch (e) {
-    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : 400);
+    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' ? 503 : 400);
     const code = (e as { code?: string }).code;
     if (code === '54000') return rejected('RATE_LIMITED', 429);
     if (code === '55000') return rejected('SERVICE_NOT_READY', 503);

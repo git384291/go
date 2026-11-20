@@ -56,6 +56,8 @@ const base = {
   phone: '010-0000-0001',
   consentCollection: true,
   privacyVersion: 'privacy-test-v1',
+  noticeVersion: 'privacy-test-v1',
+  noticeKeys: ['n1'],
   idempotencyKey: 'test-only-route-idem-0001',
   turnstileToken: 'test-only-turnstile-token',
 };

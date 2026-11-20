@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { maskName, normalizeMobile, type PiiCrypto } from '../security/piiCrypto';
 import { signToken, type SigningKey } from '../security/token';
 import { isActiveInterest } from '../../content/catalog';
+import { noticeReadiness, REQUIRED_NOTICES, sameNoticeKeys, type NoticeConfig } from '../../content/requiredNotices';
 
 export const INTERESTS = ['internet_tv', 'internet_phone', 'internet_only', 'cctv_security', 'other'] as const;
 
@@ -29,6 +30,9 @@ export const LeadRequestSchema = z
     consentCollection: z.literal(true),
     marketingOptIn: z.boolean().default(false),
     privacyVersion: z.string().min(1).max(40),
+    // PM 11/21: 고객이 확인한 필수 고지의 버전과 항목 키. 확정되지 않은 문구로는 접수하지 않는다
+    noticeVersion: z.string().min(1).max(40),
+    noticeKeys: z.array(z.string().max(40)).max(20),
     idempotencyKey: z.string().regex(/^[A-Za-z0-9-]{16,64}$/),
     utmSource: optionalShort(100),
     utmMedium: optionalShort(100),
@@ -70,6 +74,7 @@ export type IntakeContext = {
   currentPrivacyVersion: string; // 서버 설정값. 화면이 보낸 버전과 일치해야 한다
   clientIp: string;
   nowSeconds?: number;
+  notices?: NoticeConfig; // 기본은 content/requiredNotices의 확정 상태(현재 미확정 → 접수 거부)
 };
 
 /**
@@ -86,6 +91,11 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
   // PHASE 1: 형식상 허용 값이어도 예약 상품이면 거부(DB api.create_lead도 별도로 다시 검사)
   if (!isActiveInterest(input.interest)) throw new LeadRejected('PRODUCT_NOT_ACTIVE');
   if (input.privacyVersion !== ctx.currentPrivacyVersion) throw new LeadRejected('CONSENT_VERSION_MISMATCH');
+  // 필수 고지: 문구가 확정되지 않았거나 버전이 어긋나면 접수하지 않는다. 고객이 모든 항목을 확인했어야 한다
+  const notices = ctx.notices ?? REQUIRED_NOTICES;
+  if (!noticeReadiness(notices, ctx.currentPrivacyVersion).ready) throw new LeadRejected('NOTICE_NOT_CONFIRMED');
+  if (input.noticeVersion !== notices.version) throw new LeadRejected('NOTICE_VERSION_MISMATCH');
+  if (!sameNoticeKeys(notices, input.noticeKeys)) throw new LeadRejected('NOTICE_ACK_REQUIRED');
 
   let phone: string;
   try {

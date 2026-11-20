@@ -51,3 +51,12 @@ reset role;
 select test.expect_eq($$select count(*)::text from pg_tables t where t.schemaname in ('core', 'pii') and t.tablename in ('notice_texts', 'notice_exposures')
   and exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = t.schemaname and c.relname = t.tablename and c.relrowsecurity and c.relforcerowsecurity)$$,
   '2', 'N15 새 테이블 RLS enable+force');
+
+-- N16~N17: 접수(N1) → DB 저장 → 관리자 조회 한 줄 흐름 (PM 11/21 e2e: DB 계층)
+select set_config('t.owner', test.staff_token('00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001'), false);
+-- N1로 저장된 고객(phone_hmac d*64)의 리드가 대표 목록에 마스킹된 상태로 보인다
+select test.expect_eq($$select count(*)::text from core.leads l join pii.customers c on c.id = l.customer_id where c.phone_hmac = repeat('d', 64)$$, '1', 'N16 접수한 리드가 DB에 1건 저장');
+select set_config('t.n_leads', (select count(*)::text from core.leads where interest = 'internet_tv'), false);
+set role app_staff;
+select test.expect_eq($$select count(*)::text from api.list_leads('00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', current_setting('t.owner'), 200, 0) where phone_masked ~ '^010-\*\*\*\*-[0-9]{4}$' and interest = 'internet_tv'$$, current_setting('t.n_leads'), 'N17 대표 목록은 접수 건을 마스킹된 전화번호로만 조회');
+reset role;

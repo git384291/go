@@ -19,6 +19,7 @@ import {
 import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './TurnstileWidget';
 import { KAKAO_INQUIRY_LABEL, KAKAO_INQUIRY_NOTES } from '../content/channels';
 import { resolveAttribution } from '../content/attribution';
+import { noticeReadiness, REQUIRED_NOTICES } from '../content/requiredNotices';
 
 // REV-004: 실제 고객정보 수집은 재검수 통과 전까지 비활성. 화면만 제공한다.
 const FORM_ENABLED = process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED === 'true';
@@ -45,8 +46,12 @@ const newKey = (): string => {
 export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string | null }) {
   const hasOption = options.length > 0;
   // 공개 준비값(사이트 키·처리방침 버전)이 하나라도 비면 위젯 외부 요청과 접수 요청을 모두 만들지 않는다
-  const botEnabled = FORM_ENABLED && hasOption && TURNSTILE_SITE_KEY !== '' && PRIVACY_VERSION !== '';
+  const noticeReady = noticeReadiness(REQUIRED_NOTICES, PRIVACY_VERSION).ready;
+  const botEnabled = FORM_ENABLED && hasOption && TURNSTILE_SITE_KEY !== '' && PRIVACY_VERSION !== '' && noticeReady;
   const [consent, setConsent] = useState(false);
+  // 고객이 확인한 필수 고지 항목 키(브라우저 메모리에만 둔다)
+  const [acked, setAcked] = useState<readonly string[]>([]);
+  const [noticeError, setNoticeError] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [message, setMessage] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -143,6 +148,13 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
         focusField(first);
         return;
       }
+      if (noticeReady && REQUIRED_NOTICES.items.some((n) => !acked.includes(n.key))) {
+        setNoticeError(true);
+        setPhase('error');
+        setMessage(OUTCOME_MESSAGES.input);
+        return;
+      }
+      setNoticeError(false);
       if (!botEnabled) {
         // 공개 사이트 키가 없으면 서버가 어차피 거부한다. 보내지 않는다
         setPhase('error');
@@ -181,6 +193,8 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
             consentCollection: input.consent,
             marketingOptIn: input.marketing,
             privacyVersion: PRIVACY_VERSION,
+            noticeVersion: REQUIRED_NOTICES.version,
+            noticeKeys: REQUIRED_NOTICES.items.map((n) => n.key),
             idempotencyKey,
             turnstileToken: token,
             ...currentAttribution(),
@@ -303,6 +317,33 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
             <input type="checkbox" name="marketing" />
             <span><b>[선택]</b> 요금 혜택 등 광고성 정보를 문자로 받겠습니다.</span>
           </label>
+        </div>
+
+        <div className="consent-box" aria-label="필수 고지">
+          {!noticeReady ? (
+            <p className="field-hint" role="status">필수 고지 문구가 확정되기 전에는 상담 신청을 받지 않습니다.</p>
+          ) : (
+            REQUIRED_NOTICES.items.map((n) => (
+              <div key={n.key}>
+                <details>
+                  <summary>{n.title}</summary>
+                  <p>{n.body}</p>
+                </details>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={acked.includes(n.key)}
+                    onChange={(e) => {
+                      setNoticeError(false);
+                      setAcked((prev) => (e.target.checked ? [...prev.filter((k) => k !== n.key), n.key] : prev.filter((k) => k !== n.key)));
+                    }}
+                  />
+                  <span><b>[필수]</b> {n.title} 내용을 확인했습니다.</span>
+                </label>
+              </div>
+            ))
+          )}
+          {noticeError && <span className="field-error" role="alert">[필수] 고지 항목을 모두 확인해 주세요.</span>}
         </div>
 
         {botEnabled && phase !== 'done' && (

@@ -15,6 +15,8 @@ const ctx = {
   currentPrivacyVersion: 'privacy-test-v1',
   clientIp: '203.0.113.10',
   nowSeconds: 1_800_000_000,
+  // 시험 전용 확정 문구(실제 문구 아님). 실제 설정(REQUIRED_NOTICES)은 미확정이라 접수를 거부한다(아래 IN1)
+  notices: { version: 'privacy-test-v1', confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: '시험용 문구' }] },
 };
 
 const valid = {
@@ -25,6 +27,8 @@ const valid = {
   consentCollection: true,
   marketingOptIn: false,
   privacyVersion: 'privacy-test-v1',
+  noticeVersion: 'privacy-test-v1',
+  noticeKeys: ['n1'],
   idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab',
 };
 
@@ -89,4 +93,22 @@ test('I7 수집 차단 스위치: 기본·운영·검수·원격 DB에서는 꺼
     false,
   );
   assert.equal(leadIntakeGate({ LEAD_INTAKE_MODE: 'local', DATABASE_URL: local }).enabled, true);
+});
+
+test('IN1 필수 고지 미확정(실제 설정 기본값)이면 접수 거부', () => {
+  const { notices: _omit, ...real } = ctx;
+  assert.equal(code(() => buildCreateLeadArgs(valid, real)), 'NOTICE_NOT_CONFIRMED');
+  assert.equal(code(() => buildCreateLeadArgs(valid, { ...ctx, notices: { ...ctx.notices, confirmed: false } })), 'NOTICE_NOT_CONFIRMED');
+});
+
+test('IN2 고지 버전 불일치·항목 확인 누락·중복·추가 키는 거부', () => {
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, noticeVersion: 'old' }, ctx)), 'NOTICE_VERSION_MISMATCH');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, noticeKeys: [] }, ctx)), 'NOTICE_ACK_REQUIRED');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, noticeKeys: ['n1', 'n1'] }, ctx)), 'NOTICE_ACK_REQUIRED');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, noticeKeys: ['n1', 'x'] }, ctx)), 'NOTICE_ACK_REQUIRED');
+  assert.equal(code(() => buildCreateLeadArgs({ ...valid, noticeVersion: undefined }, ctx)), 'INVALID_INPUT');
+});
+
+test('IN3 처리방침 버전과 고지 버전이 다르면(설정 오류) 거부', () => {
+  assert.equal(code(() => buildCreateLeadArgs(valid, { ...ctx, notices: { ...ctx.notices, version: 'other' } })), 'NOTICE_NOT_CONFIRMED');
 });
