@@ -139,7 +139,8 @@ test('HF12 입력 오류: 형식이 틀린 신호는 무시하고, 시작 값이
   );
   assert.equal(bad.decision, null);
   assert.equal(bad.ignored.length, 4);
-  assert.ok(bad.ignored.every((x) => x.reason === 'invalid'));
+  assert.deepEqual(bad.ignored.map((x) => x.reason), ['invalid_event_id', 'invalid_request_id', 'invalid_kind', 'invalid_time']);
+  assert.ok(bad.ignored.every((x) => x.eventId === undefined && x.kind === undefined), '잘못된 신호의 값은 복사하지 않는다');
   assert.throws(() => startHandoff({ requestId: 'bad id', startedAt: T0, deadlineMs: 10 }), TypeError);
   assert.throws(() => startHandoff({ requestId: 'req-1', startedAt: T0, deadlineMs: 0 }), TypeError);
   assert.throws(() => startHandoff({ requestId: 'req-1', startedAt: Number.NaN, deadlineMs: 10 }), TypeError);
@@ -199,4 +200,85 @@ test('HF15 고객 문구와 소스: 금액·접수·가입 표시 없음, "확�
 test('HF16 기존 승인 문구와 일치: 담당자 연결 확인 불가 문구는 상담 예시(PR 승인)와 같다', async () => {
   const { EXAMPLES } = await import('../../src/content/consultPreview');
   assert.equal(EXAMPLES[1].answer, REPLIES.connection_unavailable);
+});
+
+// PM 7027915204: 유효하지 않은 입력에서는 수신 확인이 나오지 않는다(회귀 4건 + 변형)
+const confirmed = (rec: HandoffRecord) => rec.decision?.state === 'mock_staff_confirmed';
+const anyReplyStates = (rec: HandoffRecord) => takeReply(rec, T0 + 10).reply?.state;
+const unsafe = (v: unknown) => v as never; // 잘못된 타입의 입력을 일부러 넘긴다
+
+test('HF17 요청 ID가 빠졌거나 문자열이 아닌 시작은 거부, 식별자 없는 확인으로 모의 수신 확인이 성립하지 않는다', () => {
+  // 시작 요청과 확인 이벤트 모두 요청 ID가 없는 경우: 시작 자체가 거부되어 기록이 만들어지지 않는다
+  assert.throws(() => startHandoff(unsafe({ startedAt: T0, deadlineMs: DEADLINE, enabled: true })), TypeError);
+  for (const bad of [undefined, null, 123, ['req-1'], { toString: () => 'req-1' }, true]) {
+    assert.throws(() => startHandoff(unsafe({ requestId: bad, startedAt: T0, deadlineMs: DEADLINE, enabled: true })), TypeError, String(typeof bad));
+  }
+  assert.throws(() => startHandoff(unsafe(null)), TypeError);
+  // 정상 요청에 요청 ID 없는 확인 이벤트
+  const rec = applySignal(start(), unsafe({ eventId: 'evt-no-req', kind: 'human_ack_fixture', at: T0 + 5 }));
+  assert.equal(confirmed(rec), false);
+  assert.equal(rec.decision, null);
+  assert.deepEqual(rec.ignored, [{ reason: 'invalid_request_id' }]);
+  assert.equal(finalState(rec), 'delivery_unknown');
+});
+
+test('HF18 이벤트 ID가 빠졌거나 문자열이 아닌 확인은 무시(누락값이 문자열로 바뀌어 통과하지 않는다)', () => {
+  for (const bad of [undefined, null, 5, ['evt-1'], { a: 1 }, '']) {
+    const rec = applySignal(start(), unsafe({ eventId: bad, requestId: 'req-1', kind: 'human_ack_fixture', at: T0 + 5 }));
+    assert.equal(confirmed(rec), false, String(typeof bad));
+    assert.deepEqual(rec.ignored, [{ reason: 'invalid_event_id' }]);
+  }
+  // 종류·시각·신호 자체가 없거나 틀린 경우도 확인이 되지 않는다
+  assert.deepEqual(applySignal(start(), unsafe({ eventId: 'e1', requestId: 'req-1', at: T0 + 5 })).ignored, [{ reason: 'invalid_kind' }]);
+  assert.deepEqual(applySignal(start(), unsafe({ eventId: 'e2', requestId: 'req-1', kind: ['human_ack_fixture'], at: T0 + 5 })).ignored, [{ reason: 'invalid_kind' }]);
+  assert.deepEqual(applySignal(start(), unsafe({ eventId: 'e3', requestId: 'req-1', kind: 'human_ack_fixture' })).ignored, [{ reason: 'invalid_time' }]);
+  assert.deepEqual(applySignal(start(), unsafe('human_ack_fixture')).ignored, [{ reason: 'invalid_signal' }]);
+  assert.deepEqual(applySignal(start(), unsafe(null)).ignored, [{ reason: 'invalid_signal' }]);
+});
+
+test('HF19 모의 경로는 불리언 true에서만: 문자열 "false"·"true"·숫자 등은 꺼짐', () => {
+  for (const bad of ['false', 'true', 'TRUE', 1, 0, {}, [], 'yes']) {
+    const rec = startHandoff(unsafe({ requestId: 'req-1', startedAt: T0, deadlineMs: DEADLINE, enabled: bad }));
+    assert.equal(rec.decision?.state, 'off', String(bad));
+    const after = applySignal(rec, sig('human_ack_fixture', T0 + 5));
+    assert.equal(confirmed(after), false, String(bad));
+    assert.equal(takeReply(after, T0 + 6).reply?.text, REPLIES.off);
+  }
+  assert.equal(start({ enabled: true }).decision, null); // 불리언 true만 열린다
+  assert.equal(startHandoff({ requestId: 'req-1', startedAt: T0, deadlineMs: DEADLINE }).decision?.state, 'off'); // 생략은 기본값 꺼짐
+});
+
+test('HF20 잘못된 신호의 기록에는 고정 사유만 남고, 받은 자유문구가 결과(기록 전체)에 복사되지 않는다', () => {
+  const FREE = '<script>홍길동 010-1234-5678 서울시 어딘가 1-1</script>';
+  let rec = start();
+  rec = applySignal(rec, unsafe({ eventId: FREE, requestId: 'req-1', kind: 'human_ack_fixture', at: T0 + 1 }));
+  rec = applySignal(rec, unsafe({ eventId: 'evt-ok-1', requestId: 'req-1', kind: FREE, at: T0 + 2 }));
+  rec = applySignal(rec, unsafe({ eventId: 'evt-ok-2', requestId: FREE, kind: 'human_ack_fixture', at: T0 + 3 }));
+  rec = applySignal(rec, unsafe({ eventId: 'evt-ok-3', requestId: 'req-1', kind: 'human_ack_fixture', at: FREE }));
+  assert.deepEqual(rec.ignored.map((x) => x.reason), ['invalid_event_id', 'invalid_kind', 'invalid_request_id', 'invalid_time']);
+  const t = takeReply(rec, T0 + DEADLINE + 1);
+  const dump = JSON.stringify(t);
+  for (const piece of ['script', '홍길동', '010-1234', '서울시']) assert.ok(!dump.includes(piece), `${piece}가 결과에 복사됨`);
+  // 형식이 맞는 값만(다른 요청 ID, 중복 등) 기록에 남는다
+  const ok = applySignal(start(), sig('human_ack_fixture', T0 + 1, { requestId: 'req-other' }));
+  assert.deepEqual(ok.ignored, [{ reason: 'other_request', eventId: ok.ignored[0].eventId, kind: 'human_ack_fixture' }]);
+  assert.match(ok.ignored[0].eventId!, /^[A-Za-z0-9_-]{1,64}$/);
+});
+
+test('HF21 잘못된 입력 뒤에도 정상 같은 요청의 모의 확인·중복 안내 방지·마감 후 결과 보존은 유지된다', () => {
+  let rec = start();
+  rec = applySignal(rec, unsafe({ kind: 'human_ack_fixture', at: T0 + 1 })); // 잘못된 신호
+  rec = applySignal(rec, unsafe({ eventId: 5, requestId: 'req-1', kind: 'human_ack_fixture', at: T0 + 2 }));
+  assert.equal(rec.decision, null);
+  const ack = sig('human_ack_fixture', T0 + 100);
+  rec = run(rec, ack, ack); // 정상 확인 + 중복
+  assert.equal(anyReplyStates(rec), 'mock_staff_confirmed');
+  const first = takeReply(rec, T0 + 200);
+  assert.equal(first.reply?.mock, true);
+  assert.equal(takeReply(first.record, T0 + 300).reply, null, '중복 안내 없음');
+  // 마감 후 결과 보존: 불명으로 정해진 뒤 정상 확인이 와도 바뀌지 않는다
+  const timeout = takeReply(start(), T0 + DEADLINE + 1);
+  const late = applySignal(timeout.record, sig('human_ack_fixture', T0 + DEADLINE + 2));
+  assert.equal(late.decision?.state, 'delivery_unknown');
+  assert.equal(takeReply(late, T0 + DEADLINE + 3).reply, null);
 });

@@ -32,8 +32,19 @@ export type Decision = {
   readonly real: false;
 };
 
-export type LateReason = 'duplicate' | 'other_request' | 'stale' | 'invalid' | 'after_decision';
-export type LateEntry = { readonly eventId: string; readonly kind: string; readonly reason: LateReason };
+/** 반영하지 않은 신호의 고정 사유. 형식이 맞지 않은 신호는 사유만 남기고 받은 값을 복사하지 않는다 */
+export type IgnoreReason =
+  | 'duplicate'
+  | 'other_request'
+  | 'stale'
+  | 'after_decision'
+  | 'invalid_signal'
+  | 'invalid_event_id'
+  | 'invalid_request_id'
+  | 'invalid_kind'
+  | 'invalid_time';
+/** eventId·kind는 형식 검증을 통과한 값(ID 형식·고정 종류)일 때만 들어간다 */
+export type IgnoredEntry = { readonly reason: IgnoreReason; readonly eventId?: string; readonly kind?: SignalKind };
 
 export type HandoffRecord = {
   readonly requestId: string;
@@ -45,7 +56,7 @@ export type HandoffRecord = {
   readonly decision: Decision | null;
   /** 고객 안내를 이미 냈는지 */
   readonly replied: boolean;
-  readonly ignored: readonly LateEntry[];
+  readonly ignored: readonly IgnoredEntry[];
 };
 
 export const REPLIES: Readonly<Record<HandoffState, string>> = {
@@ -58,15 +69,20 @@ export const REPLIES: Readonly<Record<HandoffState, string>> = {
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const KINDS: readonly SignalKind[] = ['request_accepted', 'agent_assigned', 'room_created', 'agent_status_away', 'agent_status_online', 'delivery_error', 'human_ack_fixture'];
 const isTime = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+/** 실제 문자열이고 ID 형식인 값만 통과한다(누락값·숫자·배열·객체가 문자열로 변환돼 통과하지 못하게 typeof를 먼저 본다) */
+const isId = (v: unknown): v is string => typeof v === 'string' && ID_RE.test(v);
+const isKind = (v: unknown): v is SignalKind => typeof v === 'string' && (KINDS as readonly string[]).includes(v);
 
 export type StartInput = { readonly requestId: string; readonly startedAt: number; readonly deadlineMs: number; readonly enabled?: boolean };
 
 /** 요청 하나의 기록을 시작한다. 꺼짐(기본)이면 곧바로 '꺼짐'으로 정해진다 */
 export function startHandoff(input: StartInput): HandoffRecord {
-  if (!ID_RE.test(input.requestId)) throw new TypeError('requestId 형식 오류');
+  if (typeof input !== 'object' || input === null) throw new TypeError('시작 값 형식 오류');
+  if (!isId(input.requestId)) throw new TypeError('requestId 형식 오류');
   if (!isTime(input.startedAt)) throw new TypeError('startedAt 형식 오류');
   if (!isTime(input.deadlineMs) || input.deadlineMs <= 0) throw new TypeError('deadlineMs는 0보다 커야 해요');
-  const enabled = input.enabled ?? HANDOFF_ENABLED;
+  // 모의 경로는 불리언 true일 때만 열린다. 생략하면 기본값(꺼짐), 문자열 'true'·'false'·숫자 등 다른 값은 모두 꺼짐으로 본다
+  const enabled = (input.enabled ?? HANDOFF_ENABLED) === true;
   const base: HandoffRecord = {
     requestId: input.requestId,
     startedAt: input.startedAt,
@@ -81,7 +97,9 @@ export function startHandoff(input: StartInput): HandoffRecord {
 }
 
 const decide = (rec: HandoffRecord, state: HandoffState, at: number): HandoffRecord => ({ ...rec, decision: { state, at, mock: state === 'mock_staff_confirmed', real: false } });
-const ignore = (rec: HandoffRecord, s: Signal, reason: LateReason): HandoffRecord => ({ ...rec, ignored: [...rec.ignored, { eventId: String(s.eventId), kind: String(s.kind), reason }] });
+const ignoreInvalid = (rec: HandoffRecord, reason: IgnoreReason): HandoffRecord => ({ ...rec, ignored: [...rec.ignored, { reason }] });
+/** 형식 검증을 통과한 신호에 대해서만 쓴다(eventId·kind가 안전한 값) */
+const ignore = (rec: HandoffRecord, s: Signal, reason: IgnoreReason): HandoffRecord => ({ ...rec, ignored: [...rec.ignored, { reason, eventId: s.eventId, kind: s.kind }] });
 
 /** 시간 제한에 도달했으면 결과를 정한다: 부재중 표시를 봤으면 '연결 확인 불가', 아니면 '전달 결과 불명' */
 export function settleDeadline(rec: HandoffRecord, now: number): HandoffRecord {
@@ -91,9 +109,12 @@ export function settleDeadline(rec: HandoffRecord, now: number): HandoffRecord {
 
 /** 신호 하나를 반영한다. 이미 정해진 결과·이미 낸 안내는 바뀌지 않는다 */
 export function applySignal(input: HandoffRecord, signal: Signal): HandoffRecord {
-  if (!signal || !ID_RE.test(String(signal.eventId)) || !ID_RE.test(String(signal.requestId)) || !KINDS.includes(signal.kind) || !isTime(signal.at)) {
-    return { ...input, ignored: [...input.ignored, { eventId: String(signal?.eventId ?? ''), kind: String(signal?.kind ?? ''), reason: 'invalid' }] };
-  }
+  // 요청 ID·이벤트 ID·종류·시각을 모두 검증한 뒤에만 판정한다. 잘못된 신호는 고정 사유만 기록한다
+  if (typeof signal !== 'object' || signal === null) return ignoreInvalid(input, 'invalid_signal');
+  if (!isId(signal.eventId)) return ignoreInvalid(input, 'invalid_event_id');
+  if (!isId(signal.requestId)) return ignoreInvalid(input, 'invalid_request_id');
+  if (!isKind(signal.kind)) return ignoreInvalid(input, 'invalid_kind');
+  if (!isTime(signal.at)) return ignoreInvalid(input, 'invalid_time');
   if (input.seenEventIds.includes(signal.eventId)) return ignore(input, signal, 'duplicate');
   // 다른 요청의 신호는 이 요청의 시간·결과에 아무 영향을 주지 않는다
   if (signal.requestId !== input.requestId) return ignore(input, signal, 'other_request');
