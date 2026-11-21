@@ -76,7 +76,7 @@ try {
   check('N7 같은 IP의 새 세션 발급 제한: 5개 뒤 429', codes.filter((c) => c === 200).length === 5 && codes.includes(429), codes.join(','));
   // 접수: Turnstile(가상 확인 서버)을 통과해도 실제 설정의 필수 고지가 미확정이면 접수는 막힌다(DB 0건)
   const l0 = await n(`select count(*)::int as n from core.leads`);
-  const L = (tok) => post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', consentCollection: true, idempotencyKey: 'next-e2e-lead-000000001', turnstileToken: tok });
+  const L = (tok) => post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['collection_purpose', 'not_a_contract', 'policy_confirm'], idempotencyKey: 'next-e2e-lead-000000001', turnstileToken: tok });
   const t0 = seen.turnstile;
   const bad = await L('nope'), host = await L('wrong-host'), down = await L('down');
   check('N8 봇 확인: 실패 403, 호스트 불일치 403, 확인 서버 장애 503(접수 안 함)', bad.status === 403 && host.status === 403 && down.status === 503, `${bad.status},${host.status},${down.status}`);
@@ -106,13 +106,13 @@ try {
   await adm('/api/admin/ai/budget', ownerC, { method: 'POST', body: JSON.stringify({ limitKrw: 0, reason: 'Next E2E 복구' }) });
   check('N11b 복구 후 한도 0원', (await n(`select monthly_limit_krw as n from core.ai_budget_config where singleton`)) === 0);
   // 접수(실제 접수 코드, 시험 고지) → 암호화 저장 → Next 관리자 목록에 마스킹되어 보임
-  const sd = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/seed-lead.ts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+  const sd = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/seed-lead.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
   check('N12 접수 코드 실행(시험 고지): 성공, DB 저장', sd.status === 0 && (await n(`select count(*)::int as n from core.leads`)) === l0 + 1, (sd.stdout + sd.stderr).slice(0, 120).replace(/\n/g, ' '));
   const enc = await sql.unsafe(`select count(*)::int as n from core.leads where idempotency_key = 'next-e2e-seed-0000000001' and name_masked is not null`);
   check('N12b 개인정보는 암호화 저장(원문 이름·전화가 평문 열에 없음)', Number(enc[0].n) === 1 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%7777%' or to_jsonb(l)::text like '%김이투이%'`)) === 0);
   const ll = await adm('/api/admin/leads', ownerC);
   const lt = await ll.text();
-  check('N13 관리자 접수 목록(Next→DB): 200, 마스킹된 전화번호 표시, 원문 전화·이름 없음', ll.status === 200 && lt.includes('010-****-1234') && !lt.includes('7777') && !lt.includes('김이투이'), `status=${ll.status}`);
+  check('N13 관리자 접수 목록(Next→DB): 200, 마스킹된 전화번호 표시, 원문 전화·이름 없음', ll.status === 200 && lt.includes('010-****-1234') && !lt.includes('7777') && !lt.includes('김이투이'), `status=${ll.status} ${ll.status === 200 ? '' : lt.slice(0, 120)}`);
   check('N13b 무인증·검토자 외 역할 규칙: 무인증 목록 401', (await adm('/api/admin/leads')).status === 401);
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
