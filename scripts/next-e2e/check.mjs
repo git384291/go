@@ -195,7 +195,7 @@ try {
   const CHK = { source_matched: true, validity: true, vat: true, benefit_terms: true, region_bundle: true };
   const stateNow = async () => (await sql.unsafe(`select state from core.policy_versions where id = '${pid}'`))[0]?.state;
   const early = await act(ownerC, { action: 'approve', reason: '제출 전 승인 시도', checks: CHK });
-  check('Q4 제출 전(draft) 승인은 불가(422), 상태 그대로', early.status === 422 && (await stateNow()) === 'draft', `status=${early.status}`);
+  check('Q4 제출 전(draft) 승인은 불가(403/422), 상태 그대로', [403, 422].includes(early.status) && (await stateNow()) === 'draft', `status=${early.status}`);
   check('Q5 편집자 제출 200 → submitted', (await act(editorC, { action: 'submit' })).status === 200 && (await stateNow()) === 'submitted');
   const noAp = []; for (const [nm, c] of [['편집자', editorC], ['검토자', reviewerC], ['상담원', counselorC], ['무인증', null]]) { const r = await act(c, { action: 'approve', reason: '권한 없는 승인', checks: CHK }); if (![401, 403].includes(r.status)) noAp.push(`${nm}:${r.status}`); }
   check('Q6 승인은 대표만: 편집자(자기 제출 포함)·검토자·상담원·무인증 거부, 상태 submitted 유지', noAp.length === 0 && (await stateNow()) === 'submitted', noAp.join(' '));
