@@ -160,3 +160,39 @@ test('PA9 목록: 페이지 검증·no-store·토큰 비노출', async () => {
     assert.equal((await listPolicies(mk().d, new Request('http://x/?' + q))).status, 400);
   }
 });
+
+// ---- PM 11/21 지시 1: Q10 권한·데이터 접근 정적 검증 ----
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
+
+test('PA10 policyAdmin 데이터 접근: 견적 규칙만 import, SQL은 api.policy_* 함수뿐, 수수료·원문 위치·테이블 직접 접근 없음', () => {
+  const root = path.resolve(__dirname, '../../src');
+  const src = readFileSync(path.join(root, 'server/admin/policyAdmin.ts'), 'utf8');
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  // 정책 모듈에서는 quotePolicy 하나만 가져온다(내부 값·저장 형식 타입 등 다른 이름 금지)
+  const imports = [...code.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@\/server\/policies'/g)].map((m) => m[1].trim());
+  assert.deepEqual(imports, ['quotePolicy']);
+  // SQL: tx 태그 안의 api.* 호출은 policy_* 뿐이고 테이블 직접 접근·수수료·정산 문구가 없다
+  const sqls = [...code.matchAll(/tx`([\s\S]*?)`/g)].map((m) => m[1]);
+  assert.ok(sqls.length >= 5);
+  for (const q of sqls) {
+    const fns = [...q.matchAll(/\bapi\.([a-z_]+)/g)].map((m) => m[1]);
+    assert.ok(fns.length >= 1 && fns.every((f) => /^policy_(list|create_draft|submit|approve|reject)$/.test(f)), q.slice(0, 60));
+    assert.doesNotMatch(q, /\b(core|pii|security)\.[a-z_]+/);
+    assert.doesNotMatch(q, /commission|settlement|source_ref|reveal_contact/i);
+  }
+  // 서버 권한표: 승인·반려는 owner 한 역할뿐
+  assert.match(code, /approve:\s*\['owner'\]/);
+  assert.match(code, /reject:\s*\['owner'\]/);
+  // 클라이언트 코드는 서버 모듈을 가져오지 않는다(권한 판정을 화면이 하지 않음)
+  const client = readFileSync(path.join(root, 'app/admin/policies/PolicyConsole.tsx'), 'utf8');
+  assert.match(client, /^'use client'/);
+  assert.deepEqual([...client.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]), ['react']);
+  // 모든 import 지점 점검: server/policies·policyAdmin을 가져오는 파일은 허용 목록 안에만 있다
+  const files: string[] = [];
+  const walk = (d: string) => { for (const n of readdirSync(d)) { const p = path.join(d, n); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(n)) files.push(p); } };
+  walk(root);
+  const rel = (f: string) => path.relative(root, f).split(path.sep).join('/');
+  const adminUsers = files.filter((f) => /server\/admin\/policyAdmin'/.test(readFileSync(f, 'utf8'))).map(rel).sort();
+  assert.deepEqual(adminUsers, ['app/admin/policies/page.tsx', 'app/api/admin/policies/[id]/route.ts', 'app/api/admin/policies/route.ts']);
+});

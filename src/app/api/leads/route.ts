@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { buildCreateLeadArgs, leadIntakeGate, LeadRejected } from '@/server/leads/intake';
+import { leadIntakeGate } from '@/server/leads/intake';
+import { submitLead } from '@/server/leads/submitLead';
 import { createPiiCrypto, piiKeysFromEnv } from '@/server/security/piiCrypto';
 import { signingKeyFromEnv } from '@/server/security/token';
 import { verifyTurnstile } from '@/server/leads/turnstile';
@@ -48,25 +49,19 @@ export async function POST(req: Request) {
   if (bot !== 'ok') return rejected('BOT_SUSPECTED', 403);
 
   try {
-    const a = buildCreateLeadArgs(lead, {
-      crypto: createPiiCrypto(piiKeysFromEnv()),
-      signingKey: signingKeyFromEnv('lead'),
-      currentPrivacyVersion: process.env.PRIVACY_POLICY_VERSION ?? '',
-      clientIp: ip,
-    });
-    await withRole('public', (tx) => tx`
-      select api.create_lead(${a.token}, ${a.nameEnc}, ${a.nameMasked}, ${a.phoneEnc}, ${a.phoneHmac}, ${a.phoneLast4},
-                             ${a.interest}, ${a.contactTime}, ${a.utmSource}, ${a.utmMedium}, ${a.utmCampaign},
-                             ${a.idempotencyKey}, ${a.privacyVersion}, ${a.consentCollection}, ${a.marketingOptIn}, ${a.ipHash})`);
-    return accepted();
-  } catch (e) {
-    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' ? 503 : 400);
-    const code = (e as { code?: string }).code;
-    if (code === '54000') return rejected('RATE_LIMITED', 429);
-    if (code === '55000') return rejected('SERVICE_NOT_READY', 503);
-    if (code === '22023') return rejected('INVALID_INPUT');
-    if (code === 'FP001') return rejected('PRODUCT_NOT_ACTIVE', 403); // DB 상품 상태가 예약(코드와 불일치 포함)
-    console.error('[lead] unexpected', code); // 개인정보를 로그에 남기지 않는다
+    const r = await submitLead(
+      lead,
+      {
+        crypto: createPiiCrypto(piiKeysFromEnv()),
+        signingKey: signingKeyFromEnv('lead'),
+        currentPrivacyVersion: process.env.PRIVACY_POLICY_VERSION ?? '',
+        clientIp: ip,
+      },
+      (fn) => withRole('public', (tx) => fn(tx as never) as Promise<unknown>),
+    );
+    return r.ok ? accepted() : rejected(r.code, r.status);
+  } catch {
+    // 키 환경값 누락 등 설정 오류: 내용은 남기지 않는다
     return rejected('INTERNAL', 500);
   }
 }
