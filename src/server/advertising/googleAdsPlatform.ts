@@ -4,10 +4,13 @@ import { PlatformError, type AdPlatform, type CallOpts, type LaunchRequest, type
 
 // Google Ads 어댑터 (PM 11/22 지시). **비활성 준비 코드: 실계정 연결·실접속·실집행이 아니다.**
 // - 기존 AdPlatform 계약(platform.ts 1~4항)과 0018 launch 상태 구조를 그대로 쓴다. 서버(adRun.ts)는 이 파일을 모른다 — createPlatform에 연결하지 않았다.
-// - transport(boundedHttp 주입형)·credential·API 버전은 **모두 필수 주입**이다. 기본 fetch·process.env·SDK·재시도·키 저장 없음.
+// - transport(boundedHttp 주입형)·OAuth credential 4종(client ID·client secret·refresh token·customer ID)은 **필수 주입**이다. 기본 fetch·process.env·SDK·재시도·키 저장 없음.
 //   credential은 호출자가 환경변수에서 읽어 넘긴다(GOOGLE_ADS_ENV_NAMES). 이 파일·DB·로그·오류에 값이 남지 않는다.
 //   설정이 하나라도 비면 createGoogleAdsPlatform은 null(= 닫힘). 기본 transport 연결·AD_PLATFORM 선택은 제이님 승인 뒤 별도 단계다.
-// - API 버전(apiVersion)은 코드에 박지 않는다. 실계정 연결 때 공식 문서(sunset 일정)로 확정해 주입한다(미검증).
+// - developer token은 필수가 아니다(공식 정책 페이지: 2026-09-09 폐지, 헤더는 선택이며 서버가 무시, 장차 한 major 버전부터 거부 예정). 접근 수준은 OAuth credential을 만든
+//   Google Cloud 프로젝트가 정한다(신규는 Test access; v25+에서 Test 프로젝트로 운영 계정 호출 시 CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION). legacyDeveloperToken을 주입한 때만 헤더로 보낸다.
+// - API 버전: 요청은 major(vNN)로만 보낸다. 공식 versioning 문서: minor(v26.2 등)는 같은 endpoint가 제자리에서 갱신되며 minor를 지정해 호출할 수 없다. 기본 v26, 'v26.2' 같은 minor 문자열은 거부(null).
+//   v26 sunset은 2027-11 추정(공식 일정 글). 바꿀 때는 GOOGLE_ADS_API_VERSION(major)만 바꾼다.
 // - 범위: 예산(CampaignBudget)+캠페인(Campaign) 생성·중지·성과 조회뿐. 광고 그룹·광고 소재·키워드·이미지·영상은 만들지 않는다(소재 생성·게시는 제이님 승인 전 금지).
 //   캠페인은 기본 PAUSED로 만든다(initialStatus='ENABLED'를 명시해야 활성). 소재가 없으면 노출·과금도 없다.
 // - 예산 보호: 일 예산은 원화를 micros로 바꿔 req.platformDailyBudgetKrw 이하로만 설정하고, 만든 뒤 다시 읽어(read-back) 실제 값을 돌려준다.
@@ -15,12 +18,17 @@ import { PlatformError, type AdPlatform, type CallOpts, type LaunchRequest, type
 // - 오류 구분(응답 본문은 읽지 않는다 — 반사 금지): 요청 거부(400·401·403·404·429)는 집행 안 됨이 확실 → failed(코드 BAD_REQUEST·AUTH_ERROR·NOT_FOUND·RATE_LIMITED),
 //   마감·전송 오류·5xx·2xx 판독 실패는 집행 여부 불명 → unknown. 예산 값 오류는 전송 전 BUDGET_INVALID(failed), 읽기 값 불일치는 BUDGET_MISMATCH.
 // - 캠페인 이름에 requestKey를 넣어 사람이 구글 광고 화면에서 unknown 건을 찾아 대조할 수 있게 한다(자동 재시도 없음).
-// - validateOnly=true면 구글에 검증만 요청하고(아무것도 만들지 않음) PlatformError('failed','VALIDATE_ONLY')로 끝낸다.
+// - validateOnly=true면 구글에 검증만 요청하고(아무것도 만들지 않음) PlatformError('failed','VALIDATE_ONLY')로 끝낸다. 공식 reference상 validate_only 지원: MutateCampaignBudgetsRequest(v26 확인)·
+//   MutateCampaignsRequest(v25 확인, v26 페이지는 열람 불가)·SearchGoogleAdsRequest(v26 확인). 이 어댑터는 campaignBudgets:mutate(생성)에만 적용한다 — 캠페인은 아직 없는 예산을 참조해 이어 검증할 수 없고,
+//   campaigns:mutate(생성·중지)와 조회에는 쓰지 않는다. 검색에는 page_size를 보내지 않는다(설정하면 PAGE_SIZE_NOT_SUPPORTED 오류, 공식 reference).
 
+/** 실제 필요한 credential(필수). developer token은 더 이상 필수가 아니다 */
 export const GOOGLE_ADS_ENV_NAMES = Object.freeze([
-  'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID',
+  'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID',
 ] as const);
-export const GOOGLE_ADS_OPTIONAL_ENV_NAMES = Object.freeze(['GOOGLE_ADS_LOGIN_CUSTOMER_ID', 'GOOGLE_ADS_API_VERSION'] as const);
+/** 선택: 관리자 계정 경유 시 login customer ID, major 버전 지정, 기존 developer token(legacy, 있어도 서버가 무시) */
+export const GOOGLE_ADS_OPTIONAL_ENV_NAMES = Object.freeze(['GOOGLE_ADS_LOGIN_CUSTOMER_ID', 'GOOGLE_ADS_API_VERSION', 'GOOGLE_ADS_DEVELOPER_TOKEN'] as const);
+export const GOOGLE_ADS_DEFAULT_API_VERSION = 'v26';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API_BASE = 'https://googleads.googleapis.com';
@@ -32,8 +40,10 @@ const VERSION = /^v\d{2}$/;
 
 export type GoogleAdsConfig = {
   readonly transport: BodyTransport | null;
-  readonly apiVersion: string | null;
-  readonly developerToken: string | null;
+  /** major만(예: 'v26'). 비우면 기본 v26. 'v26.2' 같은 minor는 거부 */
+  readonly apiVersion?: string | null;
+  /** legacy(선택): 주입한 때만 developer-token 헤더로 보낸다. 신규 연동은 필요 없음 */
+  readonly legacyDeveloperToken?: string | null;
   readonly clientId: string | null;
   readonly clientSecret: string | null;
   readonly refreshToken: string | null;
@@ -48,7 +58,7 @@ export type GoogleAdsConfig = {
 export function googleAdsConfigFromEnv(env: Readonly<Record<string, string | undefined>>, transport: BodyTransport | null): GoogleAdsConfig {
   const v = (k: string) => (typeof env[k] === 'string' && env[k]!.trim() !== '' ? env[k]!.trim() : null);
   return {
-    transport, apiVersion: v('GOOGLE_ADS_API_VERSION'), developerToken: v('GOOGLE_ADS_DEVELOPER_TOKEN'), clientId: v('GOOGLE_ADS_CLIENT_ID'),
+    transport, apiVersion: v('GOOGLE_ADS_API_VERSION'), legacyDeveloperToken: v('GOOGLE_ADS_DEVELOPER_TOKEN'), clientId: v('GOOGLE_ADS_CLIENT_ID'),
     clientSecret: v('GOOGLE_ADS_CLIENT_SECRET'), refreshToken: v('GOOGLE_ADS_REFRESH_TOKEN'), customerId: (v('GOOGLE_ADS_CUSTOMER_ID') ?? '').replace(/-/g, '') || null,
     loginCustomerId: (v('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '').replace(/-/g, '') || null,
   };
@@ -71,8 +81,10 @@ function classify(r: BoundedResult): PlatformError {
 }
 
 export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null {
-  const { transport, apiVersion, developerToken, clientId, clientSecret, refreshToken, customerId } = cfg;
-  if (!transport || !apiVersion || !VERSION.test(apiVersion) || !developerToken || !clientId || !clientSecret || !refreshToken || !customerId || !ID.test(customerId)) return null;
+  const { transport, clientId, clientSecret, refreshToken, customerId } = cfg;
+  const apiVersion = cfg.apiVersion == null || cfg.apiVersion === '' ? GOOGLE_ADS_DEFAULT_API_VERSION : cfg.apiVersion;
+  const legacyToken = cfg.legacyDeveloperToken && cfg.legacyDeveloperToken.trim() !== '' ? cfg.legacyDeveloperToken.trim() : null;
+  if (!transport || !VERSION.test(apiVersion) || !clientId || !clientSecret || !refreshToken || !customerId || !ID.test(customerId)) return null;
   if (cfg.loginCustomerId != null && cfg.loginCustomerId !== '' && !ID.test(cfg.loginCustomerId)) return null;
   const status = cfg.initialStatus === 'ENABLED' ? 'ENABLED' : 'PAUSED';
   const base = `${API_BASE}/${apiVersion}/customers/${customerId}`;
@@ -88,7 +100,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
     return t;
   };
   const headers = (token: string): Record<string, string> => ({
-    'content-type': 'application/json', authorization: `Bearer ${token}`, 'developer-token': developerToken,
+    'content-type': 'application/json', authorization: `Bearer ${token}`, ...(legacyToken ? { 'developer-token': legacyToken } : {}),
     ...(cfg.loginCustomerId ? { 'login-customer-id': cfg.loginCustomerId } : {}),
   });
   /** 요청 1회(변경·조회 공통). 응답 판독 실패는 mutating이면 unknown, 조회면 failed */
@@ -131,7 +143,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       // 3) 읽어서 확인(read-back). 실패·불일치는 0(미확인)으로 알려 서버가 즉시 중지·경고하게 한다(캠페인 ID는 이미 돌려준다)
       let verified = 0;
       try {
-        const j = await call('googleAds:search', { query: `SELECT campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${externalId}`, pageSize: 1 }, token, req.deadlineAt, false);
+        const j = await call('googleAds:search', { query: `SELECT campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${externalId}` }, token, req.deadlineAt, false);
         const row = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0] : null;
         const micros = isObj(row?.campaignBudget) ? Number((row!.campaignBudget as Record<string, unknown>).amountMicros) : NaN;
         if (Number.isSafeInteger(micros) && micros >= MICROS && micros % MICROS === 0 && micros / MICROS <= krw) verified = micros / MICROS;
@@ -148,7 +160,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');
       if (!DAY.test(day)) throw new PlatformError('failed', 'BAD_REQUEST');
       const token = await accessToken(opts.deadlineAt);
-      const j = await call('googleAds:search', { query: `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros FROM campaign WHERE campaign.id = ${ref.externalId} AND segments.date = '${day}'`, pageSize: 1 }, token, opts.deadlineAt, false);
+      const j = await call('googleAds:search', { query: `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros FROM campaign WHERE campaign.id = ${ref.externalId} AND segments.date = '${day}'` }, token, opts.deadlineAt, false);
       const row = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0] : null;
       const mt = row && isObj(row.metrics) ? row.metrics : {};
       const num = (v: unknown) => (v === undefined ? 0 : Number(v));

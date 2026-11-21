@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { callPlatform, createPlatform, PlatformError } from '../../src/server/advertising/platform';
-import { createGoogleAdsPlatform, googleAdsConfigFromEnv, GOOGLE_ADS_ENV_NAMES, type GoogleAdsConfig } from '../../src/server/advertising/googleAdsPlatform';
+import { createGoogleAdsPlatform, googleAdsConfigFromEnv, GOOGLE_ADS_ENV_NAMES, GOOGLE_ADS_OPTIONAL_ENV_NAMES, type GoogleAdsConfig } from '../../src/server/advertising/googleAdsPlatform';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 
 const ACCESS = 'ya29.fake_access_token_for_tests_0000';
@@ -33,7 +33,7 @@ const OK_BUDGET: Resp = { status: 200, text: JSON.stringify({ results: [{ resour
 const OK_CAMP: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaigns/4242` }] }) };
 const searchBudget = (micros: string): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaignBudget: { amountMicros: micros } }] }) });
 const cfg = (t: BodyTransport | null, o: Partial<GoogleAdsConfig> = {}): GoogleAdsConfig => ({
-  transport: t, apiVersion: 'v22', developerToken: 'dev-token-SECRET', clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, ...o,
+  transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, ...o,
 });
 const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 5000, deadlineAt: Date.now() + 5000, ...o });
 const opts = () => ({ deadlineAt: Date.now() + 5000 });
@@ -43,15 +43,19 @@ const run = async (p: Plat, f: (p: NonNullable<Plat>) => Promise<unknown>) => { 
 test('GA1 설정이 하나라도 비면 어댑터 없음(닫힘), transport 0회. createPlatform은 google_ads를 선택하지 않는다', () => {
   const { t, calls } = fake({});
   assert.ok(createGoogleAdsPlatform(cfg(t)));
-  for (const bad of [{ transport: null }, { apiVersion: null }, { apiVersion: 'latest' }, { developerToken: null }, { clientId: null }, { clientSecret: null }, { refreshToken: null }, { customerId: null }, { customerId: '12-34' }, { loginCustomerId: 'x' }]) assert.equal(createGoogleAdsPlatform({ ...cfg(t), ...bad } as GoogleAdsConfig), null);
+  for (const bad of [{ transport: null }, { apiVersion: 'latest' }, { apiVersion: 'v26.2' }, { apiVersion: '26' }, { clientId: null }, { clientSecret: null }, { refreshToken: null }, { customerId: null }, { customerId: '12-34' }, { loginCustomerId: 'x' }]) assert.equal(createGoogleAdsPlatform({ ...cfg(t), ...bad } as GoogleAdsConfig), null);
   assert.equal(calls.length, 0);
+  // developer token·API 버전 미지정은 정상(developer token 불필요, 버전 기본 v26)
+  assert.ok(createGoogleAdsPlatform({ ...cfg(t), apiVersion: null, legacyDeveloperToken: null }));
   for (const v of ['google_ads', 'google', 'GOOGLE_ADS']) assert.equal(createPlatform({ AD_PLATFORM: v, AD_EXECUTION_ENABLED: 'true' }), null);
   assert.equal(createGoogleAdsPlatform(cfg(t))!.live, true);
 });
 test('GA2 환경변수 이름만 참조: 값은 읽어 설정으로 넘길 뿐, 하이픈 제거·빈 값은 null', () => {
-  assert.deepEqual([...GOOGLE_ADS_ENV_NAMES], ['GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID']);
-  const c = googleAdsConfigFromEnv({ GOOGLE_ADS_CUSTOMER_ID: '123-456-7890', GOOGLE_ADS_DEVELOPER_TOKEN: '  ', GOOGLE_ADS_API_VERSION: 'v22' }, null);
-  assert.deepEqual([c.customerId, c.developerToken, c.apiVersion, c.transport], [CID, null, 'v22', null]);
+  assert.deepEqual([...GOOGLE_ADS_ENV_NAMES], ['GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID']);
+  assert.ok(![...GOOGLE_ADS_ENV_NAMES].some((n) => /DEVELOPER/.test(n)), 'developer token은 필수 credential이 아님');
+  assert.deepEqual([...GOOGLE_ADS_OPTIONAL_ENV_NAMES], ['GOOGLE_ADS_LOGIN_CUSTOMER_ID', 'GOOGLE_ADS_API_VERSION', 'GOOGLE_ADS_DEVELOPER_TOKEN']);
+  const c = googleAdsConfigFromEnv({ GOOGLE_ADS_CUSTOMER_ID: '123-456-7890', GOOGLE_ADS_DEVELOPER_TOKEN: '  ', GOOGLE_ADS_API_VERSION: 'v26' }, null);
+  assert.deepEqual([c.customerId, c.legacyDeveloperToken, c.apiVersion, c.transport], [CID, null, 'v26', null]);
   assert.equal(createGoogleAdsPlatform(c), null);
 });
 test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소재 없음, externalId·read-back 값 반환, 요청 이름에 requestKey', async () => {
@@ -66,9 +70,14 @@ test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소
   assert.equal(camp.operations[0].create.status, 'PAUSED');
   assert.ok(String(camp.operations[0].create.name).includes(KEY));
   assert.ok(!/adGroup|ads?"|keyword|asset|image|video|creative/i.test(calls.map((c) => c.body).join('\n')), '광고 그룹·소재·이미지·영상 요청 없음');
-  assert.ok(calls.every((c) => c.url.startsWith('https://googleads.googleapis.com/v22/customers/1234567890/') || c.url === 'https://oauth2.googleapis.com/token'));
+  assert.ok(calls.every((c) => c.url.startsWith('https://googleads.googleapis.com/v26/customers/1234567890/') || c.url === 'https://oauth2.googleapis.com/token'));
   const api = calls.find((c) => c.url.includes('googleads'))!;
-  assert.deepEqual([api.headers.authorization, api.headers['developer-token']], [`Bearer ${ACCESS}`, 'dev-token-SECRET']);
+  // developer token 없이 동작: 헤더에 developer-token이 없다. legacy 토큰을 주입한 때만 보낸다
+  assert.deepEqual([api.headers.authorization, 'developer-token' in api.headers], [`Bearer ${ACCESS}`, false]);
+  const lg = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('3000000000') });
+  await createGoogleAdsPlatform(cfg(lg.t, { legacyDeveloperToken: 'dev-token-SECRET' }))!.launch(req({ platformDailyBudgetKrw: 3000 }));
+  assert.equal(lg.calls.find((c) => c.url.includes('googleads'))!.headers['developer-token'], 'dev-token-SECRET');
+  assert.ok(!calls.some((c) => /pageSize|page_size/.test(c.body)), '검색 요청에 page_size 없음(v26에서 오류)');
 });
 test('GA4 예산 보호: 상한 초과·비정수·0은 전송 0회 BUDGET_INVALID(failed), read-back 실패·불일치·초과는 dailyBudgetKrw=0(미확인) → 서버가 즉시 중지', async () => {
   const f = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP });
@@ -145,6 +154,15 @@ test('GA9 비밀 비노출: 오류·결과 어디에도 credential·토큰·URL 
   const g = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('5000000000') });
   await createGoogleAdsPlatform(cfg(g.t, { initialStatus: 'ENABLED' }))!.launch(req());
   assert.equal(JSON.parse(g.calls.find((c) => c.url.endsWith('campaigns:mutate'))!.body).operations[0].create.status, 'ENABLED');
+});
+test('GA11 API 버전: 기본 major v26, 지정은 major만(v26.2 같은 minor 거부), 모든 요청 URL이 major 경로', async () => {
+  const f = fake({ token: OK_TOKEN, campaign: OK_CAMP });
+  await createGoogleAdsPlatform(cfg(f.t))!.pause({ campaign: 'camp-a', externalId: '4242' }, opts());
+  assert.ok(f.calls.some((c) => c.url === `https://googleads.googleapis.com/v26/customers/${CID}/campaigns:mutate`));
+  const g = fake({ token: OK_TOKEN, campaign: OK_CAMP });
+  await createGoogleAdsPlatform(cfg(g.t, { apiVersion: 'v27' }))!.pause({ campaign: 'camp-a', externalId: '4242' }, opts());
+  assert.ok(g.calls.some((c) => c.url.startsWith('https://googleads.googleapis.com/v27/')));
+  for (const bad of ['v26.2', 'v26.1', 'V26', '26', 'v2', 'latest']) assert.equal(createGoogleAdsPlatform(cfg(g.t, { apiVersion: bad })), null, bad);
 });
 test('GA10 정적: 어댑터는 process.env·기본 fetch·SDK·console·재시도 없음, 고정 주소 2곳뿐, createPlatform·서버 경로에서 불러 쓰지 않음', () => {
   const src = readFileSync('src/server/advertising/googleAdsPlatform.ts', 'utf8');

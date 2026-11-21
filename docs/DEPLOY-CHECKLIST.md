@@ -143,8 +143,10 @@
 - 실제 매체 어댑터·실제 집행은 제이님 승인 전까지 없음(`AD_PLATFORM=mock`만, `AD_EXECUTION_ENABLED=false`).
 
 **R. Google Ads 어댑터(준비 코드, 실집행 아님)**
-- 파일: `src/server/advertising/googleAdsPlatform.ts`. 전송(transport)·credential·API 버전을 모두 주입받으며 기본 fetch·env 직접 읽기·재시도가 없다. **서버(createPlatform·route)에 연결하지 않았다** — 연결·`AD_PLATFORM` 선택은 제이님 승인 뒤 별도 단계.
-- 필요 credential(이름만): `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`. 선택: `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`. 값은 코드·DB·로그에 남기지 않는다.
+- 파일: `src/server/advertising/googleAdsPlatform.ts`. 전송(transport)·credential을 주입받으며 기본 fetch·env 직접 읽기·재시도가 없다. **서버(createPlatform·route)에 연결하지 않았다** — 연결·`AD_PLATFORM` 선택은 제이님 승인 뒤 별도 단계.
+- 접근 구조(공식 developer-token 정책 페이지 기준): developer token은 2026-09-09 폐지되어 **필수 credential이 아니다**. 접근 수준은 OAuth credential을 만든 Google Cloud 프로젝트가 정한다(신규는 Test access, 운영 계정 호출은 프로젝트 승인 필요 — v25+에서 미승인이면 `CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION`). 기존 토큰은 선택 항목(legacy)이며 헤더로 보내도 서버가 무시하고, 장차 한 major 버전부터 거부될 예정이다.
+- 필수 credential(이름만): `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`. 선택: `GOOGLE_ADS_LOGIN_CUSTOMER_ID`(관리자 계정 경유 시), `GOOGLE_ADS_API_VERSION`(major만, 기본 v26), `GOOGLE_ADS_DEVELOPER_TOKEN`(legacy). 값은 코드·DB·로그에 남기지 않는다.
+- API 버전: 요청은 major(`/v26/`)로만 보낸다. 공식 versioning 문서: minor(v26.1·v26.2)는 같은 endpoint가 제자리에서 갱신되며 minor를 지정해 호출할 수 없다. v26 공개 2026-10-14, v26.2 공개 2026-11-11, v26 sunset은 2027-11 추정(공식 일정 글).
+- validateOnly(시험용): 공식 reference상 `validate_only`는 MutateCampaignBudgetsRequest(v26 확인)·MutateCampaignsRequest(v25 확인)·SearchGoogleAdsRequest(v26 확인)에 있다. 이 어댑터는 `campaignBudgets:mutate` 생성에만 쓴다. 검색에는 `page_size`를 보내지 않는다(v26에서 설정하면 `PAGE_SIZE_NOT_SUPPORTED`).
 - 범위: 일 예산(≤ 승인 amountKrw)+캠페인(기본 PAUSED) 생성, 중지, 성과 조회. 광고 그룹·소재·이미지·영상은 만들지 않는다(승인 전 금지).
-- 실계정 연결 전 확인할 미검증 항목: API 버전·sunset, 계정 통화 KRW 여부, 캠페인 필수 필드(입찰 전략·네트워크 설정)가 계정 정책에 맞는지, 테스트 계정 `validateOnly` 결과.
-
+- 실계정 연결 전 확인할 미검증 항목: 계정 통화 KRW 여부, 캠페인 필수 필드(입찰 전략·네트워크·`containsEuPoliticalAdvertising` 등)가 v26에서 맞는지, Cloud 프로젝트 접근 수준, 테스트 계정 `validateOnly` 결과. 공식 call-structure 페이지에는 developer-token 헤더가 필수로 적혀 있어 정책 페이지와 어긋난다(정책 페이지의 날짜·문구를 따름, 실계정 연결 때 재확인).
