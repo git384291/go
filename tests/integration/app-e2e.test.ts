@@ -11,6 +11,8 @@ import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 import { signToken } from '../../src/server/security/token';
 import { adminLeadsList } from '../../src/server/admin/leadsRoute';
 import { answerQuote } from '../../src/server/consult/quoteAnswer';
+import { answerChat } from '../../src/server/consult/chatAnswer';
+import { createAiBudget, mockModel, type ChatModel } from '../../src/server/consult/chatModel';
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
 import { adBudgetAction, adBudgetOverview, type AdBudgetDeps } from '../../src/server/admin/adBudget';
 import { createPolicyDraft, listPolicies, policyAction, type PolicyAdminDeps } from '../../src/server/admin/policyAdmin';
@@ -308,4 +310,46 @@ test('E9 광고 예산: 승인 없으면 차단, 한도·중복·동시 요청 �
   // 앱 계정은 원장·승인 테이블을 직접 읽거나 고칠 수 없다
   await assert.rejects(withRoleOn(app, 'staff', (tx) => tx`select * from core.ad_spend_ledger`), (e: { code?: string }) => e.code === '42501');
   await assert.rejects(admin`update core.ad_spend_ledger set amount_krw = 1 where campaign_key = ${C}`);
+});
+
+// AI 상담 → 가입 접수 → DB → 관리자 조회(실제 DB, 무료 모의 모델, 실제 AI 호출 없음)
+test('E10 AI 상담: 승인 정책만 안내 → 접수 → DB 암호화 저장 → 관리자 마스킹 조회, 개인정보는 모델에 가려서만 전달', async () => {
+  const provider = dbPolicyProvider(async () => {
+    const rows = (await withRoleOn(app, 'public', (tx) => tx`select api.policy_published() as p`)) as unknown as { p: unknown }[];
+    return rows.map((r) => r.p);
+  });
+  const seen: string[] = [];
+  const spy: ChatModel = { ...mockModel, name: 'spy', generate: (i, sig) => { seen.push(JSON.stringify(i)); return mockModel.generate(i, sig); } };
+  const chat = { provider, supplierId: 'supplier-a', model: spy, budget: createAiBudget({}) };
+  const input = (message: string) => ({ message, carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1' });
+  const [flag] = await admin`select enabled from core.feature_flags where key = 'policy_publish'`;
+  const original = flag?.enabled ?? false;
+  try {
+    await admin`update core.feature_flags set enabled = false where key = 'policy_publish'`;
+    const off = await answerChat(chat, input('요금과 사은품이 궁금해요'), new Date());
+    assert.ok(off.ok && off.kind === 'needs_review' && !/11,?111/.test(off.text));
+    await admin`update core.feature_flags set enabled = true where key = 'policy_publish'`;
+    const on = await answerChat(chat, input('이름은 김철수 010-9999-8888 요금이 궁금해요'), new Date());
+    assert.ok(on.ok && on.kind === 'quote' && on.source === 'model' && /11,?111/.test(on.text), JSON.stringify(on));
+    assert.ok(!seen.join().includes('9999') && !seen.join().includes('김철수'));
+  } finally {
+    await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;
+  }
+  // 상담 → 접수(기존 접수 모듈) → DB → 관리자 조회
+  const l0 = await count(LEADS);
+  const r = await submitLead(body({ idempotencyKey: 'e2e-chat-signup-0000001', phone: '010-5555-4321', name: '김삼삼' }), ctx(), run);
+  assert.deepEqual(r, { ok: true });
+  assert.equal(await count(LEADS), l0 + 1);
+  const res = await adminLeadsList({
+    env: () => ({ ADMIN_LEADS_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_1_abcdef01' }),
+    mode: () => 'supabase',
+    requireStaff: async () => owner,
+    runInTransaction: (fn) => withRoleOn(app, 'staff', (tx) => fn(tx as never)),
+    mockList: async () => new Response('{}', { status: 500 }),
+    mockDetail: async () => new Response('{}', { status: 500 }),
+  }, new Request('http://x/api/admin/leads?limit=1'));
+  const text = await res.text();
+  assert.equal(res.status, 200, text.slice(0, 200));
+  assert.match(text, /010-\*\*\*\*-4321/);
+  assert.ok(!text.includes('5555') && !text.includes('김삼삼'));
 });
