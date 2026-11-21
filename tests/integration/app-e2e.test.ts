@@ -155,6 +155,9 @@ test('E7 관리자 정책: 초안 → 제출 → 승인, 승인 권한 우회 �
   assert.equal(created.status, 201, JSON.stringify(cj));
   const id = cj.id;
   assert.equal(await stateOf(id), 'draft');
+  // 회귀(이중 직렬화): terms는 jsonb 객체여야 하고 문자열 스칼라가 아니다
+  const [shape] = await admin`select jsonb_typeof(terms) as t, terms -> 'monthlyFee' -> 'value' ->> 'amountKrw' as fee from core.policy_versions where id = ${id}::uuid`;
+  assert.deepEqual({ t: shape.t, fee: shape.fee }, { t: 'object', fee: '11111' });
 
   // 서버 선검사: policy_editor는 승인 요청이 DB까지 가지 않는다
   const a0 = await count(AUDITS);
@@ -179,6 +182,8 @@ test('E7 관리자 정책: 초안 → 제출 → 승인, 승인 권한 우회 �
   const ok = await policyAction(pdeps(owner), id, { action: 'approve', reason: '정책표 원문과 대조 완료', checks: ALL });
   assert.equal(ok.status, 200, await ok.text());
   assert.equal(await stateOf(id), 'approved');
+  const [ck] = await admin`select jsonb_typeof(checks) as t, checks ->> 'vat' as vat, decided_by::text as by from core.policy_versions where id = ${id}::uuid`;
+  assert.deepEqual({ t: ck.t, vat: ck.vat, by: ck.by }, { t: 'object', vat: 'true', by: OWNER });
   assert.ok((await count(AUDITS)) > a0, '승인 감사 기록');
 
   const list = await listPolicies(pdeps(owner), new Request('http://x/api/admin/policies?limit=100'));
@@ -197,7 +202,7 @@ test('E7 관리자 정책: 초안 → 제출 → 승인, 승인 권한 우회 �
     assert.ok(!mentions(await published()), '스위치 꺼짐: 승인된 정책도 고객 경로에 나가지 않음');
     await admin`update core.feature_flags set enabled = true where key = 'policy_publish'`;
     const on = await published();
-    assert.ok(mentions(on), '스위치 켜짐: 승인된 정책만 고객 경로에 나감');
+    assert.ok(mentions(on) && on.includes('11111'), '스위치 켜짐: 승인된 정책의 고객용 값만 고객 경로에 나감');
     assert.ok(!/commission|source_ref|created_by|checks/i.test(on), '고객 경로에는 내부 값 없음');
   } finally {
     await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;

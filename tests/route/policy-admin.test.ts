@@ -196,3 +196,34 @@ test('PA10 policyAdmin 데이터 접근: 견적 규칙만 import, SQL은 api.pol
   const adminUsers = files.filter((f) => /server\/admin\/policyAdmin'/.test(readFileSync(f, 'utf8'))).map(rel).sort();
   assert.deepEqual(adminUsers, ['app/admin/policies/page.tsx', 'app/api/admin/policies/[id]/route.ts', 'app/api/admin/policies/route.ts']);
 });
+
+// ---- PM 11/21 지시 2: JSON 이중 직렬화 회귀 ----
+// postgres.js는 `${값}::jsonb` 자리의 JS 문자열을 다시 JSON 문자열로 직렬화한다(실제 DB에서 jsonb 문자열이 되어 terms 형태 검사 거부).
+// 그래서 문자열화한 JSON은 반드시 `::text::jsonb`로 넘긴다.
+test('PA11 JSON 문자열 파라미터는 ::text::jsonb로 전달(이중 직렬화 방지), 파라미터는 한 번만 직렬화된 객체 JSON', async () => {
+  const seen: { q: string; v: unknown[] }[] = [];
+  const d: PolicyAdminDeps = {
+    env: () => READY_ENV, mode: () => 'supabase', requireStaff: async () => who('owner'), now: () => NOW,
+    runInTransaction: async (fn) => fn((async (s: TemplateStringsArray, ...v: unknown[]) => { seen.push({ q: s.join('?'), v }); return [{ id: ID }]; }) as never),
+  };
+  assert.equal((await createPolicyDraft(d, upload())).status, 201);
+  assert.equal((await policyAction(d, ID, { action: 'approve', reason: '확인 완료', checks: { source_matched: true, validity: true, vat: true, benefit_terms: true, region_bundle: true } })).status, 200);
+  assert.equal(seen.length, 2);
+  for (const c of seen) {
+    assert.match(c.q, /::text::jsonb/);
+    assert.doesNotMatch(c.q.replace(/::text::jsonb/g, ''), /::jsonb/);
+    const js = c.v.filter((x) => typeof x === 'string' && x.startsWith('{')) as string[];
+    assert.equal(js.length, 1);
+    const parsed: unknown = JSON.parse(js[0]);
+    assert.ok(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed), '한 번 파싱하면 객체(문자열이 아님)');
+  }
+});
+
+test('PA12 src 전체: 문자열화한 JSON을 ::jsonb로 직접 캐스트하는 SQL 없음', () => {
+  const root = path.resolve(__dirname, '../../src');
+  const files: string[] = [];
+  const walk = (d: string) => { for (const n of readdirSync(d)) { const p = path.join(d, n); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(n)) files.push(p); } };
+  walk(root);
+  const bad = files.filter((f) => /JSON\.stringify\([^`]*\)\}::jsonb/.test(readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
+  assert.deepEqual(bad, []);
+});
