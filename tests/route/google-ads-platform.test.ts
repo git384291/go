@@ -37,7 +37,8 @@ const cfg = (t: BodyTransport | null, o: Partial<GoogleAdsConfig> = {}): GoogleA
 });
 const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 5000, deadlineAt: Date.now() + 5000, ...o });
 const opts = () => ({ deadlineAt: Date.now() + 5000 });
-const run = async (p: ReturnType<typeof createGoogleAdsPlatform>, f: (p: NonNullable<typeof p>) => Promise<unknown>) => { try { return { ok: await f(p!) }; } catch (e) { return { err: e as PlatformError }; } };
+type Plat = ReturnType<typeof createGoogleAdsPlatform>;
+const run = async (p: Plat, f: (p: NonNullable<Plat>) => Promise<unknown>) => { try { return { ok: await f(p!) }; } catch (e) { return { err: e as PlatformError }; } };
 
 test('GA1 설정이 하나라도 비면 어댑터 없음(닫힘), transport 0회. createPlatform은 google_ads를 선택하지 않는다', () => {
   const { t, calls } = fake({});
