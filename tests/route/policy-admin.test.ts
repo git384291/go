@@ -1,6 +1,7 @@
 // PM 11/21: 관리자 정책 업로드·검증·승인·게시 서버 모듈 시험. 가짜 의존성만 쓴다(실제 DB·Auth 아님).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { noticeReviewAdd, noticeReviewList } from '../../src/server/admin/policyAdmin';
 import { createPolicyDraft, listPolicies, parseUpload, policyAction, policyAdminReady, validateUpload, type PolicyAdminDeps } from '../../src/server/admin/policyAdmin';
 import { StaffAuthError } from '../../src/server/auth/staffAssertion';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
@@ -177,7 +178,7 @@ test('PA10 policyAdmin 데이터 접근: 견적 규칙만 import, SQL은 api.pol
   assert.ok(sqls.length >= 5);
   for (const q of sqls) {
     const fns = [...q.matchAll(/\bapi\.([a-z_]+)/g)].map((m) => m[1]);
-    assert.ok(fns.length >= 1 && fns.every((f) => /^(policy_(list|create_draft|submit|approve|reject|publish_get|publish_set)|notice_text_(list|add))$/.test(f)), q.slice(0, 60));
+    assert.ok(fns.length >= 1 && fns.every((f) => /^(policy_(list|create_draft|submit|approve|reject|publish_get|publish_set)|notice_text_(list|add)|notice_review_(add|list))$/.test(f)), q.slice(0, 60));
     assert.doesNotMatch(q, /\b(core|pii|security)\.[a-z_]+/);
     assert.doesNotMatch(q, /commission|settlement|source_ref|reveal_contact/i);
   }
@@ -194,7 +195,7 @@ test('PA10 policyAdmin 데이터 접근: 견적 규칙만 import, SQL은 api.pol
   walk(root);
   const rel = (f: string) => path.relative(root, f).split(path.sep).join('/');
   const adminUsers = files.filter((f) => /server\/admin\/policyAdmin'/.test(readFileSync(f, 'utf8'))).map(rel).sort();
-  assert.deepEqual(adminUsers, ['app/admin/notices/page.tsx', 'app/admin/policies/page.tsx', 'app/api/admin/notices/route.ts', 'app/api/admin/policies/[id]/route.ts', 'app/api/admin/policies/publish/route.ts', 'app/api/admin/policies/route.ts']);
+  assert.deepEqual(adminUsers, ['app/admin/notices/page.tsx', 'app/admin/policies/page.tsx', 'app/api/admin/notices/review/route.ts', 'app/api/admin/notices/route.ts', 'app/api/admin/policies/[id]/route.ts', 'app/api/admin/policies/publish/route.ts', 'app/api/admin/policies/route.ts']);
 });
 
 // ---- PM 11/21 지시 2: JSON 이중 직렬화 회귀 ----
@@ -263,4 +264,24 @@ test('NA1 고지 문구: 조회는 대표·검토자, 입력은 대표만, 입�
   assert.equal((await noticeAdd(mk({ tx: () => [{ sha: 'zz' }] }).d, ok)).status, 502);
   const dup = await noticeAdd(mk({ tx: () => Object.assign(new Error('NOTICE_EXISTS'), { code: '22023' }) }).d, ok);
   assert.deepEqual([dup.status, (await jj(dup)).code], [422, 'NOTICE_EXISTS']);
+});
+
+test('NR1 고지 검수: 조회·기록은 대표·검토자만, 본문 키·확인 5개 형식 검사(DB 0회), 성공 201, DB 거절 코드 변환', async () => {
+  const C = { source_matched: true, version_matched: true, keys_complete: true, conditions_checked: true, screen_checked: true };
+  const ok = { version: 'v1', decision: 'approved', checks: C, reason: '원문 대조 완료' };
+  for (const role of ['owner', 'reviewer']) assert.equal((await noticeReviewList(mk({ staff: who(role), tx: () => [] }).d)).status, 200, role);
+  for (const role of ['policy_editor', 'counselor']) { const { d, c } = mk({ staff: who(role) }); assert.equal((await noticeReviewList(d)).status, 403); assert.equal((await noticeReviewAdd(d, ok)).status, 403); assert.equal(c.tx, 0); }
+  const bad: unknown[] = [null, [], { ...ok, extra: 1 }, { version: 'v1', decision: 'approved', checks: C }, { ...ok, decision: 'maybe' }, { ...ok, version: 'bad version' },
+    { ...ok, checks: { ...C, screen_checked: 'yes' } }, { ...ok, checks: { ...C, extra: true } }, { ...ok, checks: { source_matched: true } }];
+  for (const b of bad) { const { d, c } = mk(); assert.equal((await noticeReviewAdd(d, b)).status, 422, JSON.stringify(b)); assert.equal(c.tx, 0); }
+  { const { d, c } = mk(); assert.equal((await noticeReviewAdd(d, { ...ok, reason: '' })).status, 422); assert.equal(c.tx, 0); }
+  const { d, c } = mk({ staff: who('reviewer'), tx: () => [] });
+  assert.equal((await noticeReviewAdd(d, ok)).status, 201);
+  assert.ok(c.sql.some((q) => /api\.notice_review_add\(/.test(q)));
+  const self = await noticeReviewAdd(mk({ tx: () => Object.assign(new Error('SELF_APPROVAL'), { code: '42501' }) }).d, ok);
+  assert.deepEqual([self.status, (await jj(self)).code], [403, 'FORBIDDEN']);
+  const inc = await noticeReviewAdd(mk({ tx: () => Object.assign(new Error('CHECKS_INCOMPLETE'), { code: '22023' }) }).d, ok);
+  assert.deepEqual([inc.status, (await jj(inc)).code], [422, 'CHECKS_INCOMPLETE']);
+  const nf = await noticeReviewAdd(mk({ tx: () => Object.assign(new Error('NOTICE_NOT_FOUND'), { code: '22023' }) }).d, ok);
+  assert.deepEqual([nf.status, (await jj(nf)).code], [422, 'NOTICE_NOT_FOUND']);
 });

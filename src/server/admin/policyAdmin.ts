@@ -41,7 +41,7 @@ export function policyAdminReady(env: Env): boolean {
   return dbReadReady({ ...env, ADMIN_LEADS_SOURCE: 'db' });
 }
 
-type Op = 'list' | 'create' | 'submit' | 'approve' | 'reject' | 'publish_get' | 'publish_set' | 'notice_list' | 'notice_add';
+type Op = 'list' | 'create' | 'submit' | 'approve' | 'reject' | 'publish_get' | 'publish_set' | 'notice_list' | 'notice_add' | 'review_list' | 'review_add';
 const ROLES: Record<Op, readonly string[]> = {
   list: ['owner', 'policy_editor', 'reviewer'],
   create: ['owner', 'policy_editor'],
@@ -52,6 +52,8 @@ const ROLES: Record<Op, readonly string[]> = {
   publish_set: ['owner'],
   notice_list: ['owner', 'reviewer'],
   notice_add: ['owner'],
+  review_list: ['owner', 'reviewer'],
+  review_add: ['owner', 'reviewer'],
 };
 
 async function gate(deps: PolicyAdminDeps, op: Op): Promise<StaffIdentity | Response> {
@@ -70,7 +72,7 @@ async function gate(deps: PolicyAdminDeps, op: Op): Promise<StaffIdentity | Resp
   return who;
 }
 
-const DB_MESSAGES = new Set(['REASON_REQUIRED', 'CHECKS_REQUIRED', 'SOURCE_NOT_QUOTABLE', 'CONFIRMED_AT_INVALID', 'VALIDITY_INVALID', 'INVALID_TRANSITION', 'INVALID_PAGE', 'POLICY_IMMUTABLE', 'INVALID_NOTICE', 'NOTICE_EXISTS']);
+const DB_MESSAGES = new Set(['REASON_REQUIRED', 'CHECKS_REQUIRED', 'SOURCE_NOT_QUOTABLE', 'CONFIRMED_AT_INVALID', 'VALIDITY_INVALID', 'INVALID_TRANSITION', 'INVALID_PAGE', 'POLICY_IMMUTABLE', 'INVALID_NOTICE', 'NOTICE_EXISTS', 'CHECKS_INCOMPLETE', 'NOTICE_NOT_FOUND']);
 function dbError(e: unknown): Response {
   const err = (e ?? {}) as { code?: unknown; message?: unknown };
   if (err.code === '42501') return fail('FORBIDDEN', 403);
@@ -262,5 +264,38 @@ export async function noticeAdd(deps: PolicyAdminDeps, body: unknown): Promise<R
     const sha = rows[0]?.sha;
     if (typeof sha !== 'string' || !/^[0-9a-f]{64}$/.test(sha)) return fail('INVALID_DATA', 502);
     return json({ ok: true, sha256: sha }, 201);
+  } catch (e) { return dbError(e); }
+}
+
+const REVIEW_CHECKS = ['source_matched', 'version_matched', 'keys_complete', 'conditions_checked', 'screen_checked'] as const;
+/** 총판 고지 조건 검수 이력(대표·검토자 조회) */
+export async function noticeReviewList(deps: PolicyAdminDeps): Promise<Response> {
+  const g = await gate(deps, 'review_list');
+  if (g instanceof Response) return g;
+  try {
+    const rows = await deps.runInTransaction(async (tx) =>
+      tx`select version, decision, checks, reason, created_at, is_current from api.notice_review_list(${g.actor}::uuid, ${g.session}::uuid, ${g.token})`);
+    if (!Array.isArray(rows) || rows.length > 200) return fail('INVALID_DATA', 502);
+    return json({ ok: true, role: g.role, items: rows }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+/**
+ * 총판 고지 조건 검수 기록(대표·검토자). 본문은 {version, decision: approved|rejected, checks: 5개 불리언, reason}.
+ * 승인은 5개 확인이 모두 true여야 하고, 그 버전 문구를 직접 입력한 사람은 승인할 수 없다(DB가 판정). 검수 승인은 접수를 열지 않는다.
+ */
+export async function noticeReviewAdd(deps: PolicyAdminDeps, body: unknown): Promise<Response> {
+  const g = await gate(deps, 'review_add');
+  if (g instanceof Response) return g;
+  if (!isObj(body) || !exactKeys(body, ['version', 'decision', 'checks', 'reason']) || Object.keys(body).length !== 4) return fail('INVALID_INPUT', 422);
+  const { version, decision, checks } = body;
+  if (typeof version !== 'string' || !VERSION.test(version) || (decision !== 'approved' && decision !== 'rejected')) return fail('INVALID_INPUT', 422);
+  if (!isObj(checks) || !exactKeys(checks, [...REVIEW_CHECKS]) || Object.keys(checks).length !== REVIEW_CHECKS.length || REVIEW_CHECKS.some((k) => typeof checks[k] !== 'boolean')) return fail('INVALID_INPUT', 422);
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 2 || reason.length > 500) return fail('REASON_REQUIRED', 422);
+  try {
+    await deps.runInTransaction(async (tx) =>
+      tx`select api.notice_review_add(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${version}, ${JSON.stringify(checks)}::text::jsonb, ${decision}, ${reason})`);
+    return json({ ok: true }, 201);
   } catch (e) { return dbError(e); }
 }

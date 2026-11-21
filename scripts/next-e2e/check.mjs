@@ -276,6 +276,44 @@ try {
   const ns = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/notice-source.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
   let sj = null; try { sj = JSON.parse(ns.stdout.trim().split('\n').pop()); } catch { /* 아래에서 실패 처리 */ }
   check('NA7 총판 원문 대조(실제 DB 문구): 같으면 일치, 공백만 다르면 구분, 내용 다르면 차이, 없는 항목 감지', sj && sj.saved && sj.same.join() === 'collection_purpose:MATCH' && sj.crlf.join() === 'collection_purpose:MATCH' && sj.ws.join() === 'collection_purpose:WHITESPACE_ONLY' && sj.diff.join() === 'collection_purpose:DIFF' && sj.missing.join() === 'other_key:KEY_MISSING_IN_DB,collection_purpose:SOURCE_MISSING', (ns.stdout + ns.stderr).slice(0, 160).replace(/\n/g, ' '));
+  // 총판 고지 조건 검수(대표·검토자): 확인 5개 + 자기 입력 승인 금지 + 추가 전용, 그리고 "승인 이후" 전체 접수 흐름
+  const rurl = '/api/admin/notices/review';
+  const rev = (c, body) => adm(rurl, c, { method: 'POST', body: JSON.stringify(body) });
+  const RC = { source_matched: true, version_matched: true, keys_complete: true, conditions_checked: true, screen_checked: true };
+  const RB = { version: 'next-e2e-v1', decision: 'approved', checks: RC, reason: 'Next E2E 검수' };
+  const rc = (w = '') => n(`select count(*)::int as n from core.notice_reviews ${w}`);
+  const rd = []; for (const [nm, c] of [['편집자', editorC], ['상담원', counselorC], ['무인증', null]]) { const r = await rev(c, RB); if (![401, 403].includes(r.status)) rd.push(`${nm}:${r.status}`); }
+  check('RV1 검수 기록은 대표·검토자만: 편집자·상담원·무인증 거부, DB 0건', rd.length === 0 && (await rc()) === 0, rd.join(' '));
+  const inc = await rev(reviewerC, { ...RB, checks: { ...RC, conditions_checked: false } }); const incj = await pj(inc);
+  check('RV2 적용 조건 확인이 빠지면 승인 불가(422 CHECKS_INCOMPLETE)', inc.status === 422 && incj.code === 'CHECKS_INCOMPLETE' && (await rc()) === 0, `status=${inc.status} ${incj.code}`);
+  const flow0 = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+  const fl0 = await n(`select count(*)::int as n from core.leads where idempotency_key = 'next-e2e-flow-0000000001'`);
+  check('RV3 검수 승인 전에는 시험 접수 흐름이 시작되지 않음(종료 3), 접수 0건', flow0.status === 3 && fl0 === 0, (flow0.stdout + flow0.stderr).slice(0, 120).replace(/\n/g, ' '));
+  const self = await rev(ownerC, RB);
+  check('RV4 문구를 입력한 대표는 같은 버전을 승인할 수 없음(403), 승인 기록 0건', self.status === 403 && (await rc(`where decision = 'approved'`)) === 0, `status=${self.status}`);
+  const rej = await rev(ownerC, { ...RB, decision: 'rejected', checks: { ...RC, screen_checked: false }, reason: '화면 확인 전 반려' });
+  check('RV5 대표도 반려는 기록 가능(201), 반려는 승인으로 취급되지 않음', rej.status === 201 && (await rc(`where decision = 'rejected'`)) === 1 && (await rc(`where decision = 'approved'`)) === 0, `status=${rej.status}`);
+  const ra0 = await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_approved'`);
+  const okr = await rev(reviewerC, RB);
+  check('RV6 검토자 승인 201, 승인 감사 기록 1건 증가', okr.status === 201 && (await rc(`where decision = 'approved'`)) === 1 && (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_approved'`)) === ra0 + 1, `status=${okr.status}`);
+  const rl = await adm(rurl, reviewerC); const rlj = await pj(rl);
+  check('RV7 검수 이력 조회: 승인(현재 문구 기준) 표시, 정책 담당·무인증은 조회 불가', rl.status === 200 && rlj.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === true) && [401, 403].includes((await adm(rurl, editorC)).status) && (await adm(rurl)).status === 401);
+  // 승인 이후 전체 흐름: DB 승인 문구로 구성한 화면 설정 → 동의·고지 키 → 접수(암호화) → 노출 기록 해시 → 관리자 목록(마스킹)
+  const lf0 = await n(`select count(*)::int as n from core.leads`);
+  const flow = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+  check('FL1 승인된 고지 설정으로 접수 코드 실행: 성공, DB에 1건 저장', flow.status === 0 && (await n(`select count(*)::int as n from core.leads`)) === lf0 + 1, (flow.stdout + flow.stderr).slice(0, 120).replace(/\n/g, ' '));
+  check('FL2 고객별 고지 노출 기록의 해시가 승인된 DB 문구 해시와 같음, 동의 기록 있음', (await n(`select count(*)::int as n from pii.notice_exposures e join core.notice_texts t on t.version = e.doc_version and t.notice_key = e.notice_key and t.body_sha256 = e.body_sha256 where e.doc_version = 'next-e2e-v1'`)) === 1 && (await n(`select count(*)::int as n from pii.consents where doc_version = 'next-e2e-v1' and granted`)) === 1);
+  check('FL3 개인정보 암호화 저장(평문 이름·전화 없음)', (await n(`select count(*)::int as n from pii.customers c where to_jsonb(c)::text like '%8888%' or to_jsonb(c)::text like '%김플로우%'`)) === 0 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%8888%' or to_jsonb(l)::text like '%김플로우%'`)) === 0);
+  const fll = await adm('/api/admin/leads?limit=1', ownerC); const flt = await fll.text();
+  check('FL4 관리자 목록(Next→DB): 방금 접수가 마스킹되어 보임, 원문 전화·이름 없음', fll.status === 200 && flt.includes('010-****-4321') && !flt.includes('8888') && !flt.includes('김플로우'), `status=${fll.status}`);
+  const lastMask = await adm('/api/admin/leads?limit=1', reviewerC);
+  check('FL4b 검토자 목록도 마스킹, 무인증 401', lastMask.status === 200 && !(await lastMask.text()).includes('8888') && (await adm('/api/admin/leads?limit=1')).status === 401);
+  // 문구가 더 추가되면 이전 승인은 최신이 아님(다시 검수 필요)
+  await nad(ownerC, { version: 'next-e2e-v1', key: 'not_a_contract', body: '[검수용 시험 문구 2 — 실제 고지 아님]', reason: 'Next E2E 항목 추가' });
+  const rl2 = await pj(await adm(rurl, reviewerC));
+  check('RV8 승인 뒤 문구가 추가되면 이전 승인은 "최신 아님"으로 표시', rl2.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === false) && rl2.items?.every((i) => !(i.decision === 'approved' && i.is_current === true)));
+  const blk2 = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], idempotencyKey: 'next-e2e-lead-000000003', turnstileToken: 'ok' });
+  check('RV9 검수 승인 이후에도 실제 서버는 코드 상수 미확정이라 접수 차단 유지(503)', blk2.status === 503 && blk2.j?.code === 'NOTICE_NOT_CONFIRMED' && (await n(`select count(*)::int as n from core.leads`)) === lf0 + 1, `status=${blk2.status}`);
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);

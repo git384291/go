@@ -57,7 +57,7 @@ select test.expect_eq($$
       'app_staff -> policy_create_draft', 'app_staff -> policy_submit', 'app_staff -> policy_approve', 'app_staff -> policy_reject', 'app_staff -> policy_list',
       'app_staff -> ad_budget_approve', 'app_staff -> ad_budget_revoke', 'app_staff -> ad_spend_request', 'app_staff -> ad_budget_overview',
       'app_staff -> ad_performance_record', 'app_staff -> ad_funnel', 'app_ai -> ai_budget_reserve',
-      'app_public -> consult_event_record', 'app_staff -> ad_funnel_full', 'app_staff -> ad_alert_open', 'app_staff -> ad_alert_resolve', 'app_staff -> ad_alert_list', 'app_staff -> ai_budget_limit_get', 'app_staff -> ai_budget_limit_set', 'app_staff -> policy_publish_get', 'app_staff -> policy_publish_set', 'app_staff -> notice_text_list', 'app_staff -> notice_text_add',
+      'app_public -> consult_event_record', 'app_staff -> ad_funnel_full', 'app_staff -> ad_alert_open', 'app_staff -> ad_alert_resolve', 'app_staff -> ad_alert_list', 'app_staff -> ai_budget_limit_get', 'app_staff -> ai_budget_limit_set', 'app_staff -> policy_publish_get', 'app_staff -> policy_publish_set', 'app_staff -> notice_text_list', 'app_staff -> notice_text_add', 'app_staff -> notice_review_add', 'app_staff -> notice_review_list',
       'app_ai -> ai_budget_hold', 'app_ai -> ai_budget_confirm', 'app_ai -> ai_budget_release',
       -- app_server는 두 역할의 멤버지만 NOINHERIT라 직접 실행 권한이 없어야 한다
       'none'])

@@ -1,8 +1,9 @@
-import { NoticeAddPanel, SourceCheckPanel } from './NoticesConsole';
+import { NoticeAddPanel, ReviewPanel, SourceCheckPanel } from './NoticesConsole';
 
 // 필수 고지 문구 입력·버전 관리 화면(서버 컴포넌트). 임의 문구를 넣어 두지 않는다 — 실제 문구는 대표·PM이 확정해 입력한다.
 // 문구를 DB에 넣어도 접수는 열리지 않는다: 접수는 코드 상수 REQUIRED_NOTICES가 '확정'으로 바뀔 때만(별도 승인·배포) 열린다.
 export type NoticeRow = { version: string; notice_key: string; body: string; body_sha256: string; created_at: string };
+export type ReviewRow = { version: string; decision: string; checks: Record<string, boolean>; reason: string; created_at: string; is_current: boolean };
 export type NoticeStatus = { ready: boolean; reason: string | null; codeVersion: string; mismatches: readonly string[] };
 const REASON: Record<string, string> = {
   NOTICE_NOT_CONFIRMED: '실제 문구가 아직 확정되지 않았습니다', NOTICE_VERSION_MISMATCH: '고지 버전과 처리방침 버전이 다릅니다',
@@ -10,7 +11,7 @@ const REASON: Record<string, string> = {
 };
 const day = (s: string) => String(s).slice(0, 10);
 
-export function NoticesView({ rows, role, status }: { rows: readonly NoticeRow[]; role: string; status: NoticeStatus }) {
+export function NoticesView({ rows, role, status, reviews = [] }: { rows: readonly NoticeRow[]; role: string; status: NoticeStatus; reviews?: readonly ReviewRow[] }) {
   const versions = Array.from(new Set(rows.map((r) => r.version)));
   return (
     <main className="admin-main" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
@@ -25,6 +26,16 @@ export function NoticesView({ rows, role, status }: { rows: readonly NoticeRow[]
         <p className="muted" data-field="match">{status.codeVersion === '' ? '코드 상수 버전: 없음' : `코드 상수 버전 ${status.codeVersion} · DB 대조: ${status.mismatches.length === 0 ? '일치' : status.mismatches.map((m) => REASON[m] ?? m).join(', ')}`}</p>
       </section>
       {role === 'owner' ? <NoticeAddPanel /> : <p className="muted">문구 입력은 대표만 할 수 있습니다(조회만 가능).</p>}
+      <ReviewPanel />
+      <section aria-label="검수 이력">
+        <h2>검수 이력</h2>
+        {reviews.length === 0 ? <p data-field="reviews">검수 기록이 없습니다.</p> : (
+          <ul data-field="reviews">{reviews.map((r, i) => (
+            <li key={`${r.version}-${r.created_at}-${i}`}>{r.version} · <strong>{r.decision === 'approved' ? '승인' : '반려'}</strong>{r.decision === 'approved' ? (r.is_current ? ' (현재 문구 기준)' : ' (이후 문구가 추가되어 최신 아님)') : ''} · {day(r.created_at)} · {r.reason}</li>
+          ))}</ul>
+        )}
+        <p className="muted">검수 승인은 접수를 열지 않습니다. 접수는 코드의 필수 고지 상수가 확정으로 바뀔 때만 열립니다.</p>
+      </section>
       <SourceCheckPanel rows={rows.map((r) => ({ version: r.version, notice_key: r.notice_key, body: r.body }))} />
       <section aria-label="고지 문구 버전">
         <h2>저장된 고지 문구</h2>

@@ -62,6 +62,7 @@ run db/tests/80_ad_performance.sql >/dev/null   # 광고 성과·AI 사용료(00
 run db/tests/90_consult_ai_confirm.sql >/dev/null   # 상담 집계·AI 정산(0012)
 run db/tests/95_ad_alerts_ai_limit.sql >/dev/null   # 광고 중지 경고·AI 한도(0013)
 run db/tests/96_policy_publish_notice_texts.sql >/dev/null   # 정책 게시 ON/OFF·고지 문구 관리(0014)
+run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(0015)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -571,6 +572,16 @@ D -f db/migrations/0014_policy_publish_notice_texts.sql >/dev/null
 back14=$(D -At -c "select (to_regprocedure('api.policy_publish_set(uuid,uuid,text,boolean,text)') is not null and to_regprocedure('api.notice_text_add(uuid,uuid,text,text,text,text,text)') is not null)")
 [ "$gone14" = t ] && [ "$keep14" = 1 ] && [ "$back14" = t ] || { echo "FAIL | M14 0014 롤백 gone=$gone14 문구보존=$keep14 재적용=$back14" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M14 정책 게시·고지 문구 0014 롤백: 함수 4개 제거, 이미 넣은 고지 문구(추가 전용)는 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0015 고지 검수 기록: 적용 → 롤백(함수만 제거, 검수 기록·감사는 남음) → 재적용
+D -f db/migrations/0015_notice_reviews.sql >/dev/null
+D -q -c "insert into core.notice_reviews (version, decision, checks, texts_sha256, reason, reviewer_id) values ('drill-v1', 'rejected', '{}'::jsonb, repeat('a', 64), '드릴', gen_random_uuid())"
+D -f db/rollback/0015_down.sql >/dev/null
+gone15=$(D -At -c "select (to_regprocedure('api.notice_review_add(uuid,uuid,text,text,jsonb,text,text)') is null and to_regprocedure('api.notice_review_list(uuid,uuid,text)') is null)")
+keep15=$(D -At -c "select count(*) from core.notice_reviews where version = 'drill-v1'")
+D -f db/migrations/0015_notice_reviews.sql >/dev/null
+back15=$(D -At -c "select (to_regprocedure('api.notice_review_add(uuid,uuid,text,text,jsonb,text,text)') is not null and to_regprocedure('api.notice_review_list(uuid,uuid,text)') is not null)")
+[ "$gone15" = t ] && [ "$keep15" = 1 ] && [ "$back15" = t ] || { echo "FAIL | M15 0015 롤백 gone=$gone15 기록보존=$keep15 재적용=$back15" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M15 고지 검수 0015 롤백: 함수 2개 제거, 이미 남긴 검수 기록(추가 전용)은 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

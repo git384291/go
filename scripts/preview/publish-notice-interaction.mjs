@@ -85,6 +85,24 @@ try {
   await page.fill('input[aria-label="대조 항목 키"]', 'nope'); await cmp.click();
   check('S4 없는 항목은 "DB에 이 항목이 없음", 서버 요청 0·외부 요청 0(검토자도 사용 가능)', (await page.textContent('[data-field=source-result]')).includes('DB에 이 항목이 없음') && seen.api.length === 0 && seen.external.length === 0);
   await ctx.close();
+  // 고지 검수 패널
+  const vJs = await bundle(`<NoticesView rows={[]} role="reviewer" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} reviews={[{ version: 'sample-v1', decision: 'approved', checks: {}, reason: '시험', created_at: '2026-11-21T10:00:00Z', is_current: false }]} />`, "import { NoticesView } from './src/app/admin/notices/NoticesView';");
+  ({ page, ctx, seen } = await open(browser, vJs, '[data-field=intake]'));
+  const ap = page.getByRole('button', { name: '검수 승인' }); const rj = page.getByRole('button', { name: '검수 반려' });
+  check('V1 검수 이력: 이후 문구가 추가되어 최신이 아닌 승인은 그렇게 표시', (await page.textContent('[data-field=reviews]')).includes('최신 아님'));
+  await page.fill('input[aria-label="검수 버전"]', 'sample-v1'); await page.fill('input[aria-label="검수 사유"]', '검수 시험');
+  const boxes = page.locator('section[aria-label="고지 검수"] input[type=checkbox]');
+  check('V2 확인 항목 5개, 하나도 안 했으면 승인 잠김·반려는 가능', (await boxes.count()) === 5 && (await ap.isDisabled()) && !(await rj.isDisabled()));
+  for (let i = 0; i < 4; i++) await boxes.nth(i).check();
+  check('V3 4개만 확인하면 승인 잠김', await ap.isDisabled());
+  await boxes.nth(4).check();
+  check('V4 5개 모두 확인해야 승인 열림, 클릭 전 요청 0회', !(await ap.isDisabled()) && seen.api.length === 0);
+  await ap.click();
+  await page.waitForFunction(() => document.querySelector('[data-field=review-result]')?.textContent?.includes('거부됨'));
+  const rb = seen.api[0]?.body ?? {};
+  check('V5 요청 본문 키 정확(version·decision·checks 5개·reason), 서버 거절만 표시', seen.api.length === 1 && seen.api[0].path === '/api/admin/notices/review' && JSON.stringify(Object.keys(rb).sort()) === '["checks","decision","reason","version"]' && rb.decision === 'approved' && Object.keys(rb.checks).length === 5 && Object.values(rb.checks).every((v) => v === true) && (await page.textContent('[data-field=review-result]')).includes('FORBIDDEN'));
+  check('V6 외부 요청 0, 페이지 오류 0, 접수 차단 문구 유지', seen.external.length === 0 && seen.errors.length === 0 && (await page.textContent('[data-field=intake]')).includes('접수 차단 유지'));
+  await ctx.close();
 } finally { await browser.close(); }
 const bad = results.filter((x) => !x).length;
 console.log(`== 게시·고지 화면 조작: pass=${results.length - bad} fail=${bad}`);

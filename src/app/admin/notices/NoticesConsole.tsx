@@ -55,3 +55,43 @@ export function SourceCheckPanel({ rows }: { rows: readonly NoticeTextRow[] }) {
     </section>
   );
 }
+
+const CHECKS: readonly (readonly [string, string])[] = [
+  ['source_matched', '총판 원문과 저장된 문구가 일치함(원문 대조 확인)'],
+  ['version_matched', '고지 버전이 처리방침 버전과 같음'],
+  ['keys_complete', '필수 항목(키)이 빠짐없이 있음'],
+  ['conditions_checked', '총판의 적용 조건(대상·기간·동의 방식 등)을 원문과 대조함'],
+  ['screen_checked', '고객 화면에 표시되는 모습을 확인함'],
+];
+// 총판 고지 조건 검수 기록(대표·검토자). 승인은 5개를 모두 확인해야 눌린다. 같은 버전의 문구를 직접 입력한 사람은 서버가 승인을 거절한다.
+// 승인해도 접수는 열리지 않는다(코드 상수 확정은 별도 승인·배포).
+export function ReviewPanel() {
+  const [version, setVersion] = useState('');
+  const [reason, setReason] = useState('');
+  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [msg, setMsg] = useState('');
+  const all = CHECKS.every(([k]) => checks[k] === true);
+  const base = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(version) && reason.trim().length >= 2;
+  async function send(decision: 'approved' | 'rejected') {
+    const body = { version, decision, checks: Object.fromEntries(CHECKS.map(([k]) => [k, checks[k] === true])), reason };
+    try {
+      const r = await fetch('/api/admin/notices/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = (await r.json()) as { ok?: boolean; code?: string };
+      if (j.ok === true) location.reload(); else setMsg(`거부됨: ${String(j.code)}`);
+    } catch { setMsg('거부됨: NETWORK'); }
+  }
+  return (
+    <section className="admin-card" aria-label="고지 검수">
+      <h2>총판 고지 조건 검수</h2>
+      <p className="muted">버전별로 확인 항목을 모두 확인한 뒤 승인합니다. 문구를 직접 입력한 사람은 같은 버전을 승인할 수 없고, 문구가 더 추가되면 이전 승인은 최신이 아닙니다. 승인해도 접수는 열리지 않습니다.</p>
+      <div className="row"><input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="검수할 버전" aria-label="검수 버전" maxLength={64} /></div>
+      {CHECKS.map(([k, label]) => (
+        <label key={k} className="check"><input type="checkbox" checked={checks[k] === true} onChange={(e) => setChecks({ ...checks, [k]: e.target.checked })} /><span>{label}</span></label>
+      ))}
+      <div className="row"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="검수 사유(필수)" aria-label="검수 사유" maxLength={500} />{' '}
+        <button type="button" disabled={!base || !all} onClick={() => send('approved')}>검수 승인</button>{' '}
+        <button type="button" disabled={!base} onClick={() => send('rejected')}>검수 반려</button></div>
+      <p role="status" data-field="review-result">{msg}</p>
+    </section>
+  );
+}
