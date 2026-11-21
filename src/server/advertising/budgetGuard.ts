@@ -4,6 +4,7 @@
 // - 이 판정은 중단 '요청이 필요함'만 알린다. 실제 중단 요청 모형은 searchAdStop, 집행 허용은 campaignDraft(항상 false)가 맡는다.
 import { AD_DAILY_CAP_KRW, AD_FIRST3DAYS_CAP_KRW } from './campaignDraft';
 
+export { AD_DAILY_CAP_KRW, AD_FIRST3DAYS_CAP_KRW };
 export const WARN_RATIO = 0.8;
 
 export type SpendDay = { readonly date: string; readonly spendKrw: number | null };

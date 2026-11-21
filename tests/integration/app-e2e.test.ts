@@ -12,6 +12,7 @@ import { signToken } from '../../src/server/security/token';
 import { adminLeadsList } from '../../src/server/admin/leadsRoute';
 import { answerQuote } from '../../src/server/consult/quoteAnswer';
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
+import { adBudgetAction, adBudgetOverview, type AdBudgetDeps } from '../../src/server/admin/adBudget';
 import { createPolicyDraft, listPolicies, policyAction, type PolicyAdminDeps } from '../../src/server/admin/policyAdmin';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
 
@@ -240,4 +241,71 @@ test('E8 상담 안내: 스위치 꺼짐·미승인·모르는 상품은 담당�
   } finally {
     await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;
   }
+});
+
+// 광고 예산 통제: 승인 없으면 차단 → 승인 → 한도·중복·동시 요청 → 권한 우회 불가 → 감사 기록. 실제 광고 집행 없음
+const REVIEWER = '00000000-0000-4000-8000-000000000005';
+const REVIEWER_S = '10000000-0000-4000-8000-000000000005';
+const reviewer = who(REVIEWER, REVIEWER_S, 'reviewer');
+const adDeps = (w: StaffIdentity): AdBudgetDeps => ({
+  env: () => ({ ADMIN_AD_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_1_abcdef01' }),
+  mode: () => 'supabase', requireStaff: async () => w,
+  runInTransaction: (fn) => withRoleOn(app, 'staff', (tx) => fn(tx as never)), now: () => new Date(),
+});
+const spendReq = (campaign: string, amountKrw: number, requestKey: string) => ({ action: 'request', campaign, amountKrw, requestKey });
+const decide = async (w: StaffIdentity, b: unknown) => { const r = await adBudgetAction(adDeps(w), b); return (await r.json()) as { decision?: string; reason?: string; ok: boolean }; };
+const ledgerSum = async (c: string) => Number(((await admin`select coalesce(sum(amount_krw), 0)::int as n from core.ad_spend_ledger where campaign_key = ${c}`)[0] as { n: number }).n);
+
+test('E9 광고 예산: 승인 없으면 차단, 한도·중복·동시 요청 통제, 권한 우회 불가, 감사 기록', async () => {
+  const C = 'e2e-ad';
+  assert.deepEqual(await decide(owner, spendReq(C, 1000, 'e2e-ad-req-000000001')), { ok: false, decision: 'BLOCK', reason: 'NO_APPROVAL' });
+  assert.equal(await ledgerSum(C), 0);
+
+  // 권한: policy_editor·reviewer는 승인할 수 없다(서버 선검사 + DB 직접 호출도 거부)
+  const body = { action: 'approve', campaign: C, dailyCapKrw: 5000, totalCapKrw: 12000, hours: 24, reason: '시험 승인' };
+  assert.equal((await adBudgetAction(adDeps(editor), body)).status, 403);
+  assert.equal((await adBudgetAction(adDeps(reviewer), body)).status, 403);
+  await assert.rejects(
+    withRoleOn(app, 'staff', (tx) => tx`select api.ad_budget_approve(${EDITOR}::uuid, ${EDITOR_S}::uuid, ${editor.token}, ${C}, 5000::int, 12000::int, now() + interval '1 day', ${'우회 시도'})`),
+    (e: { code?: string }) => e.code === '42501',
+  );
+  await assert.rejects(
+    withRoleOn(app, 'staff', (tx) => tx`select api.ad_spend_request(${EDITOR}::uuid, ${EDITOR_S}::uuid, ${editor.token}, ${C}, 1000::int, ${'e2e-ad-req-000000009'})`),
+    (e: { code?: string }) => e.code === '42501',
+  );
+  assert.equal(Number(((await admin`select count(*)::int as n from core.ad_budget_approvals where campaign_key = ${C}`)[0] as { n: number }).n), 0);
+  // 상한 초과 승인은 서버가 DB 전에 거부
+  assert.equal((await adBudgetAction(adDeps(owner), { ...body, dailyCapKrw: 10001 })).status, 422);
+
+  const a0 = await count(AUDITS);
+  assert.equal((await adBudgetAction(adDeps(owner), body)).status, 201);
+  assert.equal((await decide(owner, spendReq(C, 3000, 'e2e-ad-req-000000002'))).decision, 'ALLOW');
+  assert.deepEqual(await decide(owner, spendReq(C, 3000, 'e2e-ad-req-000000002')), { ok: false, decision: 'BLOCK', reason: 'DUPLICATE_REQUEST' });
+  assert.equal(await ledgerSum(C), 3000, '중복 요청은 두 번 세지 않음');
+  assert.equal((await decide(owner, spendReq(C, 2500, 'e2e-ad-req-000000003'))).reason, 'DAILY_CAP_EXCEEDED');
+  assert.equal((await decide(owner, spendReq(C, 2000, 'e2e-ad-req-000000004'))).decision, 'ALLOW');
+  assert.equal(await ledgerSum(C), 5000);
+  assert.equal((await decide(owner, spendReq(C, 1, 'e2e-ad-req-000000005'))).reason, 'DAILY_CAP_EXCEEDED');
+  assert.ok((await count(AUDITS)) >= a0 + 5, '승인·허용·차단이 모두 감사 기록에 남음');
+
+  // 동시 요청: 일 한도 10,000원에 4,000원 5건을 한꺼번에 → 정확히 2건만 허용
+  const C2 = 'e2e-ad-par';
+  assert.equal((await adBudgetAction(adDeps(owner), { ...body, campaign: C2, dailyCapKrw: 10000, totalCapKrw: 30000 })).status, 201);
+  const results = await Promise.all([1, 2, 3, 4, 5].map((i) => decide(owner, spendReq(C2, 4000, `e2e-ad-par-req-00000${i}`))));
+  assert.equal(results.filter((r) => r.decision === 'ALLOW').length, 2);
+  assert.equal(await ledgerSum(C2), 8000);
+
+  // 철회 → 즉시 차단
+  assert.equal((await adBudgetAction(adDeps(owner), { action: 'revoke', campaign: C2, reason: '철회 시험' })).status, 200);
+  assert.equal((await decide(owner, spendReq(C2, 100, 'e2e-ad-par-req-000009'))).reason, 'NO_APPROVAL');
+
+  // 조회: 검토자 가능(지출 합계 포함), 상담원 불가
+  const ov = await adBudgetOverview(adDeps(reviewer), new Request('http://x/api/admin/ads/budget?limit=50'));
+  const oj = (await ov.json()) as { items: { campaign_key: string; state: string; spent_total: number }[] };
+  assert.equal(ov.status, 200);
+  assert.equal(oj.items.find((i) => i.campaign_key === C && i.state === 'active')?.spent_total, 5000);
+  assert.equal((await adBudgetOverview(adDeps(who('00000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'counselor')), new Request('http://x/'))).status, 403);
+  // 앱 계정은 원장·승인 테이블을 직접 읽거나 고칠 수 없다
+  await assert.rejects(withRoleOn(app, 'staff', (tx) => tx`select * from core.ad_spend_ledger`), (e: { code?: string }) => e.code === '42501');
+  await assert.rejects(admin`update core.ad_spend_ledger set amount_krw = 1 where campaign_key = ${C}`);
 });

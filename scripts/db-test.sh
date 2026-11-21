@@ -57,6 +57,7 @@ run db/tests/45_product_scope_hardening.sql >/dev/null   # PHASE 1 보완: 승�
 run db/tests/50_required_notices.sql >/dev/null   # 필수 고지 문구·버전·노출 기록(0007)
 run db/tests/60_policy_store.sql >/dev/null   # 정책 저장소(0008)
 run db/tests/61_policy_list.sql >/dev/null   # 정책 조회 함수(0009)
+run db/tests/70_ad_budget.sql >/dev/null    # 광고 예산 통제(0010)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -488,6 +489,24 @@ r_exp=$(D -At -c "select count(*) from pii.notice_exposures"); r_pol=$(D -At -c 
 d_re=$(D -At -c "select md5(prosrc) from pg_proc where oid = '$CREATE_LEAD_SIG'::regprocedure")
 [ "$d_re" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | M5 재적용 뒤 create_lead 본문이 고정 해시와 다름" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M5·M8 재적용·복구: 고지 노출 $r_exp건·정책 $r_pol건 되살림, create_lead 고정 해시 일치" >> "$LOG_DIR/db-test.log"
+# 0010 광고 예산 통제: 적용 → 승인·지출 기록 → 롤백(보관) → 복구
+D -f db/migrations/0010_ad_budget.sql >/dev/null
+D -q -c "insert into core.ad_budget_approvals (id, campaign_key, daily_cap_krw, total_cap_krw, valid_from, valid_until, approved_by, reason)
+         values ('50000000-0000-4000-8000-000000000001', 'drill-camp', 5000, 9000, now(), now() + interval '1 day', '00000000-0000-4000-8000-000000000001', '가상')"
+D -q -c "insert into core.ad_spend_ledger (campaign_key, approval_id, spend_date, amount_krw, request_key, recorded_by)
+         values ('drill-camp', '50000000-0000-4000-8000-000000000001', current_date, 1234, 'drill-req-0000000001', '00000000-0000-4000-8000-000000000001')"
+D -f db/rollback/0010_down.sql >/dev/null
+gone10=$(D -At -c "select (to_regclass('core.ad_budget_approvals') is null and to_regclass('core.ad_spend_ledger') is null)::text")
+a10=$(D -At -c "select (select count(*) from core.ad_budget_approvals_rollback_archive) || '/' || (select coalesce(sum(amount_krw), 0) from core.ad_spend_ledger_rollback_archive)")
+prot10=$(D -At -c "select count(*) from pg_class c where c.oid in ('core.ad_budget_approvals_rollback_archive'::regclass, 'core.ad_spend_ledger_rollback_archive'::regclass) and c.relrowsecurity and c.relforcerowsecurity")
+open10=$(D -At -c "select count(*) from (values ('core.ad_budget_approvals_rollback_archive'), ('core.ad_spend_ledger_rollback_archive')) t(r) cross join (values ('public'), ('app_public'), ('app_staff'), ('app_server')) g(role) where has_table_privilege(g.role, t.r, 'SELECT')")
+[ "$gone10" = true ] && [ "$a10" = "1/1234" ] && [ "$prot10" = 2 ] && [ "$open10" = 0 ] || { echo "FAIL | M10 0010 롤백 gone=$gone10 보관=$a10 RLS=$prot10 열림=$open10" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+if D -q -f db/rollback/0010_down.sql >/dev/null 2>&1; then echo "FAIL | M10b 0010 보관본이 있는데 롤백이 다시 성공" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
+D -f db/migrations/0010_ad_budget.sql >/dev/null
+D -q -f db/rollback/0010_restore.sql >/dev/null
+r10=$(D -At -c "select (select count(*) from core.ad_budget_approvals) || '/' || (select coalesce(sum(amount_krw), 0) from core.ad_spend_ledger)")
+[ "$r10" = "1/1234" ] || { echo "FAIL | M10c 0010 복구 건수 불일치 $r10" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M10 광고 예산 0010 롤백: 승인·원장 보관(1건/1,234원), 새 테이블 제거, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

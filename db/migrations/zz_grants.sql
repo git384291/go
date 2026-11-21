@@ -102,7 +102,11 @@ grant execute on function
   api.policy_submit(uuid, uuid, text, uuid),
   api.policy_approve(uuid, uuid, text, uuid, text, jsonb),
   api.policy_reject(uuid, uuid, text, uuid, text),
-  api.policy_list(uuid, uuid, text, int, int)
+  api.policy_list(uuid, uuid, text, int, int),
+  api.ad_budget_approve(uuid, uuid, text, text, int, int, timestamptz, text),
+  api.ad_budget_revoke(uuid, uuid, text, text, text),
+  api.ad_spend_request(uuid, uuid, text, text, int, text),
+  api.ad_budget_overview(uuid, uuid, text, int)
   to app_staff;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.

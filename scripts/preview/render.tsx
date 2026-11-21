@@ -15,6 +15,7 @@ import { AdminMockView } from '../../src/app/admin/AdminMockView';
 import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
 import { ProgressView } from '../../src/app/admin/progress/ProgressView';
 import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
+import { AdBudgetLocked, AdBudgetView, type BudgetRow } from '../../src/app/admin/ads/AdBudgetView';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from '../../src/app/admin/policies/PolicyAdminView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
@@ -146,6 +147,11 @@ const POLICY_FIXTURE: PolicyRow[] = [
   { id: '10000000-0000-4000-8000-000000000003', supplier_id: 'sample-supplier', segment: 'household', carrier: 'sample-carrier', product_id: 'sample-3', category: 'internet_tv', revision: 1, state: 'draft', source_kind: 'training_material', product_label: '인터넷+TV 샘플 C', confirmed_at: '2026-11-19T09:00:00+09:00', valid_from: '2026-11-19T00:00:00+09:00', valid_until: '2026-11-30T00:00:00+09:00', content_hash: '1122334455aa', self_approval: false, decided_at: null, decision_reason: null },
 ];
 
+const BUDGET_FIXTURE: BudgetRow[] = [
+  { id: '10000000-0000-4000-8000-000000000001', campaign_key: 'sample-camp', state: 'active', daily_cap_krw: 10000, total_cap_krw: 30000, valid_until: '2026-11-23T09:00:00Z', reason: '시험 승인', created_at: '2026-11-21T09:00:00Z', revoke_reason: null, spent_today: 4000, spent_total: 4000 },
+  { id: '10000000-0000-4000-8000-000000000002', campaign_key: 'old-camp', state: 'revoked', daily_cap_krw: 5000, total_cap_krw: 12000, valid_until: '2026-11-22T09:00:00Z', reason: '이전 승인', created_at: '2026-11-20T09:00:00Z', revoke_reason: '교체', spent_today: 0, spent_total: 5000 },
+];
+
 const OUT = process.argv[2] ?? 'test-results/screens';
 // 검사 폭: 좁은 휴대폰(320)과 일반 휴대폰(390). 둘 다 통과해야 한다.
 const WIDTHS = [320, 390] as const;
@@ -166,6 +172,10 @@ async function main() {
     ['16-admin-policies-owner', <PolicyAdminView key="pol-owner" items={POLICY_FIXTURE} role="owner" publishOn={false} />],
     ['17-admin-policies-editor', <PolicyAdminView key="pol-editor" items={POLICY_FIXTURE} role="policy_editor" publishOn={false} />],
     ['18-admin-policies-locked', <PolicyLocked key="pol-locked" kind="disabled" />],
+    // 광고 예산 화면(가상 내역, 실제 광고 집행 없음): 대표 / 검토자 / 잠금
+    ['19-admin-ads-owner', <AdBudgetView key="ad-owner" items={BUDGET_FIXTURE} role="owner" caps={{ dailyKrw: 10000, totalKrw: 30000 }} />],
+    ['20-admin-ads-reviewer', <AdBudgetView key="ad-rev" items={BUDGET_FIXTURE} role="reviewer" caps={{ dailyKrw: 10000, totalKrw: 30000 }} />],
+    ['21-admin-ads-locked', <AdBudgetLocked key="ad-locked" kind="disabled" />],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
     ['11-official-intake-fake', <PageShell key="intake-fake"><section className="hero"><h1>가상 공식 접수처 표시</h1><OfficialIntakeCta intake={FAKE_INTAKE} /></section></PageShell>],
     // 선택형 상품 안내 패널(실제 코드 상수는 false). 가상 켜짐 화면: 접수 꺼짐(12)과 가상 접수 켜짐(13). 공개 화면 아님
