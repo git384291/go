@@ -392,7 +392,8 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   const ok = await body0(await launch(owner, 'e11-key-0000000000004', 500));
   assert.deepEqual([ok.ok, ok.executed, ok.simulated], [true, false, true]);
   assert.equal((await body0(await launch(owner, 'e11-key-0000000000004', 500))).reason, 'DUPLICATE_REQUEST');
-  assert.equal((await body0(await launch(owner, 'e11-key-0000000000005', 600))).reason, 'DAILY_CAP_EXCEEDED');
+  // 캠페인당 열린(active) launch는 1건: 두 번째 launch는 지출 판정 전에 차단(일 한도 초과는 지출 원장 시험 300줄에서 확인)
+  assert.equal((await body0(await launch(owner, 'e11-key-0000000000005', 600))).reason, 'LAUNCH_ACTIVE');
   assert.equal(await ledgerSum(camp), 500);
   // 4) 성과 수집: 원장 안(400 ≤ 500)은 정상, 원장 없는 어제 100원은 초과 표시, 같은 날 재수집은 중복 없음
   let paused = 0;
@@ -404,7 +405,7 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   const over = await body0(await col(kst(1), 100));
   assert.equal(over.overLedger, true);
   // 초과 감지 → 자동 중지: 승인 철회 + 플랫폼 중지, 이후 모든 지출 차단
-  assert.deepEqual(over.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true, alert: null });
+  assert.deepEqual(over.autoStop, { revoked: true, revokeNote: null, paused: true, pauseNote: null, simulated: true, alert: null });
   assert.equal(paused, 1);
   assert.equal((await body0(await launch(owner, 'e11-key-0000000000006', 100))).reason, 'NO_APPROVAL');
   assert.equal(await ledgerSum(camp), 500);
@@ -541,7 +542,7 @@ test('E14 광고 중지 실패: 경고 열림 → 지출·새 승인 차단 → 
   const col = await adRunAction(runDeps(owner, broken), { action: 'collect', campaign: camp, day: kst(1) });
   const cb = await body0(col);
   assert.equal(col.status, 200);
-  assert.deepEqual(cb.autoStop, { revoked: true, revokeNote: null, paused: false, simulated: true, alert: { opened: true } });
+  assert.deepEqual(cb.autoStop, { revoked: true, revokeNote: null, paused: false, pauseNote: null, simulated: true, alert: { opened: true } });
   assert.ok(!JSON.stringify(cb).includes('secret'));
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.stop_failed'`), f0 + 1);
   // 같은 캠페인에서 다시 실패해도 열린 경고는 1건(멱등)
