@@ -390,7 +390,7 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   const col = async (day: string, cost: number, w = owner) => adRunAction(runDeps(w, fake(cost)), { action: 'collect', campaign: camp, day });
   assert.deepEqual(await body0(await col(kst(0), 400)), { ok: true, recorded: true, overLedger: false, source: 'mock' });
   assert.equal((await body0(await col(kst(0), 400))).recorded, false);
-  assert.equal(paused, 0); // 정상 수집은 중지하지 않는다
+  assert.equal(paused as number, 0); // 정상 수집은 중지하지 않는다
   const over = await body0(await col(kst(1), 100));
   assert.equal(over.overLedger, true);
   // 초과 감지 → 자동 중지: 승인 철회 + 플랫폼 중지, 이후 모든 지출 차단
@@ -435,7 +435,7 @@ test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확�
     await admin`update core.ai_budget_config set monthly_limit_krw = ${u0 + 10} where singleton`;
     // 정상 호출: 예약 3 → 호출 → 확정(모델 비용 3)
     const ok = await ask(paid);
-    assert.ok(ok.ok && ok.source === 'model' && calls === 1);
+    assert.ok(ok.ok && ok.source === 'model' && (calls as number) === 1);
     assert.equal(await used(), u0 + 3);
     // 호출 전 실패(설정 누락 등)는 취소 → 사용액 변화 없음
     const unsent: ChatModel = { name: 'no-key', costPerCallKrw: 3, async generate() { throw new ModelNotCalledError('no key'); } };
