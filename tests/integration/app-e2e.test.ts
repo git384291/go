@@ -185,10 +185,21 @@ test('E7 관리자 정책: 초안 → 제출 → 승인, 승인 권한 우회 �
   const lj = (await list.json()) as { items: { id: string; state: string }[] };
   assert.equal(lj.items.find((i) => i.id === id)?.state, 'approved');
   assert.ok(!JSON.stringify(lj).includes('commission'));
-  // 게시 스위치(policy_publish)는 이 화면이 켜지 않는다: 꺼져 있으면 고객 상담 경로로 나가지 않는다
+  // 게시 스위치(policy_publish)는 이 화면이 켜지지 않는다. 스위치 값은 앞선 시험이 바꿔 둘 수 있으니 직접 끄고 켜며 확인하고 원래대로 돌려 놓는다
   const [flag] = await admin`select enabled from core.feature_flags where key = 'policy_publish'`;
-  assert.equal(flag?.enabled ?? false, false);
-  let published = '';
-  try { published = JSON.stringify(await withRoleOn(app, 'public', (tx) => tx`select api.policy_published() as p`)); } catch { published = ''; }
-  assert.ok(!published.includes('e2e-p1'), '스위치 꺼짐: 승인된 정책도 고객 경로에 나가지 않음');
+  const original = flag?.enabled ?? false;
+  const published = async () => {
+    try { return JSON.stringify(await withRoleOn(app, 'public', (tx) => tx`select api.policy_published() as p`)); } catch { return ''; }
+  };
+  const mentions = (t: string) => t.includes('e2e-p1') || t.includes('E2E');
+  try {
+    await admin`update core.feature_flags set enabled = false where key = 'policy_publish'`;
+    assert.ok(!mentions(await published()), '스위치 꺼짐: 승인된 정책도 고객 경로에 나가지 않음');
+    await admin`update core.feature_flags set enabled = true where key = 'policy_publish'`;
+    const on = await published();
+    assert.ok(mentions(on), '스위치 켜짐: 승인된 정책만 고객 경로에 나감');
+    assert.ok(!/commission|source_ref|created_by|checks/i.test(on), '고객 경로에는 내부 값 없음');
+  } finally {
+    await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;
+  }
 });
