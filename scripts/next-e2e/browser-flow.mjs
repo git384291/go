@@ -57,8 +57,8 @@ export async function runBrowserFlow(c) {
     br = await chromium.launch();
     const snap = async () => [await n(`select count(*)::int as n from core.leads`), await n(`select count(*)::int as n from pii.customers`), await n(`select count(*)::int as n from pii.consents`), await n(`select count(*)::int as n from pii.notice_exposures`), await n(`select count(*)::int as n from pii.lead_applications`), await n(`select count(*)::int as n from core.audit_logs where action = 'application.save'`)].join(',');
     let ipSeq = 100;
-    const newCtx = async ({ noSubtle = false } = {}) => {
-      const ctx = await br.newContext({ viewport: { width: 390, height: 1800 }, bypassCSP: true, extraHTTPHeaders: { 'x-forwarded-for': `198.51.100.${++ipSeq}` } }); // next dev eval 때문에 시험 브라우저만 CSP 우회
+    const newCtx = async ({ noSubtle = false, width = 390 } = {}) => {
+      const ctx = await br.newContext({ viewport: { width, height: 1800 }, bypassCSP: true, extraHTTPHeaders: { 'x-forwarded-for': `198.51.100.${++ipSeq}` } }); // next dev eval 때문에 시험 브라우저만 CSP 우회
       await ctx.route('https://challenges.cloudflare.com/**', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE_TS }));
       if (noSubtle) await ctx.addInitScript(() => { Object.defineProperty(window.crypto, 'subtle', { value: undefined, configurable: true }); });
       return ctx;
@@ -78,8 +78,8 @@ export async function runBrowserFlow(c) {
       await pg.fill('input[aria-label="이메일"]', 'browser.e2e@example.com'); await pg.click('button:has-text("답하기")');
       for (const l of ['SK브로드밴드', '빠른 날짜', '기존 회선 있음', '확인했습니다', '확인했습니다']) await pg.click(`[role=group] button:has-text("${l}")`);
     };
-    const fillForm = async (pg, { notices = true } = {}) => {
-      await pg.fill('input[name=name]', '김브라우저'); await pg.fill('input[name=phone]', '010-9999-5678');
+    const fillForm = async (pg, { notices = true, phone = '010-9999-5678' } = {}) => {
+      await pg.fill('input[name=name]', '김브라우저'); await pg.fill('input[name=phone]', phone);
       await pg.locator('.consent-box:not([aria-label]) input[type=checkbox]').first().check();
       if (notices) for (const b of await pg.locator('.consent-box[aria-label="필수 고지"] input[type=checkbox]').all()) await b.check();
     };
@@ -240,6 +240,66 @@ export async function runBrowserFlow(c) {
     const orphan = await n(`select count(*)::int as n from core.leads l where l.customer_id is not null and (not exists (select 1 from pii.consents c where c.customer_id = l.customer_id) or not exists (select 1 from pii.notice_exposures e where e.customer_id = l.customer_id)) and l.idempotency_key = '${body.idempotencyKey}'`);
     const appLead = await n(`select count(*)::int as n from pii.lead_applications where lead_id = '${lid}'`);
     check('BF18 DB 정합성: 성공 1건은 리드·고객·동의·고지 노출·신청서가 서로 연결돼 있고 어긋난 레코드(신청서 없는 신청 접수·동의 없는 고객) 없음', orphan === 0 && appLead === 1 && (await snap()) === s2);
+
+    // ── PM 11/22 옥의티 점검: 새로고침·뒤로가기·중복 클릭·같은 연락처 재접수·모바일(320·390)·고객 오류 문구
+    const overflow = (pg) => pg.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    const TECH = /undefined|\bnull\b|NaN|exception|stack|SQL|\b[45]\d\d\b|[A-Z][A-Z_]{5,}|INTERNAL|UNAVAILABLE/i;
+    // BF19 모바일: 320·390 폭에서 상담·신청서·고지·오류가 가로로 넘치지 않고, 빈 제출 오류가 보이며, 고객에게 보인 모든 오류 문구에 기술 용어가 없다
+    const mob = [];
+    for (const w of [320, 390]) {
+      const mc = await newCtx({ width: w });
+      const m = await openCustomer(mc);
+      const o1 = await overflow(m.pg);
+      await ask(m.pg, '요금이 궁금해요'); await assist(m.pg);
+      const o2 = await overflow(m.pg);
+      await m.pg.click('form button[type=submit]'); await m.pg.waitForTimeout(500);
+      const errs = (await m.pg.locator('[role=alert]').allTextContents()).join(' ');
+      const o3 = await overflow(m.pg);
+      const vis = await m.pg.locator('form button[type=submit]').isVisible();
+      mob.push({ w, o: [o1, o2, o3], errs, vis, posts: m.posts.length });
+      await mc.close();
+    }
+    const custTexts = [fres, nt, ...oldRes.map((r) => r.t), ...mob.map((r) => r.errs)];
+    check('BF19 모바일(320·390): 상담·신청서·고지·오류 화면이 가로로 넘치지 않고 접수 버튼이 보이며, 빈 제출 오류가 표시되고(요청 0), 고객에게 보인 오류 문구(고지 오류·저장 실패·구버전·보안 연결·입력 오류)에 기술 용어가 없다',
+      mob.every((r) => r.o.every((x) => x <= 1) && r.vis && r.errs.length > 0 && r.posts === 0) && custTexts.every((t) => t.length > 0 && !TECH.test(t)),
+      JSON.stringify(mob.map((r) => [r.w, r.o])) + ' | ' + custTexts.filter((t) => TECH.test(t)).map((t) => t.slice(0, 40)).join(' / '));
+
+    // BF20 새로고침·뒤로가기: 입력 중 새로고침하면 입력이 비워지고(저장소에 남기지 않음) 요청·DB 변화가 없으며, 뒤로/앞으로 이동도 접수를 만들지 않는다
+    const sR0 = await snap();
+    const rc = await newCtx();
+    const r1 = await openCustomer(rc);
+    await ask(r1.pg, '요금이 궁금해요'); await assist(r1.pg); await fillForm(r1.pg, { phone: '010-9999-2222' });
+    await r1.pg.reload({ waitUntil: 'networkidle' }); await r1.pg.waitForTimeout(1000);
+    const afterReload = [await r1.pg.inputValue('input[name=name]'), await r1.pg.inputValue('input[name=phone]')];
+    const checked = await r1.pg.locator('form input[type=checkbox]:checked').count();
+    await r1.pg.goto(`${FX}/`, { waitUntil: 'networkidle' }); await r1.pg.goBack({ waitUntil: 'networkidle' }); await r1.pg.waitForTimeout(800); await r1.pg.goForward({ waitUntil: 'networkidle' }).catch(() => {});
+    check('BF20 새로고침·뒤로가기·앞으로: 이름·번호·동의 입력이 남지 않고(개인정보를 브라우저에 보관하지 않음) 접수 요청 0건·DB 변화 없음', afterReload.every((v) => v === '') && checked === 0 && r1.posts.length === 0 && (await snap()) === sR0, `${JSON.stringify(afterReload)} checked=${checked} posts=${r1.posts.length}`);
+    await rc.close();
+
+    // BF21 중복 클릭: 같은 화면에서 접수 버튼을 빠르게 두 번 눌러도 요청 1건·리드 +1·신청서 +1(다른 연락처)
+    const sD0 = await snap();
+    const dc = await newCtx();
+    const d1 = await openCustomer(dc);
+    await ask(d1.pg, '요금이 궁금해요'); await assist(d1.pg); await fillForm(d1.pg, { phone: '010-9999-3333' });
+    await d1.pg.waitForTimeout(300);
+    await d1.pg.dblclick('form button[type=submit]').catch(() => {});
+    const dtext = await resultText(d1.pg);
+    await d1.pg.waitForTimeout(500);
+    check('BF21 접수 버튼 더블클릭: 접수 요청 1건, 화면 "신청이 접수되었습니다", 리드·고객·동의·신청서 각 +1', d1.posts.length === 1 && /신청이 접수되었습니다/.test(dtext) && (await snap()) === sD0.split(',').map((v, i) => Number(v) + [1, 1, 1, items.length, 1, 1][i]).join(','), `${sD0} -> ${await snap()} posts=${d1.posts.length}`);
+    await dc.close();
+
+    // BF22 같은 고객 재접속·재접수(같은 연락처): 새 접수 요청은 정상 응답이지만 새 리드·신청서는 만들지 않고 재문의로만 기록된다(현재 동작 기록)
+    const sS0 = await snap();
+    const rep0 = await n(`select count(*)::int as n from core.lead_status_history where reason = 'repeat_inquiry'`);
+    const sc = await newCtx();
+    const s1c = await openCustomer(sc);
+    await ask(s1c.pg, '요금이 궁금해요'); await assist(s1c.pg); await fillForm(s1c.pg, { phone: '010-9999-3333' }); await submit(s1c.pg);
+    const stext = await resultText(s1c.pg);
+    const rep1 = await n(`select count(*)::int as n from core.lead_status_history where reason = 'repeat_inquiry'`);
+    const sS1 = await snap();
+    const phoneLeads = await n(`select count(*)::int as n from core.leads l join pii.customers c on c.id = l.customer_id join pii.lead_applications a on a.lead_id = l.id where c.phone_hmac = (select phone_hmac from pii.customers order by created_at desc limit 1)`);
+    check('BF22 같은 연락처 재접수(7일 내): 화면은 접수 완료 문구, 리드·고객·동의·신청서·고지 노출 증가 0건, 재문의 기록 +1, 그 연락처의 리드·신청서는 1건씩', s1c.posts.length === 1 && /접수/.test(stext) && !TECH.test(stext) && sS1 === sS0 && rep1 === rep0 + 1 && phoneLeads === 1, `${sS0} -> ${sS1} rep=${rep0}->${rep1} leads=${phoneLeads} | ${stext.slice(0, 40)}`);
+    await sc.close();
   } finally {
     try { await sql.unsafe(`drop trigger if exists e2e_fail_app on pii.lead_applications`); await sql.unsafe(`drop function if exists public.e2e_fail_app()`); } catch { /* 정리 */ }
     try { await pubSet(false); } catch { /* 정리 */ }
