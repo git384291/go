@@ -42,7 +42,7 @@ const ctx = (over: Partial<IntakeContext> = {}): IntakeContext => ({
 });
 const run = (fn: (tx: never) => PromiseLike<unknown>) => withRoleOn(app, 'public', (tx) => Promise.resolve(fn(tx as never)));
 const body = (over: Record<string, unknown> = {}) => ({
-  name: 'E2E고객', phone: '010-7777-1234', interest: 'internet_tv', contactTime: '평일 저녁',
+  name: '김이투이', phone: '010-7777-1234', interest: 'internet_tv', contactTime: '평일 저녁',
   consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1',
   noticeVersion: 'privacy-test-v1', noticeKeys: TEST_NOTICES.items.map((n) => n.key),
   idempotencyKey: 'e2e-intake-0000000000001', utmSource: 'naver', utmMedium: 'cpc', utmCampaign: 'e2e', ...over,
@@ -71,10 +71,10 @@ test('E2 접수 → DB 저장: 암호화 저장·동의·고지 노출 기록·�
     where l.idempotency_key = 'e2e-intake-0000000000001'`;
   assert.ok(row, '저장된 리드');
   // 원문은 DB 어디에도 평문으로 없다
-  assert.ok(!String(row.name_enc).includes('E2E') && !String(row.name_enc).includes('고객'));
+  assert.ok(!String(row.name_enc).includes('김이투이'));
   assert.ok(!String(row.phone_enc).includes('7777') && !String(row.phone_enc).includes('1234'));
   assert.equal(row.phone_last4, '1234');
-  assert.ok(!String(row.name_masked).includes('E2E고객'));
+  assert.ok(!String(row.name_masked).includes('김이투이'));
   const [exp] = await admin`select count(*)::int as n, count(distinct notice_key)::int as k from pii.notice_exposures where customer_id = ${row.cid}::uuid and doc_version = 'privacy-test-v1'`;
   assert.deepEqual({ n: exp.n, k: exp.k }, { n: 3, k: 3 });
   const [con] = await admin`select count(*)::int as n from pii.consents where customer_id = ${row.cid}::uuid and granted = true and doc_version = 'privacy-test-v1'`;
@@ -108,7 +108,7 @@ test('E5 관리자 조회: 접수 건이 마스킹되어 목록에 보이고 원
   const text = await res.text();
   assert.equal(res.status, 200, text.slice(0, 200));
   assert.match(text, /010-\*\*\*\*-1234/);
-  assert.ok(!text.includes('7777') && !text.includes('E2E고객') && !text.includes('v1:'));
+  assert.ok(!text.includes('7777') && !text.includes('김이투이') && !text.includes('v1:'));
   assert.equal(res.headers.get('cache-control'), 'private, no-store');
 });
 

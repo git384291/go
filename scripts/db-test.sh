@@ -505,7 +505,7 @@ else
     grep '^ok ' "$LOG_DIR/db-integration.log" | sed 's/^ok [0-9]* - /NOTICE:  PASS | /' >> "$LOG_DIR/db-test.log"
     echo "  integration: $n passed"
   else
-    tail -40 "$LOG_DIR/db-integration.log"
+    grep -vE '^\s+at ' "$LOG_DIR/db-integration.log" | grep -E -B1 -A16 '^not ok' | head -120
     echo "FAIL | I* 앱 ↔ DB 통합 시험 실패 (test-results/db-integration.log)" | tee -a "$LOG_DIR/db-test.log"; exit 1
   fi
 fi
