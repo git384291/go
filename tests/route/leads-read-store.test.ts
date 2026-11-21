@@ -142,8 +142,7 @@ test('L5 잘못된 runtime 행은 안전한 전체 실패(INVALID_DATA), 오류�
     ['번호 원문', row({ phone_masked: 'RAW-PHONE-01012345678' })],
     ['번호 원문 숫자', row({ phone_masked: '010-1234-5678' })],
     ['번호 형식 밖', row({ phone_masked: '011-****-1234' })],
-    ['예약 상품', row({ interest: 'cctv_security' })],
-    ['미정의 상품', row({ interest: 'mobile' })],
+    ['미정의 상품', row({ interest: 'not_a_product' })],
     ['상태 미정의', row({ status: 'deleted' })],
     ['배정 비UUID', row({ assigned_to: 'someone' })],
   ];
@@ -247,5 +246,16 @@ test('L9 생성 시각: 달력·윤년·시분초·offset 엄격, Date 정규화
   for (const bad of bads) {
     const r = await listMaskedLeads(fakeDeps({ rows: [row(), row({ created_at: bad })] }).deps, who('owner'));
     assert.deepEqual(r, { ok: false, code: 'INVALID_DATA' }, String(bad));
+  }
+});
+
+test('L10 예약 상품 접수 행은 목록에서 제외되고(다른 행은 정상), 카탈로그에 없는 값·다른 항목 오류가 섞이면 여전히 전체 실패', async () => {
+  const ok = await listMaskedLeads(fakeDeps({ rows: [row(), row({ lead_id: '10000000-0000-4000-8000-000000000009', interest: 'cctv_security' })] }).deps, who('owner'));
+  assert.equal(ok.ok, true);
+  assert.equal(ok.ok && ok.items.length, 1);
+  assert.ok(ok.ok && ok.items.every((i) => i.interest === 'internet_tv'));
+  for (const bad of [row({ interest: 'not_a_product' }), row({ interest: 'cctv_security', phone_masked: '010-1234-5678' }), row({ interest: 'internet_phone', status: 'deleted' })]) {
+    const r = await listMaskedLeads(fakeDeps({ rows: [row(), bad] }).deps, who('owner'));
+    assert.deepEqual(r, { ok: false, code: 'INVALID_DATA' });
   }
 });

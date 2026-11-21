@@ -1,5 +1,5 @@
 import 'server-only';
-import { isActiveInterest } from '../../content/catalog';
+import { CATALOG, isActiveInterest } from '../../content/catalog';
 import type { StaffIdentity } from '../auth/staffSession';
 
 /**
@@ -117,7 +117,10 @@ function isoInstant(v: unknown): string {
   return new Date(t).toISOString();
 }
 
-function maskedLead(row: unknown, scope: { role: ListRole; actor: string }): MaskedLead {
+/** 예약(비활성) 상품 접수 행: 다른 모든 검증을 통과해야 '제외'로 인정한다(목록에는 싣지 않는다). 카탈로그에 없는 값은 계속 실패 */
+const isReservedInterest = (v: unknown): boolean => typeof v === 'string' && Object.prototype.hasOwnProperty.call(CATALOG, v) && !isActiveInterest(v);
+
+function maskedLead(row: unknown, scope: { role: ListRole; actor: string }): MaskedLead | null {
   if (row === null || typeof row !== 'object' || Array.isArray(row)) throw new RowInvalid();
   const r = row as Record<string, unknown>;
   if (!isUuid(r.lead_id)) throw new RowInvalid();
@@ -127,12 +130,13 @@ function maskedLead(row: unknown, scope: { role: ListRole; actor: string }): Mas
   if (typeof name !== 'string' || !NAME_MASKED_RE.test(name)) throw new RowInvalid();
   const phone = r.phone_masked;
   if (typeof phone !== 'string' || !PHONE_MASKED_RE.test(phone)) throw new RowInvalid();
-  if (typeof r.interest !== 'string' || !isActiveInterest(r.interest)) throw new RowInvalid();
+  if (typeof r.interest !== 'string' || (!isActiveInterest(r.interest) && !isReservedInterest(r.interest))) throw new RowInvalid();
   const status = r.status;
   if (typeof status !== 'string' || !(LEAD_STATUSES as readonly string[]).includes(status)) throw new RowInvalid();
   const assigned = r.assigned_to;
   if (assigned !== null && !isUuid(assigned)) throw new RowInvalid();
   if (scope.role === 'counselor' && assigned !== scope.actor) throw new ScopeViolation();
+  if (isReservedInterest(r.interest)) return null; // 예약 상품 행은 목록에서 제외(한 행 때문에 목록 전체가 막히지 않게)
   return Object.freeze({
     id: r.lead_id,
     createdAt,
@@ -198,15 +202,13 @@ export async function listMaskedLeads(deps: LeadsReadDeps, identity: StaffIdenti
       return res;
     });
   } catch (e) {
-    console.error('LEADLIST_DIAG', (e as { code?: string })?.code, String((e as Error)?.message).slice(0, 120)); // TEMP 진단
     return fail(dbErrorCode(e));
   }
   if (!Array.isArray(rows) || rows.length > p.limit) return fail('INVALID_DATA');
   try {
-    const items = rows.map((row) => maskedLead(row, who));
+    const items = rows.map((row) => maskedLead(row, who)).filter((x): x is MaskedLead => x !== null);
     return Object.freeze({ ok: true as const, items: Object.freeze(items) });
   } catch (e) {
-    console.error('LEADLIST_DIAG2 row-invalid', (e as Error)?.constructor?.name, JSON.stringify(rows.map((r) => (r as Record<string, unknown>)?.interest))); // TEMP 진단
     return fail(e instanceof ScopeViolation ? 'SCOPE_VIOLATION' : 'INVALID_DATA');
   }
 }

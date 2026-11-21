@@ -146,14 +146,15 @@ export async function runBrowserFlow(c) {
     await adminCtx.addCookies([{ name: cn, value: cv.join('='), url: FX }]);
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
-    const lr = await adm('/api/admin/leads?limit=20', owner); const lrt = await lr.text();
-    console.log('DIAG interests ' + JSON.stringify(await sql.unsafe(`select interest, count(*)::int as c from core.leads group by 1 order by 1`)));
-    const l1 = await admBase('/api/admin/leads?limit=1', owner); console.log(`DIAG list limit=1 base status=${l1.status}`);
-    console.log(`DIAG list api fx status=${lr.status} body=${lrt.slice(0, 120)}`);
-    const lr2 = await admBase('/api/admin/leads?limit=20', owner); console.log(`DIAG list api base status=${lr2.status} body=${(await lr2.text()).slice(0, 120)}`);
-    for (const f of ['test-results/next-e2e/next-fixture.log', 'test-results/next-e2e/next.log']) { try { console.log('DIAG ' + f + ': ' + fs.readFileSync(f, 'utf8').split('\n').filter((l) => /LEADLIST_DIAG/.test(l) || /LEADLIST_DIAG2/.test(l)).slice(-3).join(' || ')); } catch { /* 없음 */ } }
-    check('BF9 목록 API', lr.status === 200 && lrt.includes('010-****-5678'), lrt.slice(0, 60));
-    await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
+    // 목록: 시험 앱(3139)의 실제 API와 실제 /admin 화면으로 확인한다(DB 직접 조회로 대체하지 않는다). 시험 DB에는 예약 상품 접수 행도 있으나 목록은 열린다(제외)
+    const lr = await adm('/api/admin/leads?limit=50', owner); const lrt = await lr.text();
+    check('BF9 목록 API(시험 앱): 200, 방금 접수가 마스킹(010-****-5678)으로 보이고 원문 이름·번호 없음, 예약 상품 행은 제외(DB에는 있음)', lr.status === 200 && lrt.includes('010-****-5678') && !lrt.includes('김브라우저') && !lrt.includes('99995678') && !/cctv_security|internet_phone/.test(lrt) && (await n(`select count(*)::int as n from core.leads where interest in ('cctv_security','internet_phone')`)) >= 2, `status=${lr.status}`);
+    await ap.goto(`${FX}/admin`, { waitUntil: 'networkidle' });
+    await ap.waitForTimeout(1500);
+    const listText = await ap.locator('body').innerText();
+    const link = ap.locator(`a.lead-packet[href="/admin/leads/${leadRow?.id}/packet"]`);
+    check('BF9b 실제 /admin 화면: 접수 목록이 열리고 해당 고객의 마스킹된 행(010-****-5678)과 신청서 링크가 보이며 원문 이름·번호·"목록을 불러오지 못했습니다" 없음', listText.includes('010-****-5678') && !listText.includes('김브라우저') && !listText.includes('99995678') && !listText.includes('불러오지 못했습니다') && (await link.count()) === 1, `rows=${await ap.locator('a.lead-packet').count()} ${listText.replace(/\s+/g, ' ').slice(0, 80)}`);
+    if ((await link.count()) === 1) await link.click(); else await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
     await ap.waitForTimeout(1000);
     await ap.selectOption('select[aria-label="열람 사유"]', 'dealer_handoff');
@@ -194,6 +195,8 @@ export async function runBrowserFlow(c) {
     const codes = [];
     for (const [nm, ck] of [['검토자', reviewer], ['편집자', editor], ['상담원', counselor], ['무인증', null]]) { const r = await pk(ck); const t = await r.text(); codes.push(`${nm}:${r.status}${/브라우저로|browser\.e2e|김브라우저|99995678/.test(t) ? ':원문노출' : ''}`); }
     const hdl = []; for (const [nm, ck] of [['검토자', reviewer], ['편집자', editor], ['상담원', counselor]]) { const r = await adm(`/api/admin/leads/${lid}/handoff`, ck); hdl.push(`${nm}:${r.status}`); }
+    const lst = []; for (const [nm, ck] of [['검토자', reviewer], ['편집자', editor], ['상담원', counselor], ['무인증', null]]) { const r = await adm('/api/admin/leads?limit=50', ck); const t = await r.text(); lst.push(`${nm}:${r.status}${/김브라우저|99995678|010-\*\*\*\*-5678/.test(t) ? ':노출' : ''}`); }
+    check('BF14b owner 외 역할의 접수 목록: 검토자·편집자 403, 무인증 401, 상담원은 본인 배정만(미배정 신규 접수 노출 없음)', lst.join(' ') === '검토자:403 편집자:403 상담원:200 무인증:401', lst.join(' '));
     const rctx = await br.newContext({ viewport: { width: 1000, height: 1400 }, bypassCSP: true });
     const [rn, ...rv] = reviewer.split('=');
     await rctx.addCookies([{ name: rn, value: rv.join('='), url: FX }]);
