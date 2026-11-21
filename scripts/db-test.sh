@@ -66,6 +66,7 @@ run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(00
 run db/tests/98_notice_intake_gate.sql >/dev/null   # 접수 직전 고지 승인 게이트(0016)
 run db/tests/99_dealer_application.sql >/dev/null   # 총판 전달용 신청서(0017)
 run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
+run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -613,6 +614,15 @@ D -f db/rollback/0018_restore.sql >/dev/null
 back18=$(D -At -c "select count(*) from core.ad_launches where request_key = 'req-m18-0123456789'")
 [ "$gone18" = t ] && [ "$arch18" = 1 ] && [ "$back18" = 1 ] || { echo "FAIL | M18 0018 롤백 gone=$gone18 보관=$arch18 복구=$back18" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M18 광고 launch 상태 0018 롤백: 함수 5개·테이블 제거, 기록 보관, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
+# 0019 재접수 변경 요청: 적용 → 함수 2개·테이블 제거(보관) → 재적용 → 복구
+D -f db/migrations/0019_lead_amendments.sql >/dev/null
+D -f db/rollback/0019_down.sql >/dev/null
+gone19=$(D -At -c "select (to_regprocedure('api.application_amend(text,text,text,text,text,text)') is null and to_regprocedure('api.application_amendments(uuid,uuid,text,uuid)') is null and to_regclass('pii.lead_amendments') is null and to_regclass('pii.lead_amendments_rollback_archive') is not null)")
+D -f db/migrations/0019_lead_amendments.sql >/dev/null
+D -f db/rollback/0019_restore.sql >/dev/null
+back19=$(D -At -c "select (to_regprocedure('api.application_amend(text,text,text,text,text,text)') is not null and to_regclass('pii.lead_amendments') is not null)")
+[ "$gone19" = t ] && [ "$back19" = t ] || { echo "FAIL | M19 0019 롤백 gone=$gone19 복구=$back19" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M19 재접수 변경 요청 0019 롤백: 함수 2개·테이블 제거(보관), 재적용·복구" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)

@@ -15,6 +15,7 @@ import {
   type ConsultInput,
   type FieldErrors,
   type SubmitOutcome,
+  isAcceptedKind,
 } from './consultSubmit';
 import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './TurnstileWidget';
 import { KAKAO_INQUIRY_LABEL, KAKAO_INQUIRY_NOTES } from '../content/channels';
@@ -109,7 +110,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
   }
 
   function finish(result: SubmitOutcome) {
-    if (result.kind === 'accepted') {
+    if (isAcceptedKind(result.kind)) {
       accepted.current = true;
       setPhase('done');
       setMessage(result.message);
@@ -244,7 +245,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
       }
       // 폼 상태부터 정리한다(위젯 SDK가 실패해도 잠금이 남지 않게)
       finish(result);
-      if (result.kind !== 'accepted') refreshBot();
+      if (!isAcceptedKind(result.kind)) refreshBot();
     } finally {
       inFlight.current = false;
     }

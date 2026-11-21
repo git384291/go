@@ -2,7 +2,7 @@ import 'server-only';
 import type { AdminAuthMode } from '../auth/adminAuthMode';
 import { StaffAuthError } from '../auth/staffAssertion';
 import type { StaffIdentity } from '../auth/staffSession';
-import { buildDealerPacket, validateApplication, type Application, type PacketQuote } from '../../content/applicationForm';
+import { APPLICATION_FIELDS, buildDealerPacket, CHOICE_KEYS, labelOf, validateApplication, type Application, type PacketQuote } from '../../content/applicationForm';
 import { noticeReadiness, sameNoticeKeys, type NoticeConfig } from '../../content/requiredNotices';
 import { dbReadReady } from './leadsSource';
 import type { TxRunner } from './policyAdmin';
@@ -70,6 +70,19 @@ function dbError(e: unknown): Response {
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** 변경 요청(PM 11/22): 원본은 그대로 두고, 원본과 달라진 항목만 '이전 → 변경 요청' 값으로 보여 준다(자동 반영 없음) */
+export type AmendmentChange = { readonly key: string; readonly label: string; readonly before: string; readonly after: string };
+export type AmendmentView = { readonly createdAt: string; readonly changes: readonly AmendmentChange[] };
+const shown = (key: string, v: string | undefined): string => {
+  if (v === undefined || v === '') return '(없음)';
+  return APPLICATION_FIELDS.find((f) => f.key === key)?.options?.find((o) => o.value === v)?.label ?? v;
+};
+export function amendmentChanges(orig: Application | null, next: Application): AmendmentChange[] {
+  const a = (orig ?? {}) as Record<string, string | undefined>, b = next as Record<string, string | undefined>;
+  const keys = [...CHOICE_KEYS, ...APPLICATION_FIELDS.map((f) => f.key)];
+  return keys.filter((k) => (a[k] ?? '') !== (b[k] ?? '')).map((k) => ({ key: k, label: labelOf(k), before: shown(k, a[k]), after: shown(k, b[k]) }));
+}
+
 /** POST: {reason} → 복호화한 총판 전달용 자료. 열람 이력('viewed')·감사 로그가 같이 남는다 */
 export async function dealerPacketGet(deps: DealerPacketDeps, id: string, body: unknown): Promise<Response> {
   const g = await gate(deps, id, ROLES);
@@ -101,7 +114,20 @@ export async function dealerPacketGet(deps: DealerPacketDeps, id: string, body: 
       lead: { name, phone, interest: String(r.interest), contactTime: r.contact_time == null ? null : String(r.contact_time), createdAt: created },
       app, quote, noticeReady: noticeReady(deps, r.notice_version, r.notice_keys), generatedAt: deps.now().toISOString(),
     });
-    return json({ ok: true, hasApplication: app !== null, packet }, 200);
+    // 변경 요청: 열람(감사·viewed 기록) 직후 같은 대표만 조회된다. 실패해도 원본 신청서는 보여 주되, '없음'으로 오해하지 않게 오류를 알린다
+    let amendments: AmendmentView[] = [];
+    let amendmentsError = false;
+    try {
+      const ar = (await deps.runInTransaction(async (tx) =>
+        tx`select payload_enc, created_at from api.application_amendments(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${id}::uuid)`)) as readonly Record<string, unknown>[];
+      if (!Array.isArray(ar) || ar.length > 50) throw new Error('INVALID_DATA');
+      amendments = ar.map((m) => {
+        const v = validateApplication(JSON.parse(deps.decrypt(String(m.payload_enc))));
+        if (!v.ok) throw new Error('INVALID_DATA');
+        return { createdAt: m.created_at instanceof Date ? m.created_at.toISOString() : String(m.created_at), changes: amendmentChanges(app, v.value) };
+      });
+    } catch { amendments = []; amendmentsError = true; }
+    return json({ ok: true, hasApplication: app !== null, packet, amendments, amendmentsError }, 200);
   } catch (e) { return dbError(e); }
 }
 

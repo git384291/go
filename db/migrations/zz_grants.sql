@@ -87,7 +87,8 @@ grant execute on function
   api.policy_published(),
   api.consult_event_record(text, text),   -- 0012: 상담 시작 건수(개인정보 없음)
   api.notice_intake_gate(text, jsonb),    -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
-  api.application_save(text, text, text, text)  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
+  api.application_save(text, text, text, text),  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
+  api.application_amend(text, text, text, text, text, text)  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
   to app_public;
 
 grant execute on function
@@ -131,7 +132,8 @@ grant execute on function
   api.ad_launch_finish(uuid, uuid, text, text, text, text, text),
   api.ad_launch_active(uuid, uuid, text, text),
   api.ad_launch_paused(uuid, uuid, text, text),
-  api.ad_launch_resolve(uuid, uuid, text, text, text, text, text)
+  api.ad_launch_resolve(uuid, uuid, text, text, text, text, text),
+  api.application_amendments(uuid, uuid, text, uuid)   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
   to app_staff;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)

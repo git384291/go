@@ -133,3 +133,20 @@ test('DP7 이력 기록: 메모는 총판 이름만(전화·계좌·이메일 �
   }
   assert.equal((await handoffRecord(mk({ ...ok, err: { code: '22023', message: 'PACKET_NOT_VIEWED' } }).d, ID, { event: 'copied' })).status, 400);
 });
+test('DP-AM 변경 요청: 원본 packet은 그대로, 변경 항목만 이전→변경 값(선택지는 라벨), 대표 열람 직후 같은 요청에서 조회, 조회 실패는 amendmentsError로 알림', async () => {
+  const amendRow = { payload_enc: 'v1:' + JSON.stringify({ ...APP, installAddress: '서울시 가상구 변경로 99', phoneCarrier: 'skt', installPref: 'date', installDate: '2026-12-05' }), created_at: new Date('2026-11-22T01:00:00Z') };
+  const { d, c } = mk();
+  d.runInTransaction = async (fn) => { c.tx++; return fn((async (s: TemplateStringsArray) => { const q = s.join('?'); c.sql.push(q); return /application_amendments/.test(q) ? [amendRow] : [row()]; }) as never); };
+  const r = await dealerPacketGet(d, ID, R);
+  const j = (await r.json()) as { packet: { text: string }; amendments: { changes: { key: string; before: string; after: string }[] }[]; amendmentsError: boolean };
+  assert.equal(r.status, 200);
+  assert.ok(j.packet.text.includes('서울시 가상구 시험로 12') && !j.packet.text.includes('변경로'), '원본 packet 불변');
+  assert.deepEqual(j.amendments[0].changes.map((x) => [x.key, x.before, x.after]), [
+    ['installAddress', '서울시 가상구 시험로 12', '서울시 가상구 변경로 99'], ['phoneCarrier', 'KT', 'SKT'], ['installPref', '빠른 날짜', '희망일 지정'], ['installDate', '(없음)', '2026-12-05']]);
+  assert.equal(j.amendmentsError, false);
+  assert.ok(c.sql.findIndex((q) => /dealer_packet_get/.test(q)) < c.sql.findIndex((q) => /application_amendments/.test(q)), '열람(감사) 뒤 변경 요청 조회');
+  const e = mk();
+  e.d.runInTransaction = async (fn) => fn((async (s: TemplateStringsArray) => { if (/application_amendments/.test(s.join('?'))) throw Object.assign(new Error('x'), { code: '22023' }); return [row()]; }) as never);
+  const je = (await (await dealerPacketGet(e.d, ID, R)).json()) as { ok: boolean; amendments: unknown[]; amendmentsError: boolean };
+  assert.deepEqual([je.ok, je.amendments.length, je.amendmentsError], [true, 0, true]);
+});

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 
 export type HandoffRow = { event: string; note: string | null; actorId: string; createdAt: string };
+type Amendment = { createdAt: string; changes: { key: string; label: string; before: string; after: string }[] };
 type Packet = { status: 'ready' | 'incomplete' | 'notice_pending'; missingLabels: string[]; dealerOnly: { key: string; label: string; note: string }[]; text: string };
 const REASONS = [['dealer_handoff', '총판 전달 준비'], ['content_check', '내용 확인'], ['correction', '정정 확인']] as const;
 const STATUS: Record<Packet['status'], string> = { ready: '총판 전달 준비 완료', incomplete: '준비 미완료 — 고객 정보 누락', notice_pending: '준비 미완료 — 필수 고지 확인 미완료' };
@@ -11,6 +12,7 @@ const EV: Record<string, string> = { viewed: '열람', copied: '복사', sent: '
 export function PacketConsole({ leadId, history }: { leadId: string; history: readonly HandoffRow[] }) {
   const [reason, setReason] = useState('dealer_handoff');
   const [packet, setPacket] = useState<Packet | null>(null);
+  const [amend, setAmend] = useState<{ items: Amendment[]; error: boolean }>({ items: [], error: false });
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState('');
   const [rows, setRows] = useState<readonly HandoffRow[]>(history);
@@ -27,8 +29,8 @@ export function PacketConsole({ leadId, history }: { leadId: string; history: re
     setMsg('');
     try {
       const r = await fetch(`${base}/packet`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) });
-      const j = (await r.json()) as { ok?: boolean; code?: string; packet?: Packet };
-      if (j.ok && j.packet) { setPacket(j.packet); await refresh(); } else setMsg(`열람 거부됨: ${String(j.code)}`);
+      const j = (await r.json()) as { ok?: boolean; code?: string; packet?: Packet; amendments?: Amendment[]; amendmentsError?: boolean };
+      if (j.ok && j.packet) { setPacket(j.packet); setAmend({ items: Array.isArray(j.amendments) ? j.amendments : [], error: j.amendmentsError === true }); await refresh(); } else setMsg(`열람 거부됨: ${String(j.code)}`);
     } catch { setMsg('열람 거부됨: NETWORK'); }
   }
   async function record(event: 'copied' | 'sent') {
@@ -59,6 +61,20 @@ export function PacketConsole({ leadId, history }: { leadId: string; history: re
           <h2>총판 전달용 신청서 <span data-field="status">{STATUS[packet.status]}</span></h2>
           {packet.missingLabels.length > 0 && <p role="alert" data-field="missing">누락 항목: {packet.missingLabels.join(', ')}</p>}
           <pre data-field="packet" style={{ whiteSpace: 'pre-wrap', userSelect: 'text' }}>{packet.text}</pre>
+          <section aria-label="변경 요청" data-field="amendments">
+            {amend.error ? <p role="alert">변경 요청을 불러오지 못했습니다. 다시 열어 확인하세요(변경 요청이 없다는 뜻이 아님).</p>
+              : amend.items.length === 0 ? <p className="muted">고객 변경 요청: 없음</p> : (
+              <>
+                <p role="alert">고객 변경 요청 {amend.items.length}건 — 위 신청서(원본)는 바뀌지 않았습니다. 총판 전달 전 고객 확인 후 반영하세요.</p>
+                {amend.items.map((m, i) => (
+                  <div key={`${m.createdAt}-${i}`} data-field="amendment">
+                    <p>변경 요청 {i + 1} · {String(m.createdAt).slice(0, 19).replace('T', ' ')} · 변경 항목: {m.changes.length === 0 ? '없음' : m.changes.map((c) => c.label).join(', ')}</p>
+                    <ul>{m.changes.map((c) => <li key={c.key} data-key={c.key}>{c.label}: {c.before} → {c.after}</li>)}</ul>
+                  </div>
+                ))}
+              </>
+            )}
+          </section>
           <p className="muted" data-field="dealer-only">총판 별도 확인: {packet.dealerOnly.map((d) => d.label).join(' · ')} — 질문·저장·AI 전달 모두 하지 않습니다.</p>
           <div className="row"><button type="button" onClick={copy}>복사</button></div>
           <div className="row"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="전달한 총판 이름(필수, 연락처·계좌 입력 금지)" aria-label="전달 메모" maxLength={30} />{' '}

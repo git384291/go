@@ -22,7 +22,7 @@ function runner(failOn?: { sql: RegExp; err: unknown }) {
 
 test('SG1 접수는 게이트 호출이 먼저, 그 다음 create_lead(같은 실행기). 게이트에는 서버 상수의 버전·문구 해시를 보낸다', async () => {
   const { run, calls } = runner();
-  assert.deepEqual(await submitLead(lead, ctx, run), { ok: true });
+  assert.deepEqual(await submitLead(lead, ctx, run), { ok: true, outcome: 'created' });
   assert.equal(calls.length, 2);
   assert.match(calls[0].q, /api\.notice_intake_gate/);
   assert.match(calls[1].q, /api\.create_lead/);
@@ -54,7 +54,7 @@ test('SG4 신청서가 있으면 같은 실행기(한 트랜잭션)에서 게이
   let runs = 0;
   const calls: { q: string; v: unknown[] }[] = [];
   const run = async (fn: (tx: (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>) => PromiseLike<unknown>) => { runs++; return fn((s, ...v) => { calls.push({ q: s.join('?'), v }); return Promise.resolve([]); }); };
-  assert.deepEqual(await submitLead({ ...lead, application: APP }, ctx, run), { ok: true });
+  assert.deepEqual(await submitLead({ ...lead, application: APP }, ctx, run), { ok: true, outcome: 'created' });
   assert.equal(runs, 1);
   assert.deepEqual(calls.map((c) => /notice_intake_gate/.test(c.q) ? 'gate' : /create_lead/.test(c.q) ? 'lead' : /application_save/.test(c.q) ? 'app' : '?'), ['gate', 'lead', 'app']);
   const [, , payloadEnc, summary] = calls[2].v as string[];

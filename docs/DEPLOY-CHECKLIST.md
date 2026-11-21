@@ -151,3 +151,8 @@
 - 범위: 일 예산(≤ 승인 amountKrw)+캠페인(기본 PAUSED) 생성, 중지, 성과 조회. 광고 그룹·소재·이미지·영상은 만들지 않는다(승인 전 금지).
 - 실계정 연결 전 확인할 미검증 항목: 계정 통화 KRW 여부, 캠페인 필수 필드(입찰 전략·네트워크·`containsEuPoliticalAdvertising` 등)가 v26에서 맞는지, Cloud 프로젝트 접근 수준, 테스트 계정 `validateOnly` 결과. 공식 call-structure 페이지에는 developer-token 헤더가 필수로 적혀 있어 정책 페이지와 어긋난다(정책 페이지의 날짜·문구를 따름, 실계정 연결 때 재확인).
 - 테스트 계정 진단(로컬 전용, CI 미실행): `node --conditions=react-server --import tsx scripts/google-ads-probe/run.mts` (credential은 로컬 환경변수로만). 순서: 환경변수 이름 확인 → OAuth → 계정 읽기(통화·test_account·manager) → **test_account=true·관리자 아님일 때만** `googleAds:mutate` validateOnly 1회(예산+캠페인 묶음, 실행 안 됨). 출력은 단계·HTTP·Google 오류코드·통화·불리언뿐. 종료 코드: 0 통과, 2 설정 없음, 3 인증·조회 실패, 4 테스트 계정 아님(변경 호출 0), 5 validateOnly 거부.
+
+**S. 같은 연락처 재접수 변경 요청(0019 `pii.lead_amendments`)**
+- 7일 안 같은 연락처 재접수: 같은 내용이면 저장 없이 재문의 기록만(고객 문구 "이미 접수된 신청이 있습니다"), 다른 내용이면 원본은 그대로 두고 변경 요청을 암호화 본문으로 추가(고객 문구 "기존 신청의 변경 요청이 접수되었습니다"). 자동 덮어쓰기 없음.
+- 내용 비교는 서버 HMAC 키 + 연락처 HMAC 솔트의 키 해시(원문 복원 불가). 변경 요청 열람은 대표만, 신청서 열람(감사·viewed) 직후에만. 감사에는 개수·누락 수만.
+- 롤백: `db/rollback/0019_down.sql`(보관 테이블로 이동 후 삭제) → 필요 시 0019 재적용 + `0019_restore.sql`. db-test.sh M19가 훈련. 롤백 시 접수 코드(submitLead·dealerPacket)도 이전 커밋으로 함께 되돌린다.

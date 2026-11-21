@@ -72,7 +72,7 @@ test('E1 필수 고지 미확정(실제 설정)이면 접수 거부·DB 0건 증
 test('E2 접수 → DB 저장: 암호화 저장·동의·고지 노출 기록·감사', async () => {
   const [l0, a0] = [await count(LEADS), await count(AUDITS)];
   const r = await submitLead(body(), ctx(), run);
-  assert.deepEqual(r, { ok: true });
+  assert.deepEqual(r, { ok: true, outcome: 'created' });
   assert.equal(await count(LEADS), l0 + 1);
   assert.ok((await count(AUDITS)) > a0, '감사 기록 증가');
   const [row] = await admin`
@@ -351,7 +351,7 @@ test('E10 AI 상담: 승인 정책만 안내 → 접수 → DB 암호화 저장 
   // 상담 → 접수(기존 접수 모듈) → DB → 관리자 조회
   const l0 = await count(LEADS);
   const r = await submitLead(body({ idempotencyKey: 'e2e-chat-signup-0000001', phone: '010-5555-4321', name: '김삼삼' }), ctx(), run);
-  assert.deepEqual(r, { ok: true });
+  assert.deepEqual(r, { ok: true, outcome: 'created' });
   assert.equal(await count(LEADS), l0 + 1);
   const res = await adminLeadsList({
     env: () => ({ ADMIN_LEADS_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_1_abcdef01' }),
@@ -415,7 +415,7 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.performance_overspend'`), over0 + 1);
   await assert.rejects(admin`update core.ad_performance set cost_krw = 0`, (e: { code?: string }) => e.code === '42501');
   // 5) 유입 → 접수: utm_campaign이 같은 접수가 분석에 접수로 잡히고 개인정보는 응답에 없다
-  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e2e-ad-signup-000000001', phone: '010-4444-9876', name: '김사사', utmCampaign: camp }), ctx(), run), { ok: true });
+  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e2e-ad-signup-000000001', phone: '010-4444-9876', name: '김사사', utmCampaign: camp }), ctx(), run), { ok: true, outcome: 'created' });
   const fr = await adFunnel(adDeps(reviewer), new Request(`http://x/api/admin/ads/funnel?from=${kst(7)}&to=${kst(0)}`));
   const ft = await fr.text();
   assert.equal(fr.status, 200, ft.slice(0, 200));
@@ -510,7 +510,7 @@ test('E13 상담 시작 집계(API 핸들러→DB): 서버 서명 세션당 1건
   const l0 = await count(LEADS);
   assert.deepEqual(await submitLead(body({ idempotencyKey: 'e13-signup-0000000001', phone: '010-3333-2468', name: '김일삼', utmCampaign: camp }), real, run), { ok: false, code: 'NOTICE_NOT_CONFIRMED', status: 503 });
   assert.equal(await count(LEADS), l0);
-  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e13-signup-0000000001', phone: '010-3333-2468', name: '김일삼', utmCampaign: camp }), ctx(), run), { ok: true });
+  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e13-signup-0000000001', phone: '010-3333-2468', name: '김일삼', utmCampaign: camp }), ctx(), run), { ok: true, outcome: 'created' });
   // 분석: 상담 2 → 접수 1, 개인정보는 응답에 없음
   const fr = await adFunnel(adDeps(owner), new Request(`http://x/api/admin/ads/funnel?from=${kst(1)}&to=${kst(0)}`));
   const ft = await fr.text();

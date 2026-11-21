@@ -80,7 +80,20 @@ export type CreateLeadArgs = {
 };
 
 /** api.application_save 인자(같은 트랜잭션에서 create_lead 뒤에 호출). 서버 서명 포함 */
-export type ApplicationArgs = { token: string; idempotencyKey: string; payloadEnc: string; summary: string };
+export type ApplicationArgs = {
+  token: string; idempotencyKey: string; payloadEnc: string; summary: string;
+  /** 같은 연락처 재접수(리드가 새로 만들어지지 않은 경우) 때만 쓰는 api.application_amend 인자. 서버 서명 포함 */
+  amendment: { token: string; phoneHmac: string; contentHmac: string };
+};
+
+/**
+ * 신청서 내용 키 해시: 서버 HMAC 키 + 연락처 HMAC(고객별 솔트)로 정규화한 본문을 해시한다. 원문 복원 불가, 다른 고객끼리 같은 값이어도 해시가 다르다.
+ * 같은 연락처 재접수가 원본과 같은 내용인지(저장 안 함) 다른 내용인지(변경 요청 저장) 판정하는 데만 쓴다.
+ */
+export function applicationContentHmac(crypto: PiiCrypto, phoneHmac: string, app: Record<string, string | undefined>): string {
+  const canon = JSON.stringify(Object.keys(app).filter((k) => app[k] !== undefined && app[k] !== '').sort().map((k) => [k, app[k]]));
+  return crypto.phoneHmac(`application-content:${phoneHmac}:${canon}`);
+}
 
 export type IntakeContext = {
   crypto: PiiCrypto;
@@ -147,10 +160,15 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
   const v = validateApplication(input.application);
   if (!v.ok) throw new LeadRejected(v.code);
   const payloadEnc = ctx.crypto.encrypt(JSON.stringify(v.value));
-  const summary = JSON.stringify(applicationSummary(v.value));
+  const contentHmac = applicationContentHmac(ctx.crypto, a.phoneHmac, v.value as Record<string, string | undefined>);
+  const summary = JSON.stringify({ ...applicationSummary(v.value), contentHmac });
   const application: ApplicationArgs = {
     token: signToken('lead', ['application', input.idempotencyKey, payloadEnc, summary], ctx.signingKey, ctx.nowSeconds),
     idempotencyKey: input.idempotencyKey, payloadEnc, summary,
+    amendment: {
+      token: signToken('lead', ['amendment', input.idempotencyKey, a.phoneHmac, payloadEnc, summary, contentHmac], ctx.signingKey, ctx.nowSeconds),
+      phoneHmac: a.phoneHmac, contentHmac,
+    },
   };
   return { token, ...a, application };
 }
