@@ -48,7 +48,7 @@ test('SG3 알 수 없는 55000은 SERVICE_NOT_READY, 실제 설정(미확정)은
   assert.equal(b.calls.length, 0);
 });
 
-const APP = { carrier: 'carrier-x', productId: 'p1', regionCode: 'r1', installAddress: '서울시 가상구 시험로 12 101동 1203호', housingType: 'apartment', subscriberType: 'self', currentCarrier: 'kt', installPref: 'asap' };
+const APP = { carrier: 'carrier-x', productId: 'p1', regionCode: 'r1', installAddress: '서울시 가상구 시험로 12 101동 1203호', phoneCarrier: 'kt', email: 'test@example.com', currentCarrier: 'kt', installPref: 'asap', existingLine: 'has', ack12m: 'confirmed', ackContract3y: 'confirmed' };
 
 test('SG4 신청서가 있으면 같은 실행기(한 트랜잭션)에서 게이트 → create_lead → application_save 순서, 본문은 암호문·요약엔 주소 없음', async () => {
   let runs = 0;
@@ -65,7 +65,7 @@ test('SG4 신청서가 있으면 같은 실행기(한 트랜잭션)에서 게이
 });
 
 test('SG5 신청서에 주민번호·계좌 등이 있거나 형식이 틀리면 DB 호출 없이 400, 저장 실패는 접수 전체 실패(한 트랜잭션)', async () => {
-  for (const bad of [{ ...APP, memo: '주민번호 900101-1234567' }, { ...APP, installAddress: '110-123-456789' }, { ...APP, housingType: 'castle' }, { ...APP, extra: 'x' }]) {
+  for (const bad of [{ ...APP, memo: '주민번호 900101-1234567' }, { ...APP, installAddress: '110-123-456789' }, { ...APP, existingLine: 'maybe' }, { ...APP, extra: 'x' }]) {
     const { run, calls } = runner();
     const r = await submitLead({ ...lead, application: bad }, ctx, run);
     assert.equal(r.ok, false);

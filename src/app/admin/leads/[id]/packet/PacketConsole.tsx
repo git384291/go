@@ -2,12 +2,14 @@
 import { useState } from 'react';
 
 export type HandoffRow = { event: string; note: string | null; actorId: string; createdAt: string };
-type Packet = { status: 'complete' | 'incomplete'; missingLabels: string[]; dealerOnly: { key: string; label: string; note: string }[]; text: string };
+type Packet = { status: 'ready' | 'incomplete' | 'notice_pending'; missingLabels: string[]; dealerOnly: { key: string; label: string; note: string }[]; text: string };
+const REASONS = [['dealer_handoff', '총판 전달 준비'], ['content_check', '내용 확인'], ['correction', '정정 확인']] as const;
+const STATUS: Record<Packet['status'], string> = { ready: '총판 전달 준비 완료', incomplete: '준비 미완료 — 고객 정보 누락', notice_pending: '준비 미완료 — 필수 고지 확인 미완료' };
 const EV: Record<string, string> = { viewed: '열람', copied: '복사', sent: '총판 전달 완료' };
 
 // 총판 전달용 신청서 확인·복사. 권한은 서버·DB가 매번 판정한다(화면은 정하지 못함). 열람은 사유가 필요하고 이력·감사에 남는다.
 export function PacketConsole({ leadId, history }: { leadId: string; history: readonly HandoffRow[] }) {
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState('dealer_handoff');
   const [packet, setPacket] = useState<Packet | null>(null);
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState('');
@@ -48,19 +50,19 @@ export function PacketConsole({ leadId, history }: { leadId: string; history: re
       {packet === null ? (
         <section className="admin-card" aria-label="열람 사유">
           <h2>신청서 열람</h2>
-          <p className="muted">개인정보가 복호화되어 표시됩니다. 열람 사유가 필요하며 열람·복사·전달은 이력과 감사 로그에 남습니다.</p>
-          <div className="row"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="열람 사유(필수)" aria-label="열람 사유" maxLength={200} />{' '}
-            <button type="button" disabled={reason.trim().length < 2} onClick={open}>신청서 열기</button></div>
+          <p className="muted">개인정보가 복호화되어 표시됩니다(대표만). 열람 사유를 고르면 열람·복사·전달이 이력과 감사 로그에 남으며, 감사 로그에는 개인정보 원문을 저장하지 않습니다.</p>
+          <div className="row"><select value={reason} onChange={(e) => setReason(e.target.value)} aria-label="열람 사유">{REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>{' '}
+            <button type="button" onClick={open}>신청서 열기</button></div>
         </section>
       ) : (
         <section className="admin-card" aria-label="총판 전달용 신청서">
-          <h2>총판 전달용 신청서 <span data-field="status">{packet.status === 'complete' ? '(필수 항목 완료)' : '(누락 있음)'}</span></h2>
+          <h2>총판 전달용 신청서 <span data-field="status">{STATUS[packet.status]}</span></h2>
           {packet.missingLabels.length > 0 && <p role="alert" data-field="missing">누락 항목: {packet.missingLabels.join(', ')}</p>}
           <pre data-field="packet" style={{ whiteSpace: 'pre-wrap', userSelect: 'text' }}>{packet.text}</pre>
-          <p className="muted" data-field="dealer-only">총판 별도 확인: {packet.dealerOnly.map((d) => d.label).join(' · ')} — 이 시스템에서 수집하지 않습니다.</p>
+          <p className="muted" data-field="dealer-only">총판 별도 확인: {packet.dealerOnly.map((d) => d.label).join(' · ')} — 질문·저장·AI 전달 모두 하지 않습니다.</p>
           <div className="row"><button type="button" onClick={copy}>복사</button></div>
-          <div className="row"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="전달한 총판·방법(필수)" aria-label="전달 메모" maxLength={200} />{' '}
-            <button type="button" disabled={note.trim().length < 2} onClick={() => record('sent')}>총판 전달 완료 기록</button></div>
+          <div className="row"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="전달한 총판 이름(필수, 연락처·계좌 입력 금지)" aria-label="전달 메모" maxLength={30} />{' '}
+            <button type="button" disabled={note.trim().length < 2 || packet.status !== 'ready'} onClick={() => record('sent')}>총판 전달 완료 기록</button></div>
         </section>
       )}
       <p role="status" data-field="msg">{msg}</p>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { APPLICATION_FIELDS, labelOf, missingApplication, nextQuestion, validateApplication, type Application, type FieldDef } from '../content/applicationForm';
+import { APPLICATION_FIELDS, labelOf, missingApplication, neededFields, nextQuestion, validateApplication, type Application, type FieldDef } from '../content/applicationForm';
 
 // AI 신청서 도우미(고객 화면). 정해진 질문을 한 항목씩 묻고, 빠진 항목을 알려 준다. 답은 이 화면 메모리에만 있다가 접수 양식과 함께 서버로 간다.
 // 질문·검사는 고정 규칙이다(AI 모델이 고객 답을 보지 않는다). 주민등록번호·자동이체·계좌정보는 묻지도 받지도 않으며, 닿으면 입력을 거부한다.
@@ -13,7 +13,7 @@ export function ApplicationAssistant({ app, onChange }: { app: Application; onCh
   const [err, setErr] = useState('');
   const current = nextQuestion(app);
   const missing = missingApplication(app).filter((k) => !['carrier', 'productId', 'regionCode'].includes(k));
-  const total = APPLICATION_FIELDS.filter((f) => f.required).length;
+  const total = neededFields(app).length;
   const done = total - missing.length;
 
   function answer(f: FieldDef, raw: string) {
@@ -31,10 +31,10 @@ export function ApplicationAssistant({ app, onChange }: { app: Application; onCh
   return (
     <section className="consent-box" aria-label="AI 신청서 도우미">
       <h3>AI 신청서 도우미</h3>
-      <p className="field-hint">가입 신청서를 만들기 위해 필요한 정보를 한 가지씩 여쭤봅니다. <b>주민등록번호·자동이체·계좌정보는 묻지 않으며 입력하지 마세요.</b> 총판이 따로 확인합니다.</p>
+      <p className="field-hint">가입 신청서를 만들기 위해 필요한 정보를 한 가지씩 여쭤봅니다. <b>주민번호·자동이체·사은품계좌는 묻지 않으며 입력하지 마세요.</b> 총판이 따로 확인합니다.</p>
       <p role="status" data-field="assistant-progress">필수 {done}/{total} 항목 완료{missing.length > 0 ? ` · 아직 필요한 항목: ${missing.map(labelOf).join(', ')}` : ' · 필수 항목이 모두 채워졌습니다'}</p>
       <ol style={{ paddingLeft: 18, margin: '8px 0' }}>
-        {APPLICATION_FIELDS.map((f) => {
+        {APPLICATION_FIELDS.filter((f) => f.key !== 'installDate' || app.installPref === 'date').map((f) => {
           const v = (app as Record<string, string | undefined>)[f.key];
           const isCurrent = current?.key === f.key;
           return (

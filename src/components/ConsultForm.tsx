@@ -323,8 +323,7 @@ export function ConsultForm({ options, kakaoUrl, choice }: { options: readonly C
           {errors.consent && <span id={errId('consent')} className="field-error">{errors.consent}</span>}
           <details>
             <summary>수집 항목과 보유 기간 보기</summary>
-            <p>수집 항목: 이름, 휴대폰 번호, 관심 상품, 연락 희망 시간{choice ? ', 설치 주소, 주거 형태, 가입 명의 구분, 현재 이용 통신사, 희망 설치 시기, TV 대수·전달 메모(선택)' : ''}</p>
-            {choice && <p>주민등록번호·자동이체·계좌정보는 이 서비스에서 수집하지 않으며 총판이 별도로 확인합니다.</p>}
+            <p>수집 항목: 이름, 휴대폰 번호, 관심 상품, 연락 희망 시간</p>
             <p>이용 목적: 가입 상담 연락</p>
             <p>보유 기간: 처리방침 확정 후 게시(확정 전에는 신청을 받지 않습니다)</p>
             <p>주소 등 가입에 필요한 정보는 상담 후 가입을 원하실 때만 따로 받습니다.</p>

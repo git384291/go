@@ -20,7 +20,7 @@ try {
   const cfg: NoticeConfig = { version: VERSION, confirmed: true, items: rows.map((r, i) => ({ key: r.notice_key, title: '시험 고지', body: process.env.FLOW_TAMPER === '1' && i === 0 ? r.body + '!' : r.body })) };
   const r = await submitLead(
     { name: '김플로우', phone, interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: VERSION, noticeVersion: VERSION, noticeKeys: cfg.items.map((n) => n.key), idempotencyKey: idem, utmSource: 'naver', utmMedium: 'cpc', utmCampaign: 'next-e2e-camp',
-      ...(process.env.FLOW_APP === '1' ? { application: { carrier: 'kt', productId: 'p-e2e', regionCode: 'r-e2e', installAddress: '서울시 가상구 시험로 12 101동 1203호', housingType: 'apartment', subscriberType: 'self', currentCarrier: 'kt', installPref: 'asap' } } : {}) },
+      ...(process.env.FLOW_APP === '1' ? { application: { carrier: 'kt', productId: 'p-e2e', regionCode: 'r-e2e', installAddress: '서울시 가상구 시험로 12 101동 1203호', phoneCarrier: 'skt', email: 'e2e.test@example.com', currentCarrier: 'skb', installPref: 'asap', existingLine: 'has', ack12m: 'confirmed', ackContract3y: 'confirmed' } } : {}) },
     { crypto: createPiiCrypto(piiKeysFromEnv()), signingKey: signingKeyFromEnv('lead'), currentPrivacyVersion: VERSION, clientIp: '203.0.113.88', notices: cfg },
     (fn) => withRoleOn(sql, 'public', (tx) => Promise.resolve(fn(tx as never))),
   );

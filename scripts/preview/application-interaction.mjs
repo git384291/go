@@ -144,30 +144,41 @@ const browser = await chromium.launch();
 try {
   const { page, ctx, seen } = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', api: reply(202, { ok: true }), tsConf: { auto: true } });
   const prog = () => page.locator('[data-field=assistant-progress]').textContent();
-  check('AA1 도우미가 보이고 필수 항목이 모두 남음, 주민번호·자동이체·계좌는 묻지 않는다는 안내', (await page.locator('[aria-label="AI 신청서 도우미"]').count()) === 1 && /필수 0\/5/.test(await prog()) && (await page.locator('[aria-label="AI 신청서 도우미"]').textContent()).includes('주민등록번호'));
-  // 빈 신청서로 제출 → 누락 안내, 전송 0회
+  check('AA1 도우미가 보이고 필수 8항목이 모두 남음, 주민번호·자동이체·사은품계좌는 묻지 않는다는 안내', (await page.locator('[aria-label="AI 신청서 도우미"]').count()) === 1 && /필수 0\/8/.test(await prog()) && (await page.locator('[aria-label="AI 신청서 도우미"]').textContent()).includes('사은품계좌'));
   await fill(page, { name: '홍길동', phone: '010-0000-0001' });
   await page.click('button[type=submit]');
   await page.waitForTimeout(150);
-  check('AA2 신청서 필수 항목 누락 시 제출 막힘(전송 0회)과 누락 목록 표시', seen.api.length === 0 && /설치 주소/.test(await page.locator('body').textContent()));
-  // 민감정보 입력 거부
+  check('AA2 신청서 필수 항목 누락 시 제출 막힘(전송 0회)과 누락 목록 표시', seen.api.length === 0 && /설치주소/.test(await page.locator('body').textContent()));
   for (const bad of ['900101-1234567', '110-123-456789', '자동이체 신청합니다']) {
-    await page.fill('input[aria-label="설치 주소"]', bad);
+    await page.fill('input[aria-label="설치주소"]', bad);
     await page.click('button:has-text("답하기")');
-    check(`AA3 민감정보 입력 거부(${bad.slice(0, 4)}…): 경고 표시, 답으로 저장되지 않음`, (await page.locator('[role=alert]:has-text("입력할 수 없습니다")').count()) >= 1 && /필수 0\/5/.test(await prog()));
+    check(`AA3 민감정보 입력 거부(${bad.slice(0, 4)}…): 경고 표시, 답으로 저장되지 않음`, (await page.locator('[role=alert]:has-text("입력할 수 없습니다")').count()) >= 1 && /필수 0\/8/.test(await prog()));
   }
-  await page.fill('input[aria-label="설치 주소"]', '서울시 가상구 시험로 12 101동 1203호');
+  await page.fill('input[aria-label="설치주소"]', '서울시 가상구 시험로 12 101동 1203호');
   await page.click('button:has-text("답하기")');
-  await answerSel(page, '아파트'); await answerSel(page, '본인'); await answerSel(page, 'KT'); await answerSel(page, '가능한 빨리');
-  check('AA4 질문 순서대로 답하면 필수 5/5 완료 표시', /필수 5\/5/.test(await prog()), await prog());
+  await answerSel(page, 'KT');
+  await page.fill('input[aria-label="이메일"]', 'bad-email');
+  await page.click('button:has-text("답하기")');
+  check('AA3b 이메일 형식이 틀리면 거부, 다시 입력해야 함', (await page.locator('[role=alert]').count()) >= 1 && /필수 2\/8/.test(await prog()), await prog());
+  await page.fill('input[aria-label="이메일"]', 'test@example.com');
+  await page.click('button:has-text("답하기")');
+  await answerSel(page, 'SK브로드밴드'); await answerSel(page, '희망일 지정');
+  check('AA3c 희망일 지정을 고르면 날짜가 필수로 추가되어 자동으로 다시 질문(필수 9항목)', /필수 5\/9/.test(await prog()) && (await page.locator('input[aria-label="설치 희망일"]').count()) === 1, await prog());
+  await page.fill('input[aria-label="설치 희망일"]', '2026-13-45'); await page.click('button:has-text("답하기")');
+  check('AA3d 잘못된 날짜 거부', /필수 5\/9/.test(await prog()));
+  await page.fill('input[aria-label="설치 희망일"]', '2026-12-05'); await page.click('button:has-text("답하기")');
+  await answerSel(page, '기존 회선 있음'); await answerSel(page, '확인했습니다');
+  check('AA3e 안내 확인 2건 중 1건만 하면 아직 누락 1건(약정 3년 및 설치비 안내·확인)', /필수 8\/9/.test(await prog()) && /약정 3년/.test(await prog()), await prog());
+  await answerSel(page, '확인했습니다');
+  check('AA4 질문 순서대로 답하면 필수 9/9 완료 표시', /필수 9\/9/.test(await prog()), await prog());
   await page.click('[data-field=installAddress] button[aria-label$="수정"]');
-  check('AA5 수정 버튼으로 답을 지우면 다시 필수 4/5, 질문이 다시 나옴', /필수 4\/5/.test(await prog()) && (await page.locator('input[aria-label="설치 주소"]').count()) === 1);
-  await page.fill('input[aria-label="설치 주소"]', '서울시 가상구 시험로 12 101동 1203호');
+  check('AA5 수정 버튼으로 답을 지우면 다시 필수 8/9, 질문이 다시 나옴', /필수 8\/9/.test(await prog()) && (await page.locator('input[aria-label="설치주소"]').count()) === 1);
+  await page.fill('input[aria-label="설치주소"]', '서울시 가상구 시험로 12 101동 1203호');
   await page.click('button:has-text("답하기")');
   await submitAndSettle(page, seen);
   const body = seen.api[0];
   const app = body.application ?? {};
-  check('AA6 제출 본문에 application이 허용된 키로만 실려 감(선택 상품 + 5개 답), 주민번호·계좌 키 없음', Object.keys(app).sort().join(',') === 'carrier,currentCarrier,housingType,installAddress,installPref,productId,regionCode,subscriberType' && app.installAddress.includes('시험로') && !JSON.stringify(body).match(/rrn|account|autopay/), Object.keys(app).join(','));
+  check('AA6 제출 본문에 application이 허용된 키로만 실려 감, 주민번호·자동이체·계좌 키 없음', Object.keys(app).sort().join(',') === 'ack12m,ackContract3y,carrier,currentCarrier,email,existingLine,installAddress,installDate,installPref,phoneCarrier,productId,regionCode' && app.installAddress.includes('시험로') && !JSON.stringify(body).match(/rrn|account|autopay/), Object.keys(app).join(','));
   check('AA7 제출 성공, 외부 요청 없음·페이지 오류 없음', /접수/.test(await resultText(page)) && seen.external.length === 0 && seen.pageErrors.length === 0, `${seen.external.join(',')} ${seen.pageErrors.join(',')}`);
   await ctx.close();
 } catch (e) {

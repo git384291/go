@@ -124,6 +124,7 @@ grant execute on function
   api.notice_review_add(uuid, uuid, text, text, jsonb, text, text),
   api.notice_review_list(uuid, uuid, text),
   api.dealer_packet_get(uuid, uuid, text, uuid, text),
+  api.dealer_packet_status(uuid, uuid, text, uuid),
   api.handoff_record(uuid, uuid, text, uuid, text, text),
   api.handoff_list(uuid, uuid, text, uuid)
   to app_staff;

@@ -573,7 +573,7 @@ keep14=$(D -At -c "select count(*) from core.notice_texts where version = 'drill
 D -f db/migrations/0014_policy_publish_notice_texts.sql >/dev/null
 back14=$(D -At -c "select (to_regprocedure('api.policy_publish_set(uuid,uuid,text,boolean,text)') is not null and to_regprocedure('api.notice_text_add(uuid,uuid,text,text,text,text,text)') is not null)")
 [ "$gone14" = t ] && [ "$keep14" = 1 ] && [ "$back14" = t ] || { echo "FAIL | M14 0014 롤백 gone=$gone14 문구보존=$keep14 재적용=$back14" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-echo "NOTICE:  PASS | M14 정책 게시·고지 문구 0014 롤백: 함수 4개 제거, 이미 넣은 고지 문구(추가 전용)는 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+echo "NOTICE:  PASS | M14 정책 게시·고지 문구 0014 롤백: 함수 5개 제거, 이미 넣은 고지 문구(추가 전용)는 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0015 고지 검수 기록: 적용 → 롤백(함수만 제거, 검수 기록·감사는 남음) → 재적용
 D -f db/migrations/0015_notice_reviews.sql >/dev/null
 D -q -c "insert into core.notice_reviews (version, decision, checks, texts_sha256, reason, reviewer_id) values ('drill-v1', 'rejected', '{}'::jsonb, repeat('a', 64), '드릴', gen_random_uuid())"
@@ -595,12 +595,12 @@ echo "NOTICE:  PASS | M16 접수 직전 고지 게이트 0016 롤백: 함수 제
 # 0017 총판 전달용 신청서: 적용 → 롤백(함수만 제거, 암호화 신청서·전달 이력은 남음) → 재적용
 D -f db/migrations/0017_dealer_application.sql >/dev/null
 D -f db/rollback/0017_down.sql >/dev/null
-gone17=$(D -At -c "select (to_regprocedure('api.application_save(text,text,text,text)') is null and to_regprocedure('api.dealer_packet_get(uuid,uuid,text,uuid,text)') is null and to_regprocedure('api.handoff_record(uuid,uuid,text,uuid,text,text)') is null and to_regprocedure('api.handoff_list(uuid,uuid,text,uuid)') is null)")
+gone17=$(D -At -c "select (to_regprocedure('api.application_save(text,text,text,text)') is null and to_regprocedure('api.dealer_packet_get(uuid,uuid,text,uuid,text)') is null and to_regprocedure('api.handoff_record(uuid,uuid,text,uuid,text,text)') is null and to_regprocedure('api.handoff_list(uuid,uuid,text,uuid)') is null and to_regprocedure('api.dealer_packet_status(uuid,uuid,text,uuid)') is null)")
 keep17=$(D -At -c "select (to_regclass('pii.lead_applications') is not null and to_regclass('core.dealer_handoffs') is not null)")
 D -f db/migrations/0017_dealer_application.sql >/dev/null
 back17=$(D -At -c "select (to_regprocedure('api.application_save(text,text,text,text)') is not null and to_regprocedure('api.handoff_list(uuid,uuid,text,uuid)') is not null)")
 [ "$gone17" = t ] && [ "$keep17" = t ] && [ "$back17" = t ] || { echo "FAIL | M17 0017 롤백 gone=$gone17 테이블보존=$keep17 재적용=$back17" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-echo "NOTICE:  PASS | M17 총판 전달용 신청서 0017 롤백: 함수 4개 제거, 저장된 신청서·전달 이력 테이블 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+echo "NOTICE:  PASS | M17 총판 전달용 신청서 0017 롤백: 함수 5개 제거, 저장된 신청서·전달 이력 테이블 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)
