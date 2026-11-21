@@ -86,12 +86,12 @@ test('SG6 롤백 불일치는 닫힌 채 실패: 0016(게이트 함수)·0017(ap
 
 test('SG7 고객 화면이 보여 준 문구 해시가 서버 상수와 다르거나 없거나 남으면 DB 호출 없이 503(NOTICE_HASH_MISMATCH)·형식 오류는 400', async () => {
   const h = noticeHashes(ctx.notices);
-  for (const bad of [{ n1: 'f'.repeat(64) }, {}, { ...h, extra: h.n1 }, { n2: h.n1 }]) {
+  for (const bad of [{ n1: 'f'.repeat(64) }, {}, { ...h, extra: h.n1 }, { n2: h.n1 }, undefined]) { // undefined = 구버전 화면(해시 미전송)
     const { run, calls } = runner();
     assert.deepEqual(await submitLead({ ...lead, noticeHashes: bad }, ctx, run), { ok: false, code: 'NOTICE_HASH_MISMATCH', status: 503 });
     assert.equal(calls.length, 0);
   }
-  for (const bad of [undefined, { n1: 'xyz' }, 'x']) {
+  for (const bad of [{ n1: 'xyz' }, 'x']) {
     const { run, calls } = runner();
     const r = await submitLead({ ...lead, noticeHashes: bad }, ctx, run);
     assert.deepEqual(r, { ok: false, code: 'INVALID_INPUT', status: 400 });

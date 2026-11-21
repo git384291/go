@@ -3,6 +3,7 @@ import postgres from 'postgres';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { runBrowserFlow } from './browser-flow.mjs';
 
 const BASE = process.env.E2E_BASE;
 const sql = postgres(process.env.E2E_ADMIN_URL, { max: 1, onnotice: () => {} });
@@ -432,6 +433,10 @@ try {
     await br.close();
     check('UI1 실제 Next 화면(고지 미확정): 상담 후 신청서 도우미가 이어 묻고, 모두 채워도 "접수 불가" 안내, 가짜 고지 체크박스 없음, 제출해도 접수 요청 0건·DB 저장 0건', /설치하실 곳의 주소/.test(t1) && /필수 고지 문구가 확정되기 전이라 접수는 아직 받을 수 없습니다/.test(t2) && boxes === 0 && /확정되기 전에는 상담 신청을 받지 않습니다/.test(gate) && leadPosts === 0 && (await lc()) === leads0, `t2=${t2.slice(0, 40)} boxes=${boxes} posts=${leadPosts}`);
   } catch (e) { check('UI1 실제 Next 화면 검증', false, String(e.message).split('\n')[0]); }
+  // PM 11/22: 실제 브라우저 단일 흐름(상담 → 수집 → 고지·동의 → 접수 → 관리자 → 총판 신청서). 고지 확정은 시험 전용 앱 사본에서만
+  try {
+    await runBrowserFlow({ sql, n, check, adm, pj, post, BASE, pubUrl, owner: ownerC, reviewer: reviewerC, editor: editorC, counselor: counselorC });
+  } catch (e) { check('BF 실제 브라우저 단일 흐름', false, String(e.message).split('\n')[0]); }
 } catch (e) { check('실행 중 예외 없음', false, String(e.message).split('\n')[0]); } finally { await sql.end(); fake.close(); }
 const bad = results.filter((x) => !x).length;
 console.log(`== Next 서버 E2E: pass=${results.length - bad} fail=${bad}`);

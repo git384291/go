@@ -98,6 +98,8 @@ export type IntakeContext = {
 export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLeadArgs & { application?: ApplicationArgs } {
   const parsed = LeadRequestSchema.safeParse(body);
   if (!parsed.success) {
+    // 구버전 화면(고지 해시를 보내지 않음)은 입력 오류가 아니라 '오래된 화면'으로 닫는다 — 화면이 새로고침을 안내한다
+    if (body !== null && typeof body === 'object' && (body as { noticeHashes?: unknown }).noticeHashes === undefined && parsed.error.issues.every((i) => i.path[0] === 'noticeHashes')) throw new LeadRejected('NOTICE_HASH_MISMATCH');
     const consentIssue = parsed.error.issues.some((i) => i.path[0] === 'consentCollection');
     throw new LeadRejected(consentIssue ? 'CONSENT_REQUIRED' : 'INVALID_INPUT');
   }

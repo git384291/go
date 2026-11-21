@@ -83,13 +83,15 @@ export class IdempotencyKeeper {
   }
 }
 
-export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'rate' | 'bot' | 'not_ready' | 'temporary' | 'unknown';
+export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'stale' | 'secure_context' | 'rate' | 'bot' | 'not_ready' | 'temporary' | 'unknown';
 export type SubmitOutcome = { kind: OutcomeKind; message: string; field?: ConsultField; retryable: boolean };
 
 export const OUTCOME_MESSAGES = {
   accepted: '신청이 접수되었습니다. 상담 가능 시간에 순서대로 연락드립니다.',
   input: '입력 내용을 확인해 주세요.',
   consent_version: '개인정보 안내가 바뀌었습니다. 페이지를 새로 고친 뒤 다시 동의해 주세요.',
+  stale: '화면이 오래되었거나 고지 문구가 바뀌었습니다. 입력하신 내용은 저장되지 않았습니다. 페이지를 새로 고친 뒤 고지를 다시 확인해 주세요.',
+  secure_context: '보안 연결(https)에서만 접수할 수 있습니다. 입력하신 내용은 전송·저장되지 않았습니다. 주소가 https로 시작하는지 확인하고 다시 열어 주세요.',
   rate: '신청이 잠시 많습니다. 잠시 후 다시 시도해 주세요.',
   bot: '자동 입력 방지 확인을 다시 완료한 뒤 시도해 주세요.',
   bot_pending: '자동 입력 방지 확인을 완료한 뒤 신청해 주세요.',
@@ -108,6 +110,10 @@ const CODE_KIND: Readonly<Record<string, { kind: OutcomeKind; field?: ConsultFie
   PAYLOAD_TOO_LARGE: { kind: 'input' },
   UNSUPPORTED_MEDIA: { kind: 'input' },
   CONSENT_VERSION_MISMATCH: { kind: 'consent_version' },
+  NOTICE_HASH_MISMATCH: { kind: 'stale' },
+  NOTICE_VERSION_MISMATCH: { kind: 'stale' },
+  NOTICE_KEYS_MISMATCH: { kind: 'stale' },
+  NOTICE_CHANGED: { kind: 'stale' },
   RATE_LIMITED: { kind: 'rate' },
   BOT_SUSPECTED: { kind: 'bot' },
   BOT_CHECK_UNAVAILABLE: { kind: 'temporary' },
@@ -141,12 +147,19 @@ function outcome(kind: OutcomeKind, field?: ConsultField): SubmitOutcome {
       return { kind, message: OUTCOME_MESSAGES.input, retryable: true };
     case 'consent_version':
       return { kind, message: OUTCOME_MESSAGES.consent_version, retryable: false };
+    case 'stale':
+      return { kind, message: OUTCOME_MESSAGES.stale, retryable: false };
+    case 'secure_context':
+      return { kind, message: OUTCOME_MESSAGES.secure_context, retryable: false };
     case 'not_ready':
       return { kind, message: OUTCOME_MESSAGES.not_ready, retryable: false };
   }
 }
 
 /** 네트워크 실패·시간 초과(응답 없음): 서버 저장 여부 미확인 */
+/** 브라우저 Web Crypto(https·localhost 필요)를 쓸 수 없음: 요청을 만들지 않는다 */
+export const SECURE_CONTEXT_REQUIRED: SubmitOutcome = outcome('secure_context');
+
 export const NETWORK_FAILURE: SubmitOutcome = outcome('unknown');
 
 /**

@@ -195,6 +195,15 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
 
       keeper.current ??= new IdempotencyKeeper(newKey);
       const idempotencyKey = keeper.current.keyFor(submissionFingerprint(input, PRIVACY_VERSION) + (application ? JSON.stringify(application) : ''));
+      // 고객에게 실제로 보여 준 문구의 해시(서버가 자기 상수·DB 승인 문구와 대조한다). 계산할 수 없으면(https·localhost 아님) 요청을 만들지 않는다
+      let shownHashes: Record<string, string>;
+      try {
+        shownHashes = await shownNoticeHashes();
+      } catch {
+        setPhase('error');
+        setMessage(OUTCOME_MESSAGES.secure_context);
+        return;
+      }
       // 봇 토큰은 일회용: 보내는 순간 비우고, 결과와 상관없이 접수 실패면 새 토큰을 받는다
       botToken.current = null;
       setPhase('sending');
@@ -204,8 +213,6 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
       const timer = setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT_MS);
       let result: SubmitOutcome;
       try {
-        // 고객에게 실제로 보여 준 문구의 해시(서버가 자기 상수·DB 승인 문구와 대조한다)
-        const shownHashes = await shownNoticeHashes();
         const res = await fetch('/api/leads', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
