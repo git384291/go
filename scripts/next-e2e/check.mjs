@@ -173,6 +173,40 @@ try {
     if (r.status === 200 || r.status >= 500 && r.status !== 503) apiBad.push(`${name}:${method}:${ap}:${r.status}`);
   }
   check(`P7 /api/admin 전 라우트 ${apiPaths.length}개 × 무인증·aal1·위조·폐기 × 4개 메서드: 200·서버 오류 없음`, apiBad.length === 0 && apiPaths.length >= 8, apiBad.slice(0, 4).join(' '));
+  // 정책 관리자 API(ADMIN_POLICY_SOURCE=db): 초안 → 제출 → 승인, 역할·상태 규칙·감사, 실제 Next 라우트 경유
+  const kn = (value) => ({ known: true, value });
+  const krw = (v) => kn({ amountKrw: v, vat: 'included' });
+  const t = Date.now();
+  const upload = { supplierId: 'supplier-a', segment: 'household', carrier: 'carrier-x', productId: 'next-e2e-p1', category: 'internet_tv', sourceKind: 'official_policy_sheet',
+    confirmedAt: new Date(t - 3600_000).toISOString(), validFrom: new Date(t - 3600_000).toISOString(), validUntil: new Date(t + 86_400_000).toISOString(), productLabel: '가상 인터넷+TV(Next E2E)',
+    terms: { monthlyFee: krw(11111), contractMonths: kn(36), equipmentMonthlyFee: krw(0), installFee: krw(2222), bundlePrerequisites: kn([]), regionScope: kn('nationwide'),
+      customerBenefit: kn({ amountKrw: 3333, form: 'gift_card', payoutCondition: kn('x'), cancellationCondition: kn('y') }) } };
+  const pj = async (r) => { try { return await r.json(); } catch { return {}; } };
+  const pol = (c, body, p = '/api/admin/policies') => adm(p, c, { method: 'POST', body: JSON.stringify(body) });
+  const dry = await pol(editorC, { ...upload, dryRun: true });
+  check('Q1 정책 초안 사전 검사(dryRun): 편집자 200, 견적 가능 판정', dry.status === 200 && (await pj(dry)).quotable === true, `status=${dry.status}`);
+  const denied = [['검토자', reviewerC], ['상담원', counselorC], ['무인증', null]];
+  const dn = []; for (const [nm, c] of denied) { const r = await pol(c, upload); if (![401, 403].includes(r.status)) dn.push(`${nm}:${r.status}`); }
+  const pc0 = await n(`select count(*)::int as n from core.policy_versions where product_id = 'next-e2e-p1'`);
+  check('Q2 초안 생성은 편집자·대표만: 검토자·상담원·무인증 거부, DB 0건', dn.length === 0 && pc0 === 0, dn.join(' '));
+  const cr = await pol(editorC, upload); const cj = await pj(cr);
+  check('Q3 편집자 초안 생성 201, DB에 draft로 저장(terms는 객체)', cr.status === 201 && /^[0-9a-f-]{36}$/.test(cj.id ?? '') && (await sql.unsafe(`select jsonb_typeof(terms) as t, state from core.policy_versions where id = '${cj.id}'`))[0]?.state === 'draft', `status=${cr.status}`);
+  const pid = cj.id; const act = (c, body) => pol(c, body, `/api/admin/policies/${pid}`);
+  const CHK = { source_matched: true, validity: true, vat: true, benefit_terms: true, region_bundle: true };
+  const stateNow = async () => (await sql.unsafe(`select state from core.policy_versions where id = '${pid}'`))[0]?.state;
+  const early = await act(ownerC, { action: 'approve', reason: '제출 전 승인 시도', checks: CHK });
+  check('Q4 제출 전(draft) 승인은 불가(422), 상태 그대로', early.status === 422 && (await stateNow()) === 'draft', `status=${early.status}`);
+  check('Q5 편집자 제출 200 → submitted', (await act(editorC, { action: 'submit' })).status === 200 && (await stateNow()) === 'submitted');
+  const noAp = []; for (const [nm, c] of [['편집자', editorC], ['검토자', reviewerC], ['상담원', counselorC], ['무인증', null]]) { const r = await act(c, { action: 'approve', reason: '권한 없는 승인', checks: CHK }); if (![401, 403].includes(r.status)) noAp.push(`${nm}:${r.status}`); }
+  check('Q6 승인은 대표만: 편집자(자기 제출 포함)·검토자·상담원·무인증 거부, 상태 submitted 유지', noAp.length === 0 && (await stateNow()) === 'submitted', noAp.join(' '));
+  const noChk = await act(ownerC, { action: 'approve', reason: '검사 누락', checks: { ...CHK, vat: false } });
+  check('Q7 확인 항목 하나라도 빠지면 승인 불가(422)', noChk.status === 422 && (await stateNow()) === 'submitted', `status=${noChk.status}`);
+  const a0 = await n(`select count(*)::int as n from core.audit_logs where action like 'policy.%'`);
+  const ok = await act(ownerC, { action: 'approve', reason: 'Next E2E 승인', checks: CHK });
+  check('Q8 대표 승인 200 → approved, 감사 기록 증가', ok.status === 200 && (await stateNow()) === 'approved' && (await n(`select count(*)::int as n from core.audit_logs where action like 'policy.%'`)) > a0, `status=${ok.status}`);
+  const lst = await adm('/api/admin/policies?limit=100', ownerC); const lj = await pj(lst);
+  check('Q9 대표 정책 목록(Next→DB)에 승인본이 보이고 내부 금액 필드(수수료)는 없음', lst.status === 200 && lj.items?.some((i) => i.id === pid && i.state === 'approved') && !JSON.stringify(lj).includes('commission'), `status=${lst.status}`);
+  check('Q10 상담원·무인증 목록 거부', [401, 403].includes((await adm('/api/admin/policies', counselorC)).status) && (await adm('/api/admin/policies')).status === 401);
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);
