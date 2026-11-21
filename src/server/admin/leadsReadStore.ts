@@ -198,6 +198,7 @@ export async function listMaskedLeads(deps: LeadsReadDeps, identity: StaffIdenti
       return res;
     });
   } catch (e) {
+    console.error('LEADLIST_DIAG', (e as { code?: string })?.code, String((e as Error)?.message).slice(0, 120)); // TEMP 진단
     return fail(dbErrorCode(e));
   }
   if (!Array.isArray(rows) || rows.length > p.limit) return fail('INVALID_DATA');

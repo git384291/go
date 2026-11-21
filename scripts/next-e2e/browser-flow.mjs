@@ -146,8 +146,11 @@ export async function runBrowserFlow(c) {
     await adminCtx.addCookies([{ name: cn, value: cv.join('='), url: FX }]);
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
-    const mr = (await sql.unsafe(`select name_masked, phone_last4 from core.leads where id = '${leadRow?.id}'`))[0];
-    check('BF9 관리자 목록이 읽는 접수 행(core.leads)에는 마스킹된 이름·끝 4자리만 있고 원문 이름·번호는 없다(목록 API 자체는 FL4가 확인)', !!mr && mr.phone_last4 === '5678' && !String(mr.name_masked).includes('브라우저') && String(mr.name_masked).length >= 1, JSON.stringify(mr));
+    const lr = await adm('/api/admin/leads?limit=20', owner); const lrt = await lr.text();
+    console.log(`DIAG list api fx status=${lr.status} body=${lrt.slice(0, 120)}`);
+    const lr2 = await admBase('/api/admin/leads?limit=20', owner); console.log(`DIAG list api base status=${lr2.status} body=${(await lr2.text()).slice(0, 120)}`);
+    for (const f of ['test-results/next-e2e/next-fixture.log', 'test-results/next-e2e/next.log']) { try { console.log('DIAG ' + f + ': ' + fs.readFileSync(f, 'utf8').split('\n').filter((l) => /LEADLIST_DIAG/.test(l)).slice(-3).join(' || ')); } catch { /* 없음 */ } }
+    check('BF9 목록 API', lr.status === 200 && lrt.includes('010-****-5678'), lrt.slice(0, 60));
     await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
     await ap.waitForTimeout(1000);
