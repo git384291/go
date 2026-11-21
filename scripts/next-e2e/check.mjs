@@ -310,8 +310,8 @@ try {
   check('FL3 개인정보 암호화 저장(평문 이름·전화 없음)', (await n(`select count(*)::int as n from pii.customers c where to_jsonb(c)::text like '%8888%' or to_jsonb(c)::text like '%김플로우%'`)) === 0 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%8888%' or to_jsonb(l)::text like '%김플로우%'`)) === 0);
   const fll = await adm('/api/admin/leads?limit=1', ownerC); const flt = await fll.text();
   check('FL4 관리자 목록(Next→DB): 방금 접수가 마스킹되어 보임, 원문 전화·이름 없음', fll.status === 200 && flt.includes('010-****-4321') && !flt.includes('8888') && !flt.includes('김플로우'), `status=${fll.status}`);
-  const lastMask = await adm('/api/admin/leads?limit=1', reviewerC);
-  check('FL4b 검토자 목록도 마스킹, 무인증 401', lastMask.status === 200 && !(await lastMask.text()).includes('8888') && (await adm('/api/admin/leads?limit=1')).status === 401);
+  const cm = await adm('/api/admin/leads?limit=1', counselorC); const cmt = await cm.text();
+  check('FL4b 상담원 목록도 마스킹(원문 없음), 검토자는 목록 거부(403), 무인증 401', cm.status === 200 && cmt.includes('010-****-4321') && !cmt.includes('8888') && (await adm('/api/admin/leads?limit=1', reviewerC)).status === 403 && (await adm('/api/admin/leads?limit=1')).status === 401);
   // 문구가 더 추가되면 이전 승인은 최신이 아님(다시 검수 필요)
   await nad(ownerC, { version: 'next-e2e-v1', key: 'not_a_contract', body: '[검수용 시험 문구 2 — 실제 고지 아님]', reason: 'Next E2E 항목 추가' });
   const rl2 = await pj(await adm(rurl, reviewerC));
