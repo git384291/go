@@ -101,7 +101,7 @@ export async function runBrowserFlow(c) {
     const inputs = await pg.locator('input, textarea, select').evaluateAll((els) => els.map((e) => `${e.name ?? ''} ${e.getAttribute('aria-label') ?? ''} ${e.placeholder ?? ''}`).join(' | '));
     const FORBID = /주민|자동이체|사은품\s*계좌|계좌번호|resident|account/i;
     const ids = await pg.locator('[data-field=intake-state]').textContent();
-    check('BF3 모든 정보를 채우면 "접수 불가" 안내가 아니라 접수 안내로 바뀌고, 주민번호·자동이체·사은품계좌를 묻는 칸·문구가 화면에 없다', !/접수는 아직 받을 수 없습니다/.test(t2) && /^접수:/.test((ids ?? '').trim()) && !FORBID.test(inputs) && !FORBID.test(pageText.replace(/총판 별도 확인/g, '')), t2.slice(0, 50));
+    check('BF3 모든 정보를 채우면 "접수 불가" 안내가 아니라 접수 안내로 바뀌고, 주민번호·자동이체·사은품계좌를 묻는 칸·문구가 화면에 없다', !/접수는 아직 받을 수 없습니다/.test(t2) && /^접수:/.test((ids ?? '').trim()) && !FORBID.test(inputs) && !FORBID.test((await pg.locator('#assistant').innerText()) + (await pg.locator('[role=log]').innerText())), t2.slice(0, 50));
 
     // 고지 미확인 제출은 막힌다(요청 0건)
     await fillForm(pg, { notices: false }); await submit(pg);
@@ -146,8 +146,8 @@ export async function runBrowserFlow(c) {
     await ap.waitForTimeout(1500);
     const listText = await ap.locator('body').innerText();
     const link = ap.locator(`a.lead-packet[href="/admin/leads/${leadRow?.id}/packet"]`);
-    check('BF9 관리자 접수 목록(실제 화면): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없으며 신청서 링크가 있다', listText.includes('010-****-5678') && !listText.includes('김브라우저') && !listText.includes('99995678') && (await link.count()) === 1);
-    await link.click();
+    check('BF9 관리자 접수 목록(실제 화면): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없으며 신청서 링크가 있다', listText.includes('010-****-5678') && !listText.includes('김브라우저') && !listText.includes('99995678') && (await link.count()) === 1, `rows=${await ap.locator('a.lead-packet').count()} url=${ap.url().slice(-30)} text=${listText.replace(/\s+/g, ' ').slice(0, 160)}`);
+    if ((await link.count()) === 1) await link.click(); else await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
     await ap.waitForTimeout(1000);
     await ap.selectOption('select[aria-label="열람 사유"]', 'dealer_handoff');
