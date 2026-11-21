@@ -19,6 +19,8 @@ import { AdBudgetLocked, AdBudgetView, type BudgetRow } from '../../src/app/admi
 import { FunnelLocked, FunnelView, type FunnelItem } from '../../src/app/admin/ads/funnel/FunnelView';
 import { AiBudgetLocked, AiBudgetView } from '../../src/app/admin/ai-budget/AiBudgetView';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from '../../src/app/admin/policies/PolicyAdminView';
+import { ApplicationAssistant } from '../../src/components/ApplicationAssistant';
+import { PacketConsole } from '../../src/app/admin/leads/[id]/packet/PacketConsole';
 import { NoticesLocked, NoticesView } from '../../src/app/admin/notices/NoticesView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
@@ -201,6 +203,8 @@ async function main() {
     ['39-admin-notices-owner-empty', <NoticesView key="nt-empty" rows={[]} role="owner" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} />],
     ['40-admin-notices-reviewer-rows', <NoticesView key="nt-rows" role="reviewer" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} rows={[{ version: 'sample-v1', notice_key: 'collection_purpose', body: '[검수용 가상 문구 — 실제 고지 아님]', body_sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12', created_at: '2026-11-21T09:00:00Z' }]} />],
     ['42-admin-notices-reviews-owner', <NoticesView key="nt-rev" role="owner" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} rows={[{ version: 'sample-v1', notice_key: 'collection_purpose', body: '[검수용 가상 문구 — 실제 고지 아님]', body_sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12', created_at: '2026-11-21T09:00:00Z' }]} reviews={[{ version: 'sample-v1', decision: 'approved', checks: {}, reason: '원문 대조·조건 확인 완료(시험)', created_at: '2026-11-21T10:00:00Z', is_current: true }, { version: 'sample-v0', decision: 'approved', checks: {}, reason: '이전 검수(시험)', created_at: '2026-11-20T10:00:00Z', is_current: false }, { version: 'sample-v1', decision: 'rejected', checks: {}, reason: '조건 확인 필요(시험)', created_at: '2026-11-21T08:00:00Z', is_current: false }]} />],
+    ['43-consult-application-assistant', <main key="aa" style={{ padding: 16 }}><ApplicationAssistant app={{ installAddress: '서울시 가상구 시험로 12', housingType: 'apartment' }} onChange={() => {}} /></main>],
+    ['44-admin-dealer-packet-open', <PacketConsole key="pk" leadId="10000000-0000-4000-8000-000000000001" history={[{ event: 'viewed', note: null, actorId: 'a', createdAt: '2026-11-22T09:00:00Z' }, { event: 'sent', note: 'A총판 메일 전달(시험)', actorId: 'a', createdAt: '2026-11-22T09:10:00Z' }]} />],
     ['41-admin-notices-locked', <NoticesLocked key="nt-locked" kind="disabled" />],
     // AI 상담창 + 접수 양식(필수 고지 미확정 실제 설정 → 양식이 접수를 막는 상태)
     ['30-consult-ai-with-form', <PageShell key="consult-ai"><section className="section"><ConsultAiChat choice={{ carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }} /></section><section className="section" id="apply" aria-label="가입 상담 신청"><ConsultForm options={[{ value: 'internet_tv', label: '인터넷+TV' }]} kakaoUrl={null} /></section></PageShell>],

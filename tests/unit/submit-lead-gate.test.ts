@@ -47,3 +47,39 @@ test('SG3 알 수 없는 55000은 SERVICE_NOT_READY, 실제 설정(미확정)은
   assert.deepEqual(await submitLead(lead, real, b.run), { ok: false, code: 'NOTICE_NOT_CONFIRMED', status: 503 });
   assert.equal(b.calls.length, 0);
 });
+
+const APP = { carrier: 'carrier-x', productId: 'p1', regionCode: 'r1', installAddress: '서울시 가상구 시험로 12 101동 1203호', housingType: 'apartment', subscriberType: 'self', currentCarrier: 'kt', installPref: 'asap' };
+
+test('SG4 신청서가 있으면 같은 실행기(한 트랜잭션)에서 게이트 → create_lead → application_save 순서, 본문은 암호문·요약엔 주소 없음', async () => {
+  let runs = 0;
+  const calls: { q: string; v: unknown[] }[] = [];
+  const run = async (fn: (tx: (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>) => PromiseLike<unknown>) => { runs++; return fn((s, ...v) => { calls.push({ q: s.join('?'), v }); return Promise.resolve([]); }); };
+  assert.deepEqual(await submitLead({ ...lead, application: APP }, ctx, run), { ok: true });
+  assert.equal(runs, 1);
+  assert.deepEqual(calls.map((c) => /notice_intake_gate/.test(c.q) ? 'gate' : /create_lead/.test(c.q) ? 'lead' : /application_save/.test(c.q) ? 'app' : '?'), ['gate', 'lead', 'app']);
+  const [, , payloadEnc, summary] = calls[2].v as string[];
+  assert.match(payloadEnc, /^v1:/);
+  assert.equal(payloadEnc.includes('시험로'), false);
+  assert.equal(summary.includes('시험로'), false);
+  assert.equal(JSON.parse(summary).missing.length, 0);
+});
+
+test('SG5 신청서에 주민번호·계좌 등이 있거나 형식이 틀리면 DB 호출 없이 400, 저장 실패는 접수 전체 실패(한 트랜잭션)', async () => {
+  for (const bad of [{ ...APP, memo: '주민번호 900101-1234567' }, { ...APP, installAddress: '110-123-456789' }, { ...APP, housingType: 'castle' }, { ...APP, extra: 'x' }]) {
+    const { run, calls } = runner();
+    const r = await submitLead({ ...lead, application: bad }, ctx, run);
+    assert.equal(r.ok, false);
+    assert.ok(['SENSITIVE_INPUT', 'APPLICATION_INVALID'].includes((r as { code: string }).code));
+    assert.equal(calls.length, 0);
+  }
+  const fail = runner({ sql: /application_save/, err: Object.assign(new Error('INVALID_INPUT'), { code: '22023' }) });
+  assert.deepEqual(await submitLead({ ...lead, application: APP }, ctx, fail.run), { ok: false, code: 'INVALID_INPUT', status: 400 });
+});
+
+test('SG6 롤백 불일치는 닫힌 채 실패: 0016(게이트 함수)·0017(application_save)이 없으면 500, 접수 전체 롤백(저장 시도만 있고 성공 응답 없음)', async () => {
+  for (const missing of [/notice_intake_gate/, /application_save/]) {
+    const fail = runner({ sql: missing, err: Object.assign(new Error('function does not exist'), { code: '42883' }) });
+    const r = await submitLead({ ...lead, application: APP }, ctx, fail.run);
+    assert.deepEqual(r, { ok: false, code: 'INTERNAL', status: 500 });
+  }
+});

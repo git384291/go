@@ -311,10 +311,26 @@ try {
   const rl = await adm(rurl, reviewerC); const rlj = await pj(rl);
   check('RV7 검수 이력 조회: 승인(현재 문구 기준) 표시, 정책 담당·무인증은 조회 불가', rl.status === 200 && rlj.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === true) && [401, 403].includes((await adm(rurl, editorC)).status) && (await adm(rurl)).status === 401);
   // 승인 이후 전체 흐름: DB 승인 문구로 구성한 화면 설정 → 동의·고지 키 → 서버 게이트(버전·해시·승인) → 접수(암호화) → 노출 기록 해시 → 관리자 목록(마스킹)
-  const flow = await runFlow();
+  const flow = await runFlow({ FLOW_APP: '1' });
   check('FL1 승인된 고지 설정으로 접수: 서버 게이트 통과, DB에 1건 저장', flow.status === 0 && (await lc()) === lf0 + 1, flow.raw);
   check('FL2 고객별 고지 노출 기록의 해시가 승인된 DB 문구 해시와 같음, 동의 기록 있음', (await n(`select count(*)::int as n from pii.notice_exposures e join core.notice_texts t on t.version = e.doc_version and t.notice_key = e.notice_key and t.body_sha256 = e.body_sha256 where e.doc_version = 'next-e2e-v1'`)) === 1 && (await n(`select count(*)::int as n from pii.consents where doc_version = 'next-e2e-v1' and granted`)) === 1);
   check('FL3 개인정보 암호화 저장(평문 이름·전화 없음)', (await n(`select count(*)::int as n from pii.customers c where to_jsonb(c)::text like '%8888%' or to_jsonb(c)::text like '%김플로우%'`)) === 0 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%8888%' or to_jsonb(l)::text like '%김플로우%'`)) === 0);
+  // 총판 전달용 신청서(PM 11/22): 접수와 같은 트랜잭션에서 암호화 저장 → 대표 열람(사유·복호화) → 복사·전달 이력 → 권한·감사
+  const lid = (await sql.unsafe(`select id::text as id from core.leads where utm_campaign = 'next-e2e-camp' order by created_at limit 1`))[0]?.id;
+  check('AP1 신청서가 접수와 함께 저장되고(1건) DB에는 평문 주소가 없음(암호문·범주형 요약만)', (await n(`select count(*)::int as n from pii.lead_applications where lead_id = '${lid}'`)) === 1 && (await n(`select count(*)::int as n from pii.lead_applications a where to_jsonb(a)::text like '%시험로%' or to_jsonb(a)::text like '%1203%'`)) === 0 && (await n(`select count(*)::int as n from pii.lead_applications a where a.payload_enc ~ '^v[0-9]+:'`)) === 1);
+  const pk = (c, body) => adm(`/api/admin/leads/${lid}/packet`, c, { method: 'POST', body: JSON.stringify(body) });
+  const pk0 = await pk(ownerC, {}); const pk1 = await pk(ownerC, { reason: '총판 전달 준비' }); const pkt = await pk1.text();
+  check('AP2 사유 없이는 열람 거부(400), 사유가 있으면 대표 열람 200·no-store, 주소·이름 복호화, 총판 별도 확인 항목 표시, 승인 정책 없으면 담당자 확인', pk0.status === 400 && pk1.status === 200 && /no-store/.test(pk1.headers.get('cache-control') ?? '') && pkt.includes('시험로 12') && pkt.includes('김플로우') && pkt.includes('주민등록번호') && /총판 확인|담당자가/.test(pkt), `status=${pk1.status}`);
+  check('AP3 검토자·편집자 403, 미배정 상담원 403, 무인증 401 (본문 없음)', (await pk(reviewerC, { reason: '시험 열람' })).status === 403 && (await pk(editorC, { reason: '시험 열람' })).status === 403 && (await pk(counselorC, { reason: '시험 열람' })).status === 403 && (await pk(null, { reason: '시험 열람' })).status === 401);
+  const hc = await adm(`/api/admin/leads/${lid}/handoff`, ownerC, { method: 'POST', body: JSON.stringify({ event: 'copied' }) });
+  const hs0 = await adm(`/api/admin/leads/${lid}/handoff`, ownerC, { method: 'POST', body: JSON.stringify({ event: 'sent' }) });
+  const hs = await adm(`/api/admin/leads/${lid}/handoff`, ownerC, { method: 'POST', body: JSON.stringify({ event: 'sent', note: 'A총판 메일 전달' }) });
+  const hl = await pj(await adm(`/api/admin/leads/${lid}/handoff`, reviewerC));
+  check('AP4 복사·전달 완료 기록(메모 없는 전달은 거부), 이력에 열람·복사·전달 순서 보존, 검토자는 이력만 조회', hc.status === 200 && hs0.status === 400 && hs.status === 200 && ['viewed', 'copied', 'sent'].every((e) => hl.items?.some((i) => i.event === e)));
+  check('AP5 감사 로그: 열람(pii.reveal via dealer_packet)·복사·전달 기록, 이력 변조 불가(UPDATE 차단)', (await n(`select count(*)::int as n from core.audit_logs where action = 'pii.reveal' and detail ->> 'via' = 'dealer_packet' and target_id = '${lid}'`)) >= 1 && (await n(`select count(*)::int as n from core.audit_logs where action in ('handoff.copied','handoff.sent') and target_id = '${lid}'`)) === 2 && await sql.unsafe(`update core.dealer_handoffs set note = 'x'`).then(() => false, () => true));
+  const pgp = await adm(`/admin/leads/${lid}/packet`, ownerC, { redirect: 'manual' }); const pgh = await pgp.text();
+  const pgn = await adm(`/admin/leads/${lid}/packet`, null, { redirect: 'manual' });
+  check('AP6 관리자 화면: 대표는 열람 사유 입력 화면(본문은 열기 전 없음), 무인증은 로그인으로 이동', pgp.status === 200 && pgh.includes('신청서 열기') && !pgh.includes('시험로') && !pgh.includes('김플로우') && [302, 303, 307, 308, 401].includes(pgn.status));
   const fll = await adm('/api/admin/leads?limit=1', ownerC); const flt = await fll.text();
   check('FL4 관리자 목록(Next→DB): 방금 접수가 마스킹되어 보임, 원문 전화·이름 없음', fll.status === 200 && flt.includes('010-****-4321') && !flt.includes('8888') && !flt.includes('김플로우'), `status=${fll.status}`);
   const cm = await adm('/api/admin/leads?limit=1', counselorC); const cmt = await cm.text();

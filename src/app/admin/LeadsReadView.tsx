@@ -73,6 +73,7 @@ export function LeadsReadView({ items, actor, offset, limit, headerExtra }: Lead
                   <span>{assignLabel(l.assignedTo, actor)}</span>
                 </div>
                 <span className={`status status-${l.status}`}>{STATUS_LABEL[l.status]}</span>
+                <a className="lead-packet" href={`/admin/leads/${l.id}/packet`}>총판 전달용 신청서</a>
               </li>
             ))}
           </ul>

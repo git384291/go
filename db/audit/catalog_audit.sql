@@ -35,7 +35,7 @@ exec_allow(rolname, proname) as (
     -- 0011 광고 성과 수집·분석, AI 사용료 예약(전용 역할)
     ('app_staff', 'ad_performance_record'), ('app_staff', 'ad_funnel'), ('app_ai', 'ai_budget_reserve'),
     -- 0012 상담 시작 집계·전환 분석·AI 정산
-    ('app_public', 'consult_event_record'), ('app_staff', 'ad_funnel_full'), ('app_staff', 'ad_alert_open'), ('app_staff', 'ad_alert_resolve'), ('app_staff', 'ad_alert_list'), ('app_staff', 'ai_budget_limit_get'), ('app_staff', 'ai_budget_limit_set'), ('app_staff', 'policy_publish_get'), ('app_staff', 'policy_publish_set'), ('app_staff', 'notice_text_list'), ('app_staff', 'notice_text_add'), ('app_public', 'notice_intake_gate'), ('app_staff', 'notice_review_add'), ('app_staff', 'notice_review_list'),
+    ('app_public', 'consult_event_record'), ('app_staff', 'ad_funnel_full'), ('app_staff', 'ad_alert_open'), ('app_staff', 'ad_alert_resolve'), ('app_staff', 'ad_alert_list'), ('app_staff', 'ai_budget_limit_get'), ('app_staff', 'ai_budget_limit_set'), ('app_staff', 'policy_publish_get'), ('app_staff', 'policy_publish_set'), ('app_staff', 'notice_text_list'), ('app_staff', 'notice_text_add'), ('app_public', 'notice_intake_gate'), ('app_public', 'application_save'), ('app_staff', 'dealer_packet_get'), ('app_staff', 'handoff_record'), ('app_staff', 'handoff_list'), ('app_staff', 'notice_review_add'), ('app_staff', 'notice_review_list'),
     ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')

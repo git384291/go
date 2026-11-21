@@ -86,7 +86,8 @@ grant execute on function
   api.create_lead(text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text),
   api.policy_published(),
   api.consult_event_record(text, text),   -- 0012: 상담 시작 건수(개인정보 없음)
-  api.notice_intake_gate(text, jsonb)     -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
+  api.notice_intake_gate(text, jsonb),    -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
+  api.application_save(text, text, text, text)  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
   to app_public;
 
 grant execute on function
@@ -121,7 +122,10 @@ grant execute on function
   api.notice_text_list(uuid, uuid, text),
   api.notice_text_add(uuid, uuid, text, text, text, text, text),
   api.notice_review_add(uuid, uuid, text, text, jsonb, text, text),
-  api.notice_review_list(uuid, uuid, text)
+  api.notice_review_list(uuid, uuid, text),
+  api.dealer_packet_get(uuid, uuid, text, uuid, text),
+  api.handoff_record(uuid, uuid, text, uuid, text, text),
+  api.handoff_list(uuid, uuid, text, uuid)
   to app_staff;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)

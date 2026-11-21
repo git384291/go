@@ -20,6 +20,8 @@ import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './T
 import { KAKAO_INQUIRY_LABEL, KAKAO_INQUIRY_NOTES } from '../content/channels';
 import { resolveAttribution } from '../content/attribution';
 import { noticeReadiness, REQUIRED_NOTICES } from '../content/requiredNotices';
+import { ApplicationAssistant } from './ApplicationAssistant';
+import { labelOf, missingApplication, type Application } from '../content/applicationForm';
 
 // REV-004: 실제 고객정보 수집은 재검수 통과 전까지 비활성. 화면만 제공한다.
 const FORM_ENABLED = process.env.NEXT_PUBLIC_LEAD_FORM_ENABLED === 'true';
@@ -43,7 +45,10 @@ const newKey = (): string => {
 
 // kakaoUrl: 카카오톡 상품 문의 주소. 서버가 kakaoInquiryLink()로 판정해 on일 때만 넘기고, 그 밖에는 null(현재 null).
 // 카카오톡은 상품 문의 창구이며 가입 접수가 아니다(PM 6938169689).
-export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOption[]; kakaoUrl: string | null }) {
+export type ApplicationChoice = { carrier: string; productId: string; regionCode: string };
+// choice: AI 상담 화면이 서버 설정으로 고정한 상품 선택. 넘기면 'AI 신청서 도우미'가 열리고 접수 때 총판 전달용 신청서 답변을 함께 보낸다(없으면 기존 양식 그대로).
+export function ConsultForm({ options, kakaoUrl, choice }: { options: readonly ConsultOption[]; kakaoUrl: string | null; choice?: ApplicationChoice }) {
+  const [appAnswers, setAppAnswers] = useState<Application>({});
   const hasOption = options.length > 0;
   // 공개 준비값(사이트 키·처리방침 버전)이 하나라도 비면 위젯 외부 요청과 접수 요청을 모두 만들지 않는다
   const noticeReady = noticeReadiness(REQUIRED_NOTICES, PRIVACY_VERSION).ready;
@@ -155,6 +160,14 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
         return;
       }
       setNoticeError(false);
+      // AI 신청서 도우미가 열려 있으면 필수 항목이 모두 채워져야 접수한다(누락 항목을 알려 준다)
+      const application = choice ? { ...choice, ...appAnswers } : undefined;
+      const lacking = choice ? missingApplication(application as Application) : [];
+      if (lacking.length > 0) {
+        setPhase('error');
+        setMessage(`AI 신청서 도우미의 필수 항목을 먼저 답해 주세요: ${lacking.map(labelOf).join(', ')}`);
+        return;
+      }
       if (!botEnabled) {
         // 공개 사이트 키가 없으면 서버가 어차피 거부한다. 보내지 않는다
         setPhase('error');
@@ -169,7 +182,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
       }
 
       keeper.current ??= new IdempotencyKeeper(newKey);
-      const idempotencyKey = keeper.current.keyFor(submissionFingerprint(input, PRIVACY_VERSION));
+      const idempotencyKey = keeper.current.keyFor(submissionFingerprint(input, PRIVACY_VERSION) + (application ? JSON.stringify(application) : ''));
       // 봇 토큰은 일회용: 보내는 순간 비우고, 결과와 상관없이 접수 실패면 새 토큰을 받는다
       botToken.current = null;
       setPhase('sending');
@@ -196,6 +209,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
             noticeVersion: REQUIRED_NOTICES.version,
             noticeKeys: REQUIRED_NOTICES.items.map((n) => n.key),
             idempotencyKey,
+            ...(application ? { application } : {}),
             turnstileToken: token,
             ...currentAttribution(),
           }),
@@ -290,6 +304,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
           <input name="contactTime" maxLength={50} placeholder="예: 평일 저녁 7시 이후" />
         </label>
 
+        {choice && <ApplicationAssistant app={appAnswers} onChange={setAppAnswers} />}
         <div className="consent-box">
           <label className="check">
             <input
@@ -308,7 +323,8 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
           {errors.consent && <span id={errId('consent')} className="field-error">{errors.consent}</span>}
           <details>
             <summary>수집 항목과 보유 기간 보기</summary>
-            <p>수집 항목: 이름, 휴대폰 번호, 관심 상품, 연락 희망 시간</p>
+            <p>수집 항목: 이름, 휴대폰 번호, 관심 상품, 연락 희망 시간{choice ? ', 설치 주소, 주거 형태, 가입 명의 구분, 현재 이용 통신사, 희망 설치 시기, TV 대수·전달 메모(선택)' : ''}</p>
+            {choice && <p>주민등록번호·자동이체·계좌정보는 이 서비스에서 수집하지 않으며 총판이 별도로 확인합니다.</p>}
             <p>이용 목적: 가입 상담 연락</p>
             <p>보유 기간: 처리방침 확정 후 게시(확정 전에는 신청을 받지 않습니다)</p>
             <p>주소 등 가입에 필요한 정보는 상담 후 가입을 원하실 때만 따로 받습니다.</p>

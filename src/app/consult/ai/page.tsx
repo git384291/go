@@ -23,7 +23,7 @@ export default function ConsultAiPage() {
       {ready && <section className="section"><ConsultAiChat choice={{ carrier, productId, regionCode }} /></section>}
       {/* 상담 뒤 가입 신청: 기존 접수 양식 그대로(필수 고지 확인·개인정보 동의·서버 검사). 고지 문구가 확정되기 전에는 양식이 접수를 막는다 */}
       <section className="section" id="apply" aria-label="가입 상담 신청">
-        <ConsultForm options={[{ value: fixedConsultInterest(), label: CATALOG[fixedConsultInterest()].label }]} kakaoUrl={inquiry.state === 'on' ? inquiry.href : null} />
+        <ConsultForm options={[{ value: fixedConsultInterest(), label: CATALOG[fixedConsultInterest()].label }]} kakaoUrl={inquiry.state === 'on' ? inquiry.href : null} choice={ready ? { carrier, productId, regionCode } : undefined} />
       </section>
     </PageShell>
   );

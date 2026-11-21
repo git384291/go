@@ -27,10 +27,13 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
     const hashes = JSON.stringify(noticeHashes(notices));
     await run(async (tx) => {
       await tx`select api.notice_intake_gate(${notices.version}, ${hashes}::text::jsonb)`;
-      return tx`
+      await tx`
       select api.create_lead(${a.token}, ${a.nameEnc}, ${a.nameMasked}, ${a.phoneEnc}, ${a.phoneHmac}, ${a.phoneLast4},
                              ${a.interest}, ${a.contactTime}, ${a.utmSource}, ${a.utmMedium}, ${a.utmCampaign},
                              ${a.idempotencyKey}, ${a.privacyVersion}, ${a.consentCollection}, ${a.marketingOptIn}, ${a.ipHash})`;
+      // 신청서 저장도 같은 트랜잭션: 여기서 실패하면 접수(리드)도 함께 취소된다
+      if (a.application) await tx`select api.application_save(${a.application.token}, ${a.application.idempotencyKey}, ${a.application.payloadEnc}, ${a.application.summary})`;
+      return null;
     });
     return { ok: true };
   } catch (e) {

@@ -64,6 +64,7 @@ run db/tests/95_ad_alerts_ai_limit.sql >/dev/null   # 광고 중지 경고·AI �
 run db/tests/96_policy_publish_notice_texts.sql >/dev/null   # 정책 게시 ON/OFF·고지 문구 관리(0014)
 run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(0015)
 run db/tests/98_notice_intake_gate.sql >/dev/null   # 접수 직전 고지 승인 게이트(0016)
+run db/tests/99_dealer_application.sql >/dev/null   # 총판 전달용 신청서(0017)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -591,6 +592,15 @@ D -f db/migrations/0016_notice_intake_gate.sql >/dev/null
 back16=$(D -At -c "select to_regprocedure('api.notice_intake_gate(text,jsonb)') is not null")
 [ "$gone16" = t ] && [ "$back16" = t ] || { echo "FAIL | M16 0016 롤백 gone=$gone16 재적용=$back16" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M16 접수 직전 고지 게이트 0016 롤백: 함수 제거, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0017 총판 전달용 신청서: 적용 → 롤백(함수만 제거, 암호화 신청서·전달 이력은 남음) → 재적용
+D -f db/migrations/0017_dealer_application.sql >/dev/null
+D -f db/rollback/0017_down.sql >/dev/null
+gone17=$(D -At -c "select (to_regprocedure('api.application_save(text,text,text,text)') is null and to_regprocedure('api.dealer_packet_get(uuid,uuid,text,uuid,text)') is null and to_regprocedure('api.handoff_record(uuid,uuid,text,uuid,text,text)') is null and to_regprocedure('api.handoff_list(uuid,uuid,text,uuid)') is null)")
+keep17=$(D -At -c "select (to_regclass('pii.lead_applications') is not null and to_regclass('core.dealer_handoffs') is not null)")
+D -f db/migrations/0017_dealer_application.sql >/dev/null
+back17=$(D -At -c "select (to_regprocedure('api.application_save(text,text,text,text)') is not null and to_regprocedure('api.handoff_list(uuid,uuid,text,uuid)') is not null)")
+[ "$gone17" = t ] && [ "$keep17" = t ] && [ "$back17" = t ] || { echo "FAIL | M17 0017 롤백 gone=$gone17 테이블보존=$keep17 재적용=$back17" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M17 총판 전달용 신청서 0017 롤백: 함수 4개 제거, 저장된 신청서·전달 이력 테이블 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)

@@ -1,3 +1,4 @@
+import { applicationSummary, validateApplication } from '../../content/applicationForm';
 import { z } from 'zod';
 import { maskName, normalizeMobile, type PiiCrypto } from '../security/piiCrypto';
 import { signToken, type SigningKey } from '../security/token';
@@ -37,6 +38,8 @@ export const LeadRequestSchema = z
     utmSource: optionalShort(100),
     utmMedium: optionalShort(100),
     utmCampaign: optionalShort(100),
+    // 총판 전달용 신청서(AI 상담 도우미 답변). 항목·민감정보 검사는 validateApplication이 한다(아래). 없어도 접수는 된다
+    application: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -68,6 +71,9 @@ export type CreateLeadArgs = {
   ipHash: string;
 };
 
+/** api.application_save 인자(같은 트랜잭션에서 create_lead 뒤에 호출). 서버 서명 포함 */
+export type ApplicationArgs = { token: string; idempotencyKey: string; payloadEnc: string; summary: string };
+
 export type IntakeContext = {
   crypto: PiiCrypto;
   signingKey: SigningKey;
@@ -81,7 +87,7 @@ export type IntakeContext = {
  * 신뢰할 수 있는 서버에서만 실행: 입력 검증 → 동의 확인 → 정규화 → 암호화·HMAC → 전체 필드 서명.
  * DB(api.create_lead)는 서명을 다시 검증하므로, 이 함수를 거치지 않은 값은 저장되지 않는다.
  */
-export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLeadArgs {
+export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLeadArgs & { application?: ApplicationArgs } {
   const parsed = LeadRequestSchema.safeParse(body);
   if (!parsed.success) {
     const consentIssue = parsed.error.issues.some((i) => i.path[0] === 'consentCollection');
@@ -123,7 +129,17 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
   };
 
   const token = signToken('lead', leadSignedFields(a), ctx.signingKey, ctx.nowSeconds);
-  return { token, ...a };
+  if (input.application === undefined) return { token, ...a };
+  // 신청서: 형식·민감정보(주민번호·계좌·자동이체 등) 검사 → 본문은 암호화, 요약(범주형·누락 목록)만 평문. 주소·메모는 요약에 넣지 않는다
+  const v = validateApplication(input.application);
+  if (!v.ok) throw new LeadRejected(v.code);
+  const payloadEnc = ctx.crypto.encrypt(JSON.stringify(v.value));
+  const summary = JSON.stringify(applicationSummary(v.value));
+  const application: ApplicationArgs = {
+    token: signToken('lead', ['application', input.idempotencyKey, payloadEnc, summary], ctx.signingKey, ctx.nowSeconds),
+    idempotencyKey: input.idempotencyKey, payloadEnc, summary,
+  };
+  return { token, ...a, application };
 }
 
 /** DB의 array[...] 순서와 동일. boolean은 PostgreSQL의 text 변환('true'/'false')과 맞춘다 */
