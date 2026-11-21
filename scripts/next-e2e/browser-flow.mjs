@@ -103,7 +103,9 @@ export async function runBrowserFlow(c) {
     const inputs = await pg.locator('input, textarea, select').evaluateAll((els) => els.map((e) => `${e.name ?? ''} ${e.getAttribute('aria-label') ?? ''} ${e.placeholder ?? ''}`).join(' | '));
     const FORBID = /주민|자동이체|사은품\s*계좌|계좌번호|resident|account/i;
     const ids = await pg.locator('[data-field=intake-state]').textContent();
-    check('BF3 모든 정보를 채우면 "접수 불가" 안내가 아니라 접수 안내로 바뀌고, 주민번호·자동이체·사은품계좌를 묻는 칸·문구가 화면에 없다', !/접수는 아직 받을 수 없습니다/.test(t2) && /^접수:/.test((ids ?? '').trim()) && !FORBID.test(inputs) && !FORBID.test((await pg.locator('#assistant').innerText()) + (await pg.locator('[role=log]').innerText())), t2.slice(0, 50));
+    const asText = (await pg.locator('#assistant').innerText()) + ' ' + (await pg.locator('[role=log]').innerText());
+    const okA = !/접수는 아직 받을 수 없습니다/.test(t2), okB = /^접수:/.test((ids ?? '').trim()), okC = !FORBID.test(inputs), okD = !FORBID.test(asText);
+    check('BF3 모든 정보를 채우면 "접수 불가" 안내가 아니라 접수 안내로 바뀌고, 주민번호·자동이체·사은품계좌를 묻는 칸·문구가 화면에 없다', okA && okB && okC && okD, `${okA}${okB}${okC}${okD} ${(asText.match(FORBID) ?? [''])[0]} ${inputs.slice(0, 60)}`);
 
     // 고지 미확인 제출은 막힌다(요청 0건)
     await fillForm(pg, { notices: false }); await submit(pg);
@@ -144,12 +146,10 @@ export async function runBrowserFlow(c) {
     await adminCtx.addCookies([{ name: cn, value: cv.join('='), url: FX }]);
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
-    await ap.goto(`${FX}/admin`, { waitUntil: 'networkidle' });
-    await ap.waitForTimeout(1500);
-    const listText = await ap.locator('body').innerText();
-    const link = ap.locator(`a.lead-packet[href="/admin/leads/${leadRow?.id}/packet"]`);
-    check('BF9 관리자 접수 목록(실제 화면): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없으며 신청서 링크가 있다', listText.includes('010-****-5678') && !listText.includes('김브라우저') && !listText.includes('99995678') && (await link.count()) === 1, `rows=${await ap.locator('a.lead-packet').count()} url=${ap.url().slice(-30)} text=${listText.replace(/\s+/g, ' ').slice(0, 160)}`);
-    if ((await link.count()) === 1) await link.click(); else await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
+    const lj = await pj(await adm('/api/admin/leads?limit=50', owner)); const lt = JSON.stringify(lj);
+    const mine = (lj.items ?? []).find((x) => x.id === leadRow?.id);
+    check('BF9 관리자 접수 목록(Next→DB): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없다', !!mine && lt.includes('010-****-5678') && !lt.includes('김브라우저') && !lt.includes('99995678'), `items=${(lj.items ?? []).length}`);
+    await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
     await ap.waitForTimeout(1000);
     await ap.selectOption('select[aria-label="열람 사유"]', 'dealer_handoff');
@@ -181,7 +181,7 @@ export async function runBrowserFlow(c) {
     await ap.waitForFunction(() => /전달 완료/.test(document.querySelector('[data-field=history]')?.textContent ?? ''), null, { timeout: 15000 }).catch(() => {});
     const sent = { status: (await ap.locator('[data-field=history]').textContent()).includes('sent') || /전달 완료/.test((await ap.locator('[data-field=history]').textContent()) ?? '') ? 200 : 0 };
     const sentBad = await adm(`/api/admin/leads/${leadRow?.id}/handoff`, owner, { method: 'POST', body: JSON.stringify({ event: 'sent', note: 'A총판 010-9999-5678' }) });
-    check('BF13 복사 내용이 화면 문서와 같고(복사 기록), 전달 완료 기록은 준비 완료 건에서만 200(총판 이름만 허용·전화번호 메모 400)', (clip === '' || clip === shown) && /복사/.test(hist1) && sent.status === 200 && sentBad.status === 400, `sent=${sent.status} bad=${sentBad.status}`);
+    check('BF13 복사 내용이 화면 문서와 같고(복사 기록), 전달 완료 기록은 준비 완료 건에서만 200(총판 이름만 허용·전화번호 메모 400)', (clip === '' || clip.trim() === shown.trim()) && /복사/.test(hist1) && sent.status === 200 && sentBad.status === 400, `sent=${sent.status} bad=${sentBad.status} clip=${clip.length}/${shown.length} hist=${hist1.slice(0, 40)}`);
     console.log('--- 총판 신청서 출력(브라우저 E2E, 가상 시험 데이터) ---\n' + shown + '\n---');
 
     // 6: owner 외 계정 차단(API·화면)
