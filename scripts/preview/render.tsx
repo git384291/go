@@ -265,8 +265,9 @@ async function main() {
   report.push(...routeChecks);
   await writeFile(`${OUT}/checks.txt`, report.join('\n') + '\n');
   console.log(report.join('\n'));
+  // 광고 예산 화면(19·20)의 금액은 상품 요금이 아니라 관리자 한도 숫자이므로 요금 노출 검사에서만 제외한다(나머지 검사는 동일).
   const bad = report.filter((r) =>
-    r.includes('가로 넘침=true') || /금액 표기=[1-9]/.test(r) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
+    r.includes('가로 넘침=true') || (/금액 표기=[1-9]/.test(r) && !/^(19|20)-admin-ads/.test(r)) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
     || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
     || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r)
     || /카톡문의 [^=\t]+=false/.test(r) || /카톡문의 (외부요소|요청)=[1-9]/.test(r));
