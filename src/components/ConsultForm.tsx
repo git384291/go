@@ -43,6 +43,16 @@ const newKey = (): string => {
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 };
 
+/** 화면에 표시한 고지 문구의 항목별 sha256(본문 trim, UTF-8) — 서버 noticeHashes와 같은 방식 */
+async function shownNoticeHashes(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const n of REQUIRED_NOTICES.items) {
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(n.body.trim()));
+    out[n.key] = Array.from(new Uint8Array(d), (x) => x.toString(16).padStart(2, '0')).join('');
+  }
+  return out;
+}
+
 // kakaoUrl: 카카오톡 상품 문의 주소. 서버가 kakaoInquiryLink()로 판정해 on일 때만 넘기고, 그 밖에는 null(현재 null).
 // 카카오톡은 상품 문의 창구이며 가입 접수가 아니다(PM 6938169689).
 export type ApplicationChoice = { carrier: string; productId: string; regionCode: string };
@@ -194,6 +204,8 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
       const timer = setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT_MS);
       let result: SubmitOutcome;
       try {
+        // 고객에게 실제로 보여 준 문구의 해시(서버가 자기 상수·DB 승인 문구와 대조한다)
+        const shownHashes = await shownNoticeHashes();
         const res = await fetch('/api/leads', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -210,6 +222,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
             privacyVersion: PRIVACY_VERSION,
             noticeVersion: REQUIRED_NOTICES.version,
             noticeKeys: REQUIRED_NOTICES.items.map((n) => n.key),
+            noticeHashes: shownHashes,
             idempotencyKey,
             ...(application ? { application } : {}),
             turnstileToken: token,

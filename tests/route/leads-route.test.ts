@@ -58,6 +58,7 @@ const base = {
   privacyVersion: 'privacy-test-v1',
   noticeVersion: 'privacy-test-v1',
   noticeKeys: ['n1'],
+  noticeHashes: { n1: 'a'.repeat(64) },
   idempotencyKey: 'test-only-route-idem-0001',
   turnstileToken: 'test-only-turnstile-token',
 };

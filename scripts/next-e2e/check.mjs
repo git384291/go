@@ -76,7 +76,7 @@ try {
   check('N7 같은 IP의 새 세션 발급 제한: 5개 뒤 429', codes.filter((c) => c === 200).length === 5 && codes.includes(429), codes.join(','));
   // 접수: Turnstile(가상 확인 서버)을 통과해도 실제 설정의 필수 고지가 미확정이면 접수는 막힌다(DB 0건)
   const l0 = await n(`select count(*)::int as n from core.leads`);
-  const L = (tok) => post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['collection_purpose', 'not_a_contract', 'policy_confirm'], idempotencyKey: 'next-e2e-lead-000000001', turnstileToken: tok });
+  const L = (tok) => post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['collection_purpose', 'not_a_contract', 'policy_confirm'], noticeHashes: { collection_purpose: 'a'.repeat(64), not_a_contract: 'a'.repeat(64), policy_confirm: 'a'.repeat(64) }, idempotencyKey: 'next-e2e-lead-000000001', turnstileToken: tok });
   const t0 = seen.turnstile;
   const bad = await L('nope'), host = await L('wrong-host'), down = await L('down');
   check('N8 봇 확인: 실패 403, 호스트 불일치 403, 확인 서버 장애 503(접수 안 함)', bad.status === 403 && host.status === 403 && down.status === 503, `${bad.status},${host.status},${down.status}`);
@@ -270,7 +270,7 @@ try {
   const ex = await nad(ownerC, { ...NB, key: 'x', extra: 1 });
   check('NA5 알 수 없는 필드 거부(422)', ex.status === 422, `status=${ex.status}`);
   const lc0 = await n(`select count(*)::int as n from core.leads`);
-  const blk = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], idempotencyKey: 'next-e2e-lead-000000002', turnstileToken: 'ok' });
+  const blk = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], noticeHashes: { collection_purpose: 'a'.repeat(64) }, idempotencyKey: 'next-e2e-lead-000000002', turnstileToken: 'ok' });
   check('NA6 고지 문구를 DB에 입력해도 접수 차단 유지(NOTICE_NOT_CONFIRMED 503), 접수 0건 증가', blk.status === 503 && blk.j?.code === 'NOTICE_NOT_CONFIRMED' && (await n(`select count(*)::int as n from core.leads`)) === lc0, `status=${blk.status} code=${blk.j?.code}`);
   // 총판 원문 ↔ 실제 DB 저장 문구 대조(읽기 전용)
   const ns = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/notice-source.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
@@ -391,11 +391,47 @@ try {
   const g5 = await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000005', FLOW_PHONE: '010-8888-4323' }); okFlows += g5.status === 0 ? 1 : 0;
   check('G5 변경된 문구를 다시 검수·승인하면 새 문구로 접수 가능(+1건), 고지 노출 기록은 새 문구 2건 해시(누적 4건)', reap2.status === 201 && g5.status === 0 && (await lc()) === lf0 + okFlows && (await n(`select count(*)::int as n from pii.notice_exposures e join core.notice_texts t on t.version = e.doc_version and t.notice_key = e.notice_key and t.body_sha256 = e.body_sha256 where e.doc_version = 'next-e2e-v1'`)) === 1 + 1 + 2, g5.raw);
   check('G6 승인 취소·재승인·변경 모두 감사 기록(반려·승인) 남음, 작성자(대표)의 승인 시도는 계속 거부', (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_rejected' and detail ->> 'version' = 'next-e2e-v1'`)) >= 2 && (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_approved' and detail ->> 'version' = 'next-e2e-v1'`)) === 3 && (await rev(ownerC, RB)).status === 403);
-  const blk2 = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], idempotencyKey: 'next-e2e-lead-000000003', turnstileToken: 'ok' });
+  // 고객 화면이 보여 준 문구 해시가 서버 상수와 다르면(오래된·변조된 화면) 다음 접수부터 즉시 차단
+  await blocked('G7 고객 화면이 보여 준 문구 해시 ≠ 서버 상수 해시면 DB 호출 전에 차단(NOTICE_HASH_MISMATCH 503)', await runFlow({ FLOW_STALE_CLIENT: '1', FLOW_IDEM: 'next-e2e-flow-0000000006', FLOW_PHONE: '010-8888-4328' }), 'NOTICE_HASH_MISMATCH');
+  // 중간 실패 원자성: 리드 저장 뒤 신청서 저장이 실패하면 리드·고객·동의·고지 노출·신청서가 모두 취소돼야 한다(어긋난 불완전 상태 없음)
+  const snap = async () => [await lc(), await n(`select count(*)::int as n from pii.customers`), await n(`select count(*)::int as n from pii.consents`), await n(`select count(*)::int as n from pii.notice_exposures`), await n(`select count(*)::int as n from pii.lead_applications`), await n(`select count(*)::int as n from core.audit_logs where action = 'application.save'`)].join(',');
+  const s0 = await snap();
+  const brk = await runFlow({ FLOW_APP: '1', FLOW_BREAK_APP: '1', FLOW_IDEM: 'next-e2e-flow-0000000007', FLOW_PHONE: '010-8888-4329' });
+  const s1 = await snap();
+  check('G8 신청서 저장이 실패하면 접수 전체가 취소된다(리드·고객·동의·고지 노출·신청서·저장 감사 모두 불변), 응답은 실패', brk.status !== 0 && brk.j?.ok === false && s1 === s0, `${s0} -> ${s1} ${brk.raw}`);
+  const okApp = await runFlow({ FLOW_APP: '1', FLOW_IDEM: 'next-e2e-flow-0000000008', FLOW_PHONE: '010-8888-4330' }); okFlows += okApp.status === 0 ? 1 : 0;
+  const s2 = await snap();
+  check('G9 정상 접수(고지 승인 fixture)는 리드·고객·동의·고지 노출 2건·신청서·저장 감사가 함께 늘어난다', okApp.status === 0 && s2 === s0.split(',').map((v, i) => Number(v) + [1, 1, 1, 2, 1, 1][i]).join(','), `${s0} -> ${s2}`);
+  const blk2 = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], noticeHashes: { collection_purpose: 'a'.repeat(64) }, idempotencyKey: 'next-e2e-lead-000000003', turnstileToken: 'ok' });
   check('RV9 검수 승인 이후에도 실제 서버는 코드 상수 미확정이라 접수 차단 유지(503), 접수 건수 변화 없음', blk2.status === 503 && blk2.j?.code === 'NOTICE_NOT_CONFIRMED' && (await lc()) === lf0 + okFlows, `status=${blk2.status}`);
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);
+  // 고지 미확정(실제 상수) 환경의 실제 Next 화면: 상담 → 신청서 정보 수집은 되지만 고지 체크박스·접수는 없고, 총판 전달 준비 완료로 가지 않는다
+  try {
+    const { chromium } = await import('playwright');
+    const br = await chromium.launch();
+    const ctx = await br.newContext({ viewport: { width: 390, height: 1600 }, bypassCSP: true }); // next dev eval 때문에 시험 브라우저만 CSP 우회
+    const pg = await ctx.newPage();
+    let leadPosts = 0;
+    pg.on('request', (r) => { if (r.url().endsWith('/api/leads') && r.method() === 'POST') leadPosts++; });
+    const leads0 = await lc();
+    await pg.goto(`${BASE}/consult/ai`, { waitUntil: 'networkidle' });
+    await pg.waitForTimeout(1500);
+    const ask = async (msg) => { const k = await pg.locator('[role=log] p').count(); await pg.fill('textarea[aria-label="상담 내용"]', msg); await pg.click('button:has-text("보내기")'); await pg.waitForFunction((c) => document.querySelectorAll('[role=log] p').length >= c + 3, k, { timeout: 20000 }); return (await pg.locator('[role=log] p').last().textContent()) ?? ''; };
+    const t1 = await ask('요금이 궁금해요');
+    await pg.fill('input[aria-label="설치주소"]', '서울시 가상구 화면로 7'); await pg.click('button:has-text("답하기")');
+    await pg.click('[role=group] button:has-text("KT")');
+    await pg.fill('input[aria-label="이메일"]', 'ui@example.com'); await pg.click('button:has-text("답하기")');
+    for (const l of ['SK브로드밴드', '빠른 날짜', '기존 회선 있음', '확인했습니다', '확인했습니다']) await pg.click(`[role=group] button:has-text("${l}")`);
+    const t2 = await ask('이제 접수하고 싶어요');
+    const boxes = await pg.locator('.consent-box[aria-label="필수 고지"] input[type=checkbox]').count();
+    const gate = (await pg.locator('.consent-box[aria-label="필수 고지"]').textContent()) ?? '';
+    await pg.locator('form button[type=submit]').click({ timeout: 2000, force: true }).catch(() => {});
+    await pg.waitForTimeout(500);
+    await br.close();
+    check('UI1 실제 Next 화면(고지 미확정): 상담 후 신청서 도우미가 이어 묻고, 모두 채워도 "접수 불가" 안내, 가짜 고지 체크박스 없음, 제출해도 접수 요청 0건·DB 저장 0건', /설치하실 곳의 주소/.test(t1) && /필수 고지 문구가 확정되기 전이라 접수는 아직 받을 수 없습니다/.test(t2) && boxes === 0 && /확정되기 전에는 상담 신청을 받지 않습니다/.test(gate) && leadPosts === 0 && (await lc()) === leads0, `t2=${t2.slice(0, 40)} boxes=${boxes} posts=${leadPosts}`);
+  } catch (e) { check('UI1 실제 Next 화면 검증', false, String(e.message).split('\n')[0]); }
 } catch (e) { check('실행 중 예외 없음', false, String(e.message).split('\n')[0]); } finally { await sql.end(); fake.close(); }
 const bad = results.filter((x) => !x).length;
 console.log(`== Next 서버 E2E: pass=${results.length - bad} fail=${bad}`);

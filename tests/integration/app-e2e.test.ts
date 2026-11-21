@@ -5,7 +5,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import postgres from 'postgres';
 import { withRoleOn } from '../../src/server/db/client';
-import { submitLead } from '../../src/server/leads/submitLead';
+import { noticeHashes, submitLead } from '../../src/server/leads/submitLead';
 import type { IntakeContext } from '../../src/server/leads/intake';
 import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 import { signToken } from '../../src/server/security/token';
@@ -54,7 +54,7 @@ const run = (fn: (tx: never) => PromiseLike<unknown>) => withRoleOn(app, 'public
 const body = (over: Record<string, unknown> = {}) => ({
   name: '김이투이', phone: '010-7777-1234', interest: 'internet_tv', contactTime: '평일 저녁',
   consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1',
-  noticeVersion: 'privacy-test-v1', noticeKeys: TEST_NOTICES.items.map((n) => n.key),
+  noticeVersion: 'privacy-test-v1', noticeKeys: TEST_NOTICES.items.map((n) => n.key), noticeHashes: noticeHashes(TEST_NOTICES),
   idempotencyKey: 'e2e-intake-0000000000001', utmSource: 'naver', utmMedium: 'cpc', utmCampaign: 'e2e', ...over,
 });
 const count = async (sql: string) => Number(((await admin.unsafe(sql)) as unknown as { n: number | string }[])[0].n);
@@ -103,7 +103,7 @@ test('E3 같은 요청 키 재전송: 리드 중복 생성 없음', async () => 
 test('E4b 서버 상수 문구가 DB 승인 문구와 한 글자라도 다르면 접수 게이트가 막음(NOTICE_HASH_MISMATCH 503), DB에 쓰지 않음', async () => {
   const l0 = await count(LEADS);
   const tampered = { ...TEST_NOTICES, items: TEST_NOTICES.items.map((n, i) => (i === 0 ? { ...n, body: n.body + '!' } : n)) };
-  const r = await submitLead(body({ idempotencyKey: 'e2e-intake-0000000000004' }), ctx({ notices: tampered }), run);
+  const r = await submitLead(body({ idempotencyKey: 'e2e-intake-0000000000004', noticeHashes: noticeHashes(tampered) }), ctx({ notices: tampered }), run);
   assert.deepEqual(r, { ok: false, code: 'NOTICE_HASH_MISMATCH', status: 503 });
   assert.equal(await count(LEADS), l0);
 });

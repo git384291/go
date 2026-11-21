@@ -12,13 +12,15 @@ export type ChatChoice = { carrier: string; productId: string; regionCode: strin
 type Msg = { from: 'me' | 'ai' | 'assist'; text: string };
 
 /** 신청서 도우미가 이어서 묻는 말(고정 문장·화면 안에서만 만든다, AI 모델·서버로 가지 않는다). 필수 항목 중 빠진 것만 순서대로, 이미 받은 것은 다시 묻지 않는다 */
-export function assistFollowUp(app: Application): string {
+export function assistFollowUp(app: Application, intakeOpen: boolean): string {
   const q = nextQuestion(app);
   const need = q && neededFields(app).some((f) => f.key === q.key);
+  if (!need && !intakeOpen) return '신청서 도우미: 필요한 정보는 모두 채워졌지만, 필수 고지 문구가 확정되기 전이라 접수는 아직 받을 수 없습니다. 접수가 열리면 안내해 드립니다.';
   return need ? `신청서 도우미: ${q.question} (아래 신청서 도우미에 답해 주세요. 주민번호·자동이체·사은품계좌는 묻지 않습니다)` : '신청서 도우미: 신청서에 필요한 정보가 모두 채워졌습니다. 아래 가입 상담 신청에서 접수해 주세요.';
 }
 
-export function ConsultAiChat({ choice, application }: { choice: ChatChoice; application?: Application }) {
+// intakeOpen: 필수 고지가 확정돼 접수를 받을 수 있는지(화면 상수 기준). false면 정보가 모두 채워져도 '접수 가능'으로 안내하지 않는다
+export function ConsultAiChat({ choice, application, intakeOpen = false }: { choice: ChatChoice; application?: Application; intakeOpen?: boolean }) {
   const [text, setText] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
@@ -26,6 +28,8 @@ export function ConsultAiChat({ choice, application }: { choice: ChatChoice; app
   const [session, setSession] = useState<string | null>(null);
   const appRef = useRef(application);
   appRef.current = application;
+  const intakeOpenRef = useRef(intakeOpen);
+  intakeOpenRef.current = intakeOpen;
   const ready = text.trim().length > 0 && text.length <= 300 && !busy;
   async function send() {
     const message = text.trim();
@@ -39,7 +43,7 @@ export function ConsultAiChat({ choice, application }: { choice: ChatChoice; app
       if (res.ok && j.ok === true && typeof j.text === 'string') reply = j.text;
       if (typeof j.session === 'string' && j.session.length <= 200) setSession(j.session);
     } catch { /* 안전 안내문 유지 */ }
-    setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(appRef.current ? [{ from: 'assist' as const, text: assistFollowUp(appRef.current) }] : [])]);
+    setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(appRef.current ? [{ from: 'assist' as const, text: assistFollowUp(appRef.current, intakeOpenRef.current) }] : [])]);
     setBusy(false);
   }
   return (

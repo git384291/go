@@ -1,4 +1,5 @@
 import { applicationSummary, validateApplication } from '../../content/applicationForm';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { maskName, normalizeMobile, type PiiCrypto } from '../security/piiCrypto';
 import { signToken, type SigningKey } from '../security/token';
@@ -34,6 +35,8 @@ export const LeadRequestSchema = z
     // PM 11/21: 고객이 확인한 필수 고지의 버전과 항목 키. 확정되지 않은 문구로는 접수하지 않는다
     noticeVersion: z.string().min(1).max(40),
     noticeKeys: z.array(z.string().max(40)).max(20),
+    // 고객 화면이 실제로 보여 준 문구의 항목별 sha256(본문 trim, UTF-8). 서버 상수의 해시와 같아야 접수한다(오래된 화면·변조 방지)
+    noticeHashes: z.record(z.string().max(40), z.string().regex(/^[0-9a-f]{64}$/)),
     idempotencyKey: z.string().regex(/^[A-Za-z0-9-]{16,64}$/),
     utmSource: optionalShort(100),
     utmMedium: optionalShort(100),
@@ -44,6 +47,11 @@ export const LeadRequestSchema = z
   .strict();
 
 export type LeadRequest = z.infer<typeof LeadRequestSchema>;
+
+/** 항목별 sha256(UTF-8, 본문 trim). DB가 저장 시 계산하는 해시·화면이 계산하는 해시와 같은 방식이다 */
+export function noticeHashes(cfg: { readonly items: readonly { readonly key: string; readonly body: string }[] }): Record<string, string> {
+  return Object.fromEntries(cfg.items.map((n) => [n.key, createHash('sha256').update(n.body.trim(), 'utf8').digest('hex')]));
+}
 
 export class LeadRejected extends Error {
   constructor(public readonly code: string) {
@@ -102,6 +110,9 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
   if (!noticeReadiness(notices, ctx.currentPrivacyVersion).ready) throw new LeadRejected('NOTICE_NOT_CONFIRMED');
   if (input.noticeVersion !== notices.version) throw new LeadRejected('NOTICE_VERSION_MISMATCH');
   if (!sameNoticeKeys(notices, input.noticeKeys)) throw new LeadRejected('NOTICE_ACK_REQUIRED');
+  // 고객이 본 문구의 해시 = 서버 상수 해시(= 이어서 DB 게이트가 승인 문구와 대조하는 해시). 하나라도 다르면 접수하지 않는다
+  const expected = noticeHashes(notices);
+  if (!Object.keys(expected).every((k) => input.noticeHashes[k] === expected[k]) || Object.keys(input.noticeHashes).length !== Object.keys(expected).length) throw new LeadRejected('NOTICE_HASH_MISMATCH');
 
   let phone: string;
   try {

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const ORIGIN = 'http://form.test';
+const ORIGIN = 'http://localhost:4173'; // crypto.subtle(고지 해시 계산)은 보안 컨텍스트(https·localhost)에서만 쓸 수 있다
 const TS_HOST = 'challenges.cloudflare.com';
 
 const results = [];

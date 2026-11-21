@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import { REQUIRED_NOTICES } from '../../content/requiredNotices';
-import { buildCreateLeadArgs, LeadRejected, type IntakeContext } from './intake';
+import { buildCreateLeadArgs, LeadRejected, noticeHashes, type IntakeContext } from './intake';
 
 /**
  * 접수 처리 핵심(검증 → 암호화·서명 → api.create_lead 저장). route.ts와 통합 시험이 같은 코드를 쓴다.
@@ -13,10 +12,7 @@ export type SubmitResult = { ok: true } | { ok: false; code: string; status: num
 /** DB 게이트(api.notice_intake_gate)가 접수를 막을 때 돌려주는 오류 메시지(문구·개인정보 없음). 모두 503으로 닫는다 */
 const GATE_CODES = new Set(['NOTICE_INVALID', 'NOTICE_VERSION_MISMATCH', 'NOTICE_NOT_FOUND', 'NOTICE_KEYS_MISMATCH', 'NOTICE_HASH_MISMATCH', 'NOTICE_NOT_APPROVED', 'NOTICE_CHANGED', 'NOTICE_SELF_APPROVED']);
 
-/** 서버 상수(고객에게 보여 주는 문구)의 항목별 sha256. DB가 저장 시 계산하는 해시와 같은 방식(UTF-8)이다 */
-export function noticeHashes(cfg: { readonly items: readonly { readonly key: string; readonly body: string }[] }): Record<string, string> {
-  return Object.fromEntries(cfg.items.map((n) => [n.key, createHash('sha256').update(n.body.trim(), 'utf8').digest('hex')]));
-}
+export { noticeHashes };
 
 export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicRunner): Promise<SubmitResult> {
   const rejected = (code: string, status = 400): SubmitResult => ({ ok: false, code, status });
@@ -37,7 +33,7 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
     });
     return { ok: true };
   } catch (e) {
-    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' ? 503 : 400);
+    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' || e.code === 'NOTICE_HASH_MISMATCH' ? 503 : 400);
     const code = (e as { code?: string }).code;
     if (code === '54000') return rejected('RATE_LIMITED', 429);
     const msg = String((e as { message?: unknown }).message ?? '').trim();

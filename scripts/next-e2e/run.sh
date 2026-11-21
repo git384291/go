@@ -44,6 +44,7 @@ export PII_ENC_KEYS="{\"1\":\"$(head -c 32 /dev/urandom | base64)\"}" PII_ENC_CU
 export TURNSTILE_SECRET_KEY=test-turnstile-secret TURNSTILE_VERIFY_URL_TEST="http://127.0.0.1:$FAKE/turnstile" PUBLIC_HOSTNAME=fideon.test PRIVACY_POLICY_VERSION=privacy-test-v1
 export E2E_FAKE_PORT=$FAKE
 export CONSULT_CHAT_ENABLED=true CONSULT_AI_MODEL=mock QUOTE_SUPPLIER_ID=supplier-a LEAD_INTAKE_MODE=local NEXT_TELEMETRY_DISABLED=1
+export CONSULT_CHAT_CARRIER=carrier-x CONSULT_CHAT_PRODUCT=net500-tv-basic CONSULT_CHAT_REGION=region-1 NEXT_PUBLIC_PRIVACY_POLICY_VERSION=privacy-test-v1
 export CONSULT_SESSION_KEY="$(head -c 32 /dev/urandom | base64)"
 # 서버 환경: 관리자 인증·봇 확인은 가상 로컬 서버로 연결, AI 키·광고 키는 비워 둔다(실제 외부 호출 경로 없음)
 env -u CONSULT_AI_API_KEY NODE_ENV=development ./node_modules/.bin/next dev -p "$WEB" -H 127.0.0.1 > "$OUT/next.log" 2>&1 &

@@ -11,7 +11,7 @@ const ctx = {
   currentPrivacyVersion: 'privacy-test-v1', clientIp: '203.0.113.10', nowSeconds: 1_800_000_000,
   notices: { version: 'privacy-test-v1', confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: ' 시험용 문구 ' }] },
 };
-const lead = { name: '테스트고객', phone: '010-0000-0001', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['n1'], idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab' };
+const lead = { name: '테스트고객', phone: '010-0000-0001', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['n1'], noticeHashes: noticeHashes(ctx.notices), idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab' };
 
 function runner(failOn?: { sql: RegExp; err: unknown }) {
   const calls: { q: string; v: unknown[] }[] = [];
@@ -81,5 +81,20 @@ test('SG6 롤백 불일치는 닫힌 채 실패: 0016(게이트 함수)·0017(ap
     const fail = runner({ sql: missing, err: Object.assign(new Error('function does not exist'), { code: '42883' }) });
     const r = await submitLead({ ...lead, application: APP }, ctx, fail.run);
     assert.deepEqual(r, { ok: false, code: 'INTERNAL', status: 500 });
+  }
+});
+
+test('SG7 고객 화면이 보여 준 문구 해시가 서버 상수와 다르거나 없거나 남으면 DB 호출 없이 503(NOTICE_HASH_MISMATCH)·형식 오류는 400', async () => {
+  const h = noticeHashes(ctx.notices);
+  for (const bad of [{ n1: 'f'.repeat(64) }, {}, { ...h, extra: h.n1 }, { n2: h.n1 }]) {
+    const { run, calls } = runner();
+    assert.deepEqual(await submitLead({ ...lead, noticeHashes: bad }, ctx, run), { ok: false, code: 'NOTICE_HASH_MISMATCH', status: 503 });
+    assert.equal(calls.length, 0);
+  }
+  for (const bad of [undefined, { n1: 'xyz' }, 'x']) {
+    const { run, calls } = runner();
+    const r = await submitLead({ ...lead, noticeHashes: bad }, ctx, run);
+    assert.deepEqual(r, { ok: false, code: 'INVALID_INPUT', status: 400 });
+    assert.equal(calls.length, 0);
   }
 });

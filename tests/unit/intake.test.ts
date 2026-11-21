@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCreateLeadArgs, leadIntakeGate, LeadRejected, leadSignedFields } from '../../src/server/leads/intake';
+import { buildCreateLeadArgs, leadIntakeGate, LeadRejected, leadSignedFields, noticeHashes } from '../../src/server/leads/intake';
 import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 import { signToken } from '../../src/server/security/token';
 
@@ -29,6 +29,7 @@ const valid = {
   privacyVersion: 'privacy-test-v1',
   noticeVersion: 'privacy-test-v1',
   noticeKeys: ['n1'],
+  noticeHashes: noticeHashes(ctx.notices),
   idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab',
 };
 

@@ -7,9 +7,10 @@ import { build } from 'esbuild';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const ORIGIN = 'http://form.test';
+const ORIGIN = 'http://localhost:4173'; // crypto.subtle(고지 해시 계산)은 보안 컨텍스트(https·localhost)에서만 쓸 수 있다
 const TS_HOST = 'challenges.cloudflare.com';
 
 const results = [];
@@ -185,6 +186,8 @@ async function scenarioMain(browser) {
   await token(page, 'tok-1');
   await submitAndSettle(page, seen);
   const k1 = seen.api[0]?.idempotencyKey;
+  // 고객이 본 고지 문구('시험용 문구')의 sha256(본문 trim, UTF-8)을 접수 본문에 싣는다(서버가 자기 상수·DB 승인 문구와 대조)
+  check('F5b 접수 본문에 고객 화면이 보여 준 고지 버전·항목 키·문구 해시가 실린다', seen.api[0]?.noticeVersion === 'privacy-test-v1' && seen.api[0]?.noticeKeys?.join() === 'n1' && seen.api[0]?.noticeHashes?.n1 === createHash('sha256').update('시험용 문구', 'utf8').digest('hex'), JSON.stringify(seen.api[0]?.noticeHashes));
   check('F6 응답 유실: 결과 미확인 안내(접수 안 됨 단정 없음), 입력 보존, 전송 잠금 해제, 봇 토큰 재발급(reset) 요청',
     seen.api.length === 1 && (await resultText(page)).includes('확인하지 못했습니다') && !(await resultText(page)).includes('접수되지 않았') && (await page.inputValue('input[name=phone]')) === '010-0000-0001' &&
       !(await page.evaluate(() => document.querySelector('fieldset').disabled)) && (await page.evaluate(() => window.__ts.resets)) === 1 && seen.api[0].turnstileToken === 'tok-1');

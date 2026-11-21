@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { ACTIVE_INTERESTS, CATALOG, fixedConsultInterest, isActiveInterest } from '../../src/content/catalog';
 import { ACTIVE_PRODUCTS, PRODUCTS, isActiveSlug } from '../../src/content/products';
-import { buildCreateLeadArgs, LeadRejected } from '../../src/server/leads/intake';
+import { buildCreateLeadArgs, LeadRejected, noticeHashes } from '../../src/server/leads/intake';
 import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 
 const ctx = {
@@ -28,6 +28,7 @@ const valid = {
   privacyVersion: 'privacy-test-v1',
   noticeVersion: 'privacy-test-v1',
   noticeKeys: ['n1'],
+  noticeHashes: noticeHashes(ctx.notices),
   // 시험 전용 가짜 요청 중복 방지 ID(형식 [A-Za-z0-9-]{16,64}만 맞춤). 비밀값 아님, 실제 접수 키와 무관
   idempotencyKey: 'test-only-catalog-idem-g6',
 };

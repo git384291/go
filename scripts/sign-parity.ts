@@ -1,6 +1,6 @@
 // TypeScript 서명과 DB 검증 규칙이 같은지 확인하는 SQL을 출력한다. scripts/db-test.sh가 psql로 실행.
 import { signToken } from '../src/server/security/token';
-import { buildCreateLeadArgs, leadSignedFields, type CreateLeadArgs } from '../src/server/leads/intake';
+import { buildCreateLeadArgs, leadSignedFields, noticeHashes, type CreateLeadArgs } from '../src/server/leads/intake';
 import { createPiiCrypto } from '../src/server/security/piiCrypto';
 
 const staffKey = { keyId: 1, secret: Buffer.alloc(32, 0x11) }; // 시드의 테스트 키와 동일
@@ -22,6 +22,7 @@ const a = buildCreateLeadArgs(
     privacyVersion: 'privacy-test-v1',
     noticeVersion: 'privacy-test-v1',
     noticeKeys: ['n1'],
+    noticeHashes: noticeHashes({ items: [{ key: 'n1', body: '시험용 문구' }] }),
     idempotencyKey: 'parity-test-0000000001',
     utmSource: 'naver',
   },
