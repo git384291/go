@@ -34,8 +34,8 @@ export function adBudgetReady(env: Env): boolean {
   return dbReadReady({ ...env, ADMIN_LEADS_SOURCE: 'db' });
 }
 
-type Op = 'overview' | 'approve' | 'revoke' | 'request';
-const ROLES: Record<Op, readonly string[]> = { overview: ['owner', 'reviewer'], approve: ['owner'], revoke: ['owner'], request: ['owner'] };
+type Op = 'overview' | 'approve' | 'revoke' | 'request' | 'launch' | 'collect' | 'funnel';
+const ROLES: Record<Op, readonly string[]> = { overview: ['owner', 'reviewer'], approve: ['owner'], revoke: ['owner'], request: ['owner'], launch: ['owner'], collect: ['owner'], funnel: ['owner', 'reviewer'] };
 
 async function gate(deps: AdBudgetDeps, op: Op): Promise<StaffIdentity | Response> {
   let ready = false;
@@ -53,7 +53,7 @@ async function gate(deps: AdBudgetDeps, op: Op): Promise<StaffIdentity | Respons
   return who;
 }
 
-const DB_MESSAGES = new Set(['INVALID_BUDGET', 'REASON_REQUIRED', 'NO_ACTIVE_APPROVAL', 'INVALID_SPEND', 'INVALID_PAGE']);
+const DB_MESSAGES = new Set(['INVALID_PERFORMANCE', 'INVALID_RANGE', 'INVALID_BUDGET', 'REASON_REQUIRED', 'NO_ACTIVE_APPROVAL', 'INVALID_SPEND', 'INVALID_PAGE']);
 function dbError(e: unknown): Response {
   const err = (e ?? {}) as { code?: unknown; message?: unknown };
   if (err.code === '42501') return fail('FORBIDDEN', 403);
@@ -125,3 +125,6 @@ export async function adBudgetAction(deps: AdBudgetDeps, body: unknown): Promise
     return dbError(e);
   }
 }
+
+// 같은 관문·오류 처리를 광고 집행·성과 모듈(adRun)이 그대로 쓴다(권한·기본 닫힘 규칙을 한곳에서 유지)
+export { gate as adGate, dbError as adDbError, json as adJson, fail as adFail, block as adBlock };

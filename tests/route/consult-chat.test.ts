@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { answerChat } from '../../src/server/consult/chatAnswer';
-import { createAiBudget, createModel, mockModel } from '../../src/server/consult/chatModel';
+import { createAiBudget, createDbAiBudget, createModel, mockModel } from '../../src/server/consult/chatModel';
 import type { ChatModel, ModelInput } from '../../src/server/consult/chatModel';
 import { maskPii } from '../../src/server/consult/piiMask';
 import { createLimiter, handleChat } from '../../src/server/consult/chatHandler';
@@ -55,7 +55,7 @@ test('CH4 모델 장애·시간 초과는 안전 안내문, 오류 문구는 고
   const slow = await answerChat(deps({ timeoutMs: 20, model: fake((_i, s) => new Promise((res) => { s.addEventListener('abort', () => res('late')); })) }), input(), NOW);
   assert.ok(slow.ok && slow.source === 'fallback');
 });
-test('CH5 사용료 한도: 기본 0원이면 유료 모델은 호출 0회, 한도 초과 뒤에도 호출 안 함(모의는 0원이라 통과)', async () => {
+test('CH5 사용료 예약: 기본 0원이면 유료 모델은 호출 0회, 한도 초과 뒤에도 호출 안 함(모의는 0원이라 통과), 집계 오류는 호출 금지', async () => {
   let calls = 0;
   const paid = fake(async () => { calls++; return '안내'; }, 5);
   const r0 = await answerChat(deps({ model: paid, budget: createAiBudget({}) }), input(), NOW);
@@ -63,9 +63,18 @@ test('CH5 사용료 한도: 기본 0원이면 유료 모델은 호출 0회, 한�
   const b = createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '10' });
   for (let i = 0; i < 4; i++) await answerChat(deps({ model: paid, budget: b }), input(), NOW);
   assert.equal(calls, 2);
-  assert.equal(createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '-5' }).allow(1), false);
-  assert.equal(createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: 'abc' }).allow(1), false);
-  assert.equal(createAiBudget({}).allow(0), true);
+  assert.equal(await createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '-5' }).reserve(1), false);
+  assert.equal(await createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: 'abc' }).reserve(1), false);
+  assert.equal(await createAiBudget({}).reserve(0), true);
+  // DB 집계: true만 통과, false·형식 밖·예외는 모두 호출 금지, 비용 0은 DB를 부르지 않음
+  const mk = (rows: unknown, boom = false) => { let n = 0; return { n: () => n, b: createDbAiBudget(async (fn) => { n++; if (boom) throw new Error('db down'); return fn((() => Promise.resolve(rows)) as never); }) }; };
+  assert.equal(await mk([{ ok: true }]).b.reserve(5), true);
+  for (const bad of [[{ ok: false }], [], [{ ok: 'true' }], null]) assert.equal(await mk(bad).b.reserve(5), false);
+  assert.equal(await mk([], true).b.reserve(5), false);
+  const free = mk([{ ok: true }]);
+  assert.equal(await free.b.reserve(0), true);
+  assert.equal(free.n(), 0);
+  assert.equal(await mk([{ ok: true }]).b.reserve(-1), false);
 });
 test('CH6 개인정보는 모델에 가려서만 전달된다', async () => {
   let seen = '';

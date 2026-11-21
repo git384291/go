@@ -16,6 +16,7 @@ import { LoginPreview } from '../../src/app/admin/login/LoginPreview';
 import { ProgressView } from '../../src/app/admin/progress/ProgressView';
 import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
 import { AdBudgetLocked, AdBudgetView, type BudgetRow } from '../../src/app/admin/ads/AdBudgetView';
+import { FunnelLocked, FunnelView, type FunnelItem } from '../../src/app/admin/ads/funnel/FunnelView';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from '../../src/app/admin/policies/PolicyAdminView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
@@ -152,6 +153,11 @@ const BUDGET_FIXTURE: BudgetRow[] = [
   { id: '10000000-0000-4000-8000-000000000002', campaign_key: 'old-camp', state: 'revoked', daily_cap_krw: 5000, total_cap_krw: 12000, valid_until: '2026-11-22T09:00:00Z', reason: '이전 승인', created_at: '2026-11-20T09:00:00Z', revoke_reason: '교체', spent_today: 0, spent_total: 5000 },
 ];
 
+const FUNNEL_FIXTURE: FunnelItem[] = [
+  { campaign: 'sample-camp', impressions: 1800, clicks: 60, costKrw: 600, ledgerKrw: 500, leads: 3, overspendDays: 1, clickRate: 0.0333, leadRate: 0.05, costPerLeadKrw: 200, overBudget: true },
+  { campaign: 'naver-brand', impressions: 2400, clicks: 96, costKrw: 960, ledgerKrw: 1000, leads: 4, overspendDays: 0, clickRate: 0.04, leadRate: 0.0417, costPerLeadKrw: 240, overBudget: false },
+];
+
 const OUT = process.argv[2] ?? 'test-results/screens';
 // 검사 폭: 좁은 휴대폰(320)과 일반 휴대폰(390). 둘 다 통과해야 한다.
 const WIDTHS = [320, 390] as const;
@@ -176,6 +182,10 @@ async function main() {
     ['19-admin-ads-owner', <AdBudgetView key="ad-owner" items={BUDGET_FIXTURE} role="owner" caps={{ dailyKrw: 10000, totalKrw: 30000 }} />],
     ['20-admin-ads-reviewer', <AdBudgetView key="ad-rev" items={BUDGET_FIXTURE} role="reviewer" caps={{ dailyKrw: 10000, totalKrw: 30000 }} />],
     ['21-admin-ads-locked', <AdBudgetLocked key="ad-locked" kind="disabled" />],
+    // 광고 성과 분석 화면(모의 플랫폼 가상 값): 대표 / 검토자 / 잠금
+    ['25-admin-ads-funnel-owner', <FunnelView key="fn-owner" items={FUNNEL_FIXTURE} role="owner" from="2026-11-15" to="2026-11-21" />],
+    ['26-admin-ads-funnel-reviewer', <FunnelView key="fn-rev" items={FUNNEL_FIXTURE} role="reviewer" from="2026-11-15" to="2026-11-21" />],
+    ['27-admin-ads-funnel-locked', <FunnelLocked key="fn-locked" kind="disabled" />],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
     ['11-official-intake-fake', <PageShell key="intake-fake"><section className="hero"><h1>가상 공식 접수처 표시</h1><OfficialIntakeCta intake={FAKE_INTAKE} /></section></PageShell>],
     // 선택형 상품 안내 패널(실제 코드 상수는 false). 가상 켜짐 화면: 접수 꺼짐(12)과 가상 접수 켜짐(13). 공개 화면 아님
@@ -267,7 +277,7 @@ async function main() {
   console.log(report.join('\n'));
   // 광고 예산 화면(19·20)의 금액은 상품 요금이 아니라 관리자 한도 숫자이므로 요금 노출 검사에서만 제외한다(나머지 검사는 동일).
   const bad = report.filter((r) =>
-    r.includes('가로 넘침=true') || (/금액 표기=[1-9]/.test(r) && !/^(19|20)-admin-ads/.test(r)) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
+    r.includes('가로 넘침=true') || (/금액 표기=[1-9]/.test(r) && !/^(19|20|25|26)-admin-ads/.test(r)) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
     || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
     || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r)
     || /카톡문의 [^=\t]+=false/.test(r) || /카톡문의 (외부요소|요청)=[1-9]/.test(r));

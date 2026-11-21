@@ -9,7 +9,7 @@
 with
 app_roles(rolname) as (
   select r.rolname from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_server', 'anon', 'authenticated', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'anon', 'authenticated', 'release_auditor')
 ),
 guarded_tables as (
   select c.oid, n.nspname || '.' || c.relname as name, c.relrowsecurity, c.relforcerowsecurity
@@ -32,6 +32,8 @@ exec_allow(rolname, proname) as (
     ('app_staff', 'policy_create_draft'), ('app_staff', 'policy_submit'), ('app_staff', 'policy_approve'), ('app_staff', 'policy_reject'), ('app_staff', 'policy_list'),
     -- 0010 광고 예산 통제(PM 11/21)
     ('app_staff', 'ad_budget_approve'), ('app_staff', 'ad_budget_revoke'), ('app_staff', 'ad_spend_request'), ('app_staff', 'ad_budget_overview'),
+    -- 0011 광고 성과 수집·분석, AI 사용료 예약(전용 역할)
+    ('app_staff', 'ad_performance_record'), ('app_staff', 'ad_funnel'), ('app_ai', 'ai_budget_reserve'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),
@@ -80,7 +82,7 @@ violations(v) as (
   from app_roles r cross join pg_namespace s
   where s.nspname in ('core', 'pii', 'security', 'api', 'extensions')
     and has_schema_privilege(r.rolname, s.oid, 'USAGE')
-    and not (r.rolname in ('app_public', 'app_staff', 'release_auditor') and s.nspname = 'api')
+    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'release_auditor') and s.nspname = 'api')
   union all
   -- V4 SECURITY DEFINER 함수는 search_path 고정
   select 'V4 search_path not fixed: ' || f.name
@@ -116,7 +118,7 @@ violations(v) as (
   -- V9 로그인 가능한 앱 역할은 app_server와 release_auditor뿐, 둘 다 슈퍼유저·RLS 우회 아님
   select 'V9 role attribute: ' || r.rolname
   from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'fideon_api', 'app_server', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'fideon_api', 'app_server', 'release_auditor')
     and (r.rolsuper or r.rolbypassrls
          or (r.rolcanlogin and r.rolname not in ('app_server', 'release_auditor')))
   union all

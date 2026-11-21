@@ -58,6 +58,7 @@ run db/tests/50_required_notices.sql >/dev/null   # 필수 고지 문구·버전
 run db/tests/60_policy_store.sql >/dev/null   # 정책 저장소(0008)
 run db/tests/61_policy_list.sql >/dev/null   # 정책 조회 함수(0009)
 run db/tests/70_ad_budget.sql >/dev/null    # 광고 예산 통제(0010)
+run db/tests/80_ad_performance.sql >/dev/null   # 광고 성과·AI 사용료(0011)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -507,6 +508,24 @@ D -q -f db/rollback/0010_restore.sql >/dev/null
 r10=$(D -At -c "select (select count(*) from core.ad_budget_approvals) || '/' || (select coalesce(sum(amount_krw), 0) from core.ad_spend_ledger)")
 [ "$r10" = "1/1234" ] || { echo "FAIL | M10c 0010 복구 건수 불일치 $r10" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M10 광고 예산 0010 롤백: 승인·원장 보관(1건/1,234원), 새 테이블 제거, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
+# 0011 광고 성과·AI 사용료: 적용 → 기록 → 롤백(보관) → 복구
+D -f db/migrations/0011_ad_performance_ai_usage.sql >/dev/null
+D -q -c "insert into core.ad_performance (campaign_key, day, impressions, clicks, cost_krw, source, over_ledger, recorded_by)
+         values ('drill-camp', current_date, 900, 30, 321, 'mock', false, '00000000-0000-4000-8000-000000000001')"
+D -q -c "insert into core.ai_usage_ledger (month, cost_krw) values ('2026-11', 7)"
+D -q -c "update core.ai_budget_config set monthly_limit_krw = 40 where singleton"
+D -f db/rollback/0011_down.sql >/dev/null
+gone11=$(D -At -c "select (to_regclass('core.ad_performance') is null and to_regclass('core.ai_usage_ledger') is null and to_regclass('core.ai_budget_config') is null and to_regprocedure('api.ai_budget_reserve(int)') is null)::text")
+a11=$(D -At -c "select (select count(*) from core.ad_performance_rollback_archive) || '/' || (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger_rollback_archive) || '/' || (select monthly_limit_krw from core.ai_budget_config_rollback_archive)")
+prot11=$(D -At -c "select count(*) from pg_class c where c.oid in ('core.ad_performance_rollback_archive'::regclass, 'core.ai_usage_ledger_rollback_archive'::regclass, 'core.ai_budget_config_rollback_archive'::regclass) and c.relrowsecurity and c.relforcerowsecurity")
+open11=$(D -At -c "select count(*) from (values ('core.ad_performance_rollback_archive'), ('core.ai_usage_ledger_rollback_archive'), ('core.ai_budget_config_rollback_archive')) t(r) cross join (values ('public'), ('app_public'), ('app_staff'), ('app_server'), ('app_ai')) g(role) where has_table_privilege(g.role, t.r, 'SELECT')")
+[ "$gone11" = true ] && [ "$a11" = "1/7/40" ] && [ "$prot11" = 3 ] && [ "$open11" = 0 ] || { echo "FAIL | M11 0011 롤백 gone=$gone11 보관=$a11 RLS=$prot11 열림=$open11" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+if D -q -f db/rollback/0011_down.sql >/dev/null 2>&1; then echo "FAIL | M11b 0011 보관본이 있는데 롤백이 다시 성공" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
+D -f db/migrations/0011_ad_performance_ai_usage.sql >/dev/null
+D -q -f db/rollback/0011_restore.sql >/dev/null
+r11=$(D -At -c "select (select count(*) from core.ad_performance) || '/' || (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger) || '/' || (select monthly_limit_krw from core.ai_budget_config)")
+[ "$r11" = "1/7/40" ] || { echo "FAIL | M11c 0011 복구 건수 불일치 $r11" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M11 광고 성과·AI 사용료 0011 롤백: 성과 1건·사용 7원·한도 40원 보관, 새 객체 제거, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

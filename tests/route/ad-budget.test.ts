@@ -139,5 +139,5 @@ test('AB8 정적: SQL은 api.ad_*뿐, 외부 호출·광고 실행 코드 없음
   const walk = (d: string) => { for (const n of readdirSync(d)) { const p = path.join(d, n); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(n)) files.push(p); } };
   walk(root);
   const users = files.filter((f) => /server\/admin\/adBudget'/.test(readFileSync(f, 'utf8'))).map((f) => path.relative(root, f).split(path.sep).join('/')).sort();
-  assert.deepEqual(users, ['app/admin/ads/page.tsx', 'app/api/admin/ads/budget/route.ts']);
+  assert.deepEqual(users, ['app/admin/ads/funnel/page.tsx', 'app/admin/ads/page.tsx', 'app/api/admin/ads/budget/route.ts', 'app/api/admin/ads/funnel/route.ts', 'app/api/admin/ads/run/route.ts']); // funnel·run 라우트는 SqlTag 타입만 가져온다
 });

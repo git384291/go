@@ -32,7 +32,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   }, now);
   const fallback = (): ChatReply => ({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' });
   const model = deps.model;
-  if (!model || !deps.budget.allow(model.costPerCallKrw)) return fallback();
+  if (!model || !(await deps.budget.reserve(model.costPerCallKrw))) return fallback();
   const ctl = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -40,7 +40,6 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
       model.generate({ system: SYSTEM_PROMPT, user: maskPii(m), approved: approved.text }, ctl.signal),
       new Promise<never>((_, rej) => { timer = setTimeout(() => { rej(new Error('TIMEOUT')); ctl.abort(); }, deps.timeoutMs ?? 8000); }),
     ]);
-    deps.budget.record(model.costPerCallKrw);
     const guarded = guardAiReply(reply, approved);
     if (guarded.text !== reply) return fallback();
     if (approved.kind !== 'quote' && BENEFIT_WORDS.test(reply)) return fallback();

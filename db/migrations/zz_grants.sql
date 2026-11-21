@@ -9,7 +9,7 @@ do $$
 declare
   r text;
 begin
-  foreach r in array array['public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server'] loop
+  foreach r in array array['public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai'] loop
     if r = 'public' or exists (select 1 from pg_roles where rolname = r) then
       execute format('revoke all on schema core, pii, security, api from %s', r);
       execute format('revoke all on all tables in schema core, pii, security from %s', r);
@@ -26,7 +26,7 @@ alter default privileges in schema core, pii, security, api revoke execute on fu
 alter default privileges in schema core, pii, security revoke all on sequences from public;
 
 -- 3) 스키마 USAGE
-grant usage on schema api to app_public, app_staff;
+grant usage on schema api to app_public, app_staff, app_ai;
 grant usage on schema core, pii, security, api, extensions to fideon_api;
 grant create on schema api to fideon_api;
 
@@ -106,8 +106,13 @@ grant execute on function
   api.ad_budget_approve(uuid, uuid, text, text, int, int, timestamptz, text),
   api.ad_budget_revoke(uuid, uuid, text, text, text),
   api.ad_spend_request(uuid, uuid, text, text, int, text),
-  api.ad_budget_overview(uuid, uuid, text, int)
+  api.ad_budget_overview(uuid, uuid, text, int),
+  api.ad_performance_record(uuid, uuid, text, text, date, int, int, int, text),
+  api.ad_funnel(uuid, uuid, text, date, date)
   to app_staff;
+
+-- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
+grant execute on function api.ai_budget_reserve(int) to app_ai;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.
 -- AI 예산 함수(3단계)는 app_public이 아닌 서버 내부 전용 역할에만 부여한다(REV-004 SEC-04).

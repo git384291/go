@@ -29,6 +29,7 @@ export function db(): postgres.Sql {
 const ROLE_SQL = {
   public: 'set local role app_public',
   staff: 'set local role app_staff',
+  ai: 'set local role app_ai',
 } as const;
 
 export type DbRole = keyof typeof ROLE_SQL;

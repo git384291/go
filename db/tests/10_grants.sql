@@ -6,7 +6,7 @@ select n.nspname || '.' || p.proname as function,
        pg_get_userbyid(p.proowner) as owner,
        coalesce(array_to_string(array(
          select r.rolname from pg_roles r
-         where r.rolname in ('public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'fideon_api')
+         where r.rolname in ('public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'fideon_api')
            and has_function_privilege(r.oid, p.oid, 'EXECUTE')
          order by r.rolname), ', '), '') as execute_roles,
        coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%' as search_path_fixed
@@ -24,14 +24,14 @@ select test.expect_eq($$
 select test.expect_eq($$
   select count(*)::text from information_schema.role_table_grants
   where table_schema in ('core', 'pii', 'security')
-    and grantee in ('PUBLIC', 'app_public', 'app_staff', 'app_server')$$, '0', 'G2 앱 역할 테이블 권한 0');
+    and grantee in ('PUBLIC', 'app_public', 'app_staff', 'app_server', 'app_ai')$$, '0', 'G2 앱 역할 테이블 권한 0');
 
 -- 3) 앱 역할의 스키마 USAGE: api만
 select test.expect_eq($$
   select string_agg(r || ':' || s, ',' order by r, s) from
-    unnest(array['app_public', 'app_staff', 'app_server']) r,
+    unnest(array['app_public', 'app_staff', 'app_server', 'app_ai']) r,
     unnest(array['core', 'pii', 'security', 'api', 'extensions']) s
-  where has_schema_privilege(r, s, 'USAGE')$$, 'app_public:api,app_staff:api', 'G3 앱 역할 USAGE는 api만');
+  where has_schema_privilege(r, s, 'USAGE')$$, 'app_ai:api,app_public:api,app_staff:api', 'G3 앱 역할 USAGE는 api만');
 
 -- 4) SECURITY DEFINER 함수는 모두 search_path 고정
 select test.expect_eq($$
@@ -44,7 +44,7 @@ select test.expect_eq($$
   select coalesce(string_agg(x, ' ; ' order by x), '') from (
     select r.rolname || ' -> ' || p.proname as x
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    cross join (select oid, rolname from pg_roles where rolname in ('app_public', 'app_staff', 'app_server')) r
+    cross join (select oid, rolname from pg_roles where rolname in ('app_public', 'app_staff', 'app_server', 'app_ai')) r
     where n.nspname in ('core', 'pii', 'security', 'api')
       and has_function_privilege(r.oid, p.oid, 'EXECUTE')
     except
@@ -56,6 +56,7 @@ select test.expect_eq($$
       'app_staff -> purge_customer',
       'app_staff -> policy_create_draft', 'app_staff -> policy_submit', 'app_staff -> policy_approve', 'app_staff -> policy_reject', 'app_staff -> policy_list',
       'app_staff -> ad_budget_approve', 'app_staff -> ad_budget_revoke', 'app_staff -> ad_spend_request', 'app_staff -> ad_budget_overview',
+      'app_staff -> ad_performance_record', 'app_staff -> ad_funnel', 'app_ai -> ai_budget_reserve',
       -- app_server는 두 역할의 멤버지만 NOINHERIT라 직접 실행 권한이 없어야 한다
       'none'])
   ) t$$, '', 'G5 EXECUTE 허용 목록 외 권한 0');
