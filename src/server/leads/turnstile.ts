@@ -13,6 +13,16 @@ export type TurnstileResult = 'ok' | 'rejected' | 'unavailable';
 export const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 export const TURNSTILE_TIMEOUT_MS = 5000;
 
+/**
+ * 확인 주소: 기본은 Cloudflare 고정값. 로컬 시험(NODE_ENV development/test, Vercel 아님)에서만 loopback http 주소로 바꿀 수 있다
+ * (실제 외부 호출 없이 연동 경로를 시험하려는 용도). 운영·미리보기 빌드는 이 값을 무시한다.
+ */
+export function turnstileVerifyUrl(env: Record<string, string | undefined> = process.env): string {
+  const o = env.TURNSTILE_VERIFY_URL_TEST;
+  if (!o || (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') || env.VERCEL === '1' || env.VERCEL_ENV) return TURNSTILE_VERIFY_URL;
+  return /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/[A-Za-z0-9/_-]*$/.test(o) ? o : TURNSTILE_VERIFY_URL;
+}
+
 export async function verifyTurnstile(token: string, ip: string): Promise<TurnstileResult> {
   if (!token || token.length > 2048) return 'rejected';
   const secret = process.env.TURNSTILE_SECRET_KEY;
@@ -21,7 +31,7 @@ export async function verifyTurnstile(token: string, ip: string): Promise<Turnst
 
   let res: Response;
   try {
-    res = await fetch(TURNSTILE_VERIFY_URL, {
+    res = await fetch(turnstileVerifyUrl(), {
       method: 'POST',
       body: new URLSearchParams({ secret, response: token, remoteip: ip }),
       signal: AbortSignal.timeout(TURNSTILE_TIMEOUT_MS),

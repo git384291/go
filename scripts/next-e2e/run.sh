@@ -32,13 +32,21 @@ as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PGP -k $SOCK -c listen_addresses=127
 PSQL=(psql -X -q -h 127.0.0.1 -p "$PGP" -U postgres -v ON_ERROR_STOP=1)
 "${PSQL[@]}" -d postgres -c "create database \"$DB\"" || exit 1
 for f in db/migrations/0*.sql db/migrations/zz_grants.sql; do "${PSQL[@]}" -d "$DB" -f "$f" >/dev/null || { echo "FAIL | 마이그레이션 $f"; exit 1; }; done
+"${PSQL[@]}" -d "$DB" -f db/seed/test_seed.sql >/dev/null || { echo "FAIL | 가상 시드"; exit 1; }
 export DATABASE_URL="postgresql://app_server@127.0.0.1:$PGP/$DB"
 export E2E_ADMIN_URL="postgresql://postgres@127.0.0.1:$PGP/$DB"
 export E2E_BASE="http://127.0.0.1:$WEB"
+# 가상 인증·봇 확인 서버(check.mjs가 띄움, 이 프로세스 로컬 포트). 키는 모두 이 실행 전용 임시 값
+FAKE=3138
+export NEXT_PUBLIC_SUPABASE_URL="http://localhost:$FAKE" NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=test-publishable-key ADMIN_AUTH_MODE=supabase ADMIN_AD_SOURCE=db ADMIN_LEADS_SOURCE=db
+export FIDEON_STAFF_SIGNING_KEY="1:$(printf '\x11%.0s' $(seq 1 32) | base64)" FIDEON_LEAD_SIGNING_KEY="1:$(printf '\x22%.0s' $(seq 1 32) | base64)"
+export PII_ENC_KEYS="{\"1\":\"$(head -c 32 /dev/urandom | base64)\"}" PII_ENC_CURRENT=1 PII_HMAC_KEY="$(head -c 32 /dev/urandom | base64)" PII_IP_HASH_KEY="$(head -c 32 /dev/urandom | base64)"
+export TURNSTILE_SECRET_KEY=test-turnstile-secret TURNSTILE_VERIFY_URL_TEST="http://127.0.0.1:$FAKE/turnstile" PUBLIC_HOSTNAME=fideon.test
+export E2E_FAKE_PORT=$FAKE
 export CONSULT_CHAT_ENABLED=true CONSULT_AI_MODEL=mock QUOTE_SUPPLIER_ID=supplier-a LEAD_INTAKE_MODE=local NEXT_TELEMETRY_DISABLED=1
 export CONSULT_SESSION_KEY="$(head -c 32 /dev/urandom | base64)"
-# 서버 환경: 관리자 인증·Turnstile·AI 키·광고 키는 일부러 비워 둔다(실제 외부 호출 경로 없음)
-env -u ADMIN_AUTH_MODE -u TURNSTILE_SECRET_KEY -u CONSULT_AI_API_KEY NODE_ENV=development ./node_modules/.bin/next dev -p "$WEB" -H 127.0.0.1 > "$OUT/next.log" 2>&1 &
+# 서버 환경: 관리자 인증·봇 확인은 가상 로컬 서버로 연결, AI 키·광고 키는 비워 둔다(실제 외부 호출 경로 없음)
+env -u CONSULT_AI_API_KEY NODE_ENV=development ./node_modules/.bin/next dev -p "$WEB" -H 127.0.0.1 > "$OUT/next.log" 2>&1 &
 NEXT_PID=$!
 for i in $(seq 1 90); do
   curl -s -o /dev/null "http://127.0.0.1:$WEB/api/consult/chat" && break
