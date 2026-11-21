@@ -29,9 +29,11 @@ function buildFixtureApp(root, items, version) {
 }
 
 export async function runBrowserFlow(c) {
-  const { sql, n, check, adm, pj, post, BASE, owner, reviewer, editor, counselor, pubUrl } = c;
+  const { sql, n, check, adm: admBase, pj, post, BASE, owner, reviewer, editor, counselor, pubUrl } = c;
   const { chromium } = await import('playwright');
   const VERSION = 'next-e2e-v1';
+  const FXB = `http://127.0.0.1:${FX_PORT}`;
+  const adm = (p, cookie, init = {}) => fetch(FXB + p, { ...init, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...(init.headers ?? {}) } }); // 관리자 API도 시험 앱(고지 확정 fixture)으로 보낸다
   const items = await sql.unsafe(`select notice_key, body from core.notice_texts where version = '${VERSION}' order by notice_key`);
   const root = process.cwd();
   const dir = buildFixtureApp(root, items, VERSION);
@@ -72,7 +74,7 @@ export async function runBrowserFlow(c) {
     const ask = async (pg, msg) => { const k = await pg.locator('[role=log] p').count(); await pg.fill('textarea[aria-label="상담 내용"]', msg); await pg.click('button:has-text("보내기")'); await pg.waitForFunction((x) => document.querySelectorAll('[role=log] p').length >= x + 3, k, { timeout: 25000 }); return (await pg.locator('[role=log] p').last().textContent()) ?? ''; };
     const assist = async (pg) => {
       await pg.fill('input[aria-label="설치주소"]', '서울시 가상구 브라우저로 9 301호'); await pg.click('button:has-text("답하기")');
-      await pg.click('[role=group] button:has-text("KT")');
+      await pg.click('[role=group] button:text-is("KT")');
       await pg.fill('input[aria-label="이메일"]', 'browser.e2e@example.com'); await pg.click('button:has-text("답하기")');
       for (const l of ['SK브로드밴드', '빠른 날짜', '기존 회선 있음', '확인했습니다', '확인했습니다']) await pg.click(`[role=group] button:has-text("${l}")`);
     };
@@ -142,7 +144,7 @@ export async function runBrowserFlow(c) {
     await adminCtx.addCookies([{ name: cn, value: cv.join('='), url: FX }]);
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
-    await ap.goto(`${FX}/admin/leads`, { waitUntil: 'networkidle' });
+    await ap.goto(`${FX}/admin`, { waitUntil: 'networkidle' });
     await ap.waitForTimeout(1500);
     const listText = await ap.locator('body').innerText();
     const link = ap.locator(`a.lead-packet[href="/admin/leads/${leadRow?.id}/packet"]`);
@@ -170,12 +172,14 @@ export async function runBrowserFlow(c) {
     check('BF10 총판 신청서 17개 항목이 지정 순서·정확한 값으로 출력(고객명~약정 3년 안내)', exact, exact ? '' : lines.map((l, i) => (l === `■ ${EXPECT[i]?.[0]}: ${EXPECT[i]?.[1]}` ? '' : `#${i + 1} ${l}`)).filter(Boolean).slice(0, 3).join(' / '));
     check('BF11 월요금·설치비·상품권이 DB 승인 정책 원본(11,111·2,222·3,333)과 같고, 고객이 AI 상담에서 들은 금액과도 같다', pol && pol.monthlyFee.value.amountKrw === 11111 && pol.installFee.value.amountKrw === 2222 && giftB.amountKrw === 3333 && shown.includes('월요금: 11,111원(부가세 포함)') && shown.includes('설치비(기사출동비): 2,222원(부가세 포함)') && shown.includes('상품권: 3,333원 상품권'));
     const sentBtn = ap.locator('button:has-text("총판 전달 완료 기록")');
-    check('BF12 고지가 확정·확인된 접수는 "총판 전달 준비 완료"로 표시되고 전달 완료 기록 버튼이 열린다(미확정 때는 막혀 있던 버튼)', /총판 전달 준비 완료/.test(shown) && /준비 완료/.test(st) && !(await sentBtn.isDisabled()), st.trim().slice(0, 40));
+    check('BF12 고지가 확정·확인된 접수는 "총판 전달 준비 완료"로 표시되고 전달 완료 기록 버튼이 열린다(미확정 때는 막혀 있던 버튼)', /총판 전달 준비 완료/.test(shown) && /준비 완료/.test(st) && (await sentBtn.isDisabled()) && (await (async () => { await ap.fill('input[aria-label="전달 메모"]', 'A총판'); return !(await sentBtn.isDisabled()); })()), st.trim().slice(0, 40));
     await ap.click('button:has-text("복사")');
     await ap.waitForFunction(() => document.querySelector('[data-field=msg]')?.textContent?.includes('복사 기록'), null, { timeout: 15000 }).catch(() => {});
     const clip = await ap.evaluate(() => navigator.clipboard.readText()).catch(() => '');
     const hist1 = (await ap.locator('[data-field=history]').textContent()) ?? '';
-    const sent = await adm(`/api/admin/leads/${leadRow?.id}/handoff`, owner, { method: 'POST', body: JSON.stringify({ event: 'sent', note: 'A총판' }) });
+    await sentBtn.click();
+    await ap.waitForFunction(() => /전달 완료/.test(document.querySelector('[data-field=history]')?.textContent ?? ''), null, { timeout: 15000 }).catch(() => {});
+    const sent = { status: (await ap.locator('[data-field=history]').textContent()).includes('sent') || /전달 완료/.test((await ap.locator('[data-field=history]').textContent()) ?? '') ? 200 : 0 };
     const sentBad = await adm(`/api/admin/leads/${leadRow?.id}/handoff`, owner, { method: 'POST', body: JSON.stringify({ event: 'sent', note: 'A총판 010-9999-5678' }) });
     check('BF13 복사 내용이 화면 문서와 같고(복사 기록), 전달 완료 기록은 준비 완료 건에서만 200(총판 이름만 허용·전화번호 메모 400)', (clip === '' || clip === shown) && /복사/.test(hist1) && sent.status === 200 && sentBad.status === 400, `sent=${sent.status} bad=${sentBad.status}`);
     console.log('--- 총판 신청서 출력(브라우저 E2E, 가상 시험 데이터) ---\n' + shown + '\n---');
