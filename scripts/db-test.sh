@@ -66,6 +66,7 @@ run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(00
 run db/tests/98_notice_intake_gate.sql >/dev/null   # 접수 직전 고지 승인 게이트(0016)
 run db/tests/99_dealer_application.sql >/dev/null   # 총판 전달용 신청서(0017)
 run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
+run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험 재현(PM 11/22 P1, 현재 동작 기록)
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 
 echo "== TypeScript ↔ DB signature parity"
