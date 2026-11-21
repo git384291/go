@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { REQUIRED_NOTICES } from '../../content/requiredNotices';
 import { buildCreateLeadArgs, LeadRejected, type IntakeContext } from './intake';
 
 /**
@@ -8,19 +10,35 @@ export type PublicSql = (strings: TemplateStringsArray, ...values: unknown[]) =>
 export type PublicRunner = (fn: (tx: PublicSql) => PromiseLike<unknown>) => Promise<unknown>;
 export type SubmitResult = { ok: true } | { ok: false; code: string; status: number };
 
+/** DB 게이트(api.notice_intake_gate)가 접수를 막을 때 돌려주는 오류 메시지(문구·개인정보 없음). 모두 503으로 닫는다 */
+const GATE_CODES = new Set(['NOTICE_INVALID', 'NOTICE_VERSION_MISMATCH', 'NOTICE_NOT_FOUND', 'NOTICE_KEYS_MISMATCH', 'NOTICE_HASH_MISMATCH', 'NOTICE_NOT_APPROVED', 'NOTICE_CHANGED', 'NOTICE_SELF_APPROVED']);
+
+/** 서버 상수(고객에게 보여 주는 문구)의 항목별 sha256. DB가 저장 시 계산하는 해시와 같은 방식(UTF-8)이다 */
+export function noticeHashes(cfg: { readonly items: readonly { readonly key: string; readonly body: string }[] }): Record<string, string> {
+  return Object.fromEntries(cfg.items.map((n) => [n.key, createHash('sha256').update(n.body.trim(), 'utf8').digest('hex')]));
+}
+
 export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicRunner): Promise<SubmitResult> {
   const rejected = (code: string, status = 400): SubmitResult => ({ ok: false, code, status });
   try {
     const a = buildCreateLeadArgs(lead, ctx);
-    await run((tx) => tx`
+    // 접수 직전 서버가 DB에 확인한다: 접수 문서 버전·DB 고지 문구 해시·검수 승인 상태가 서버 상수와 모두 맞아야 한다(하나라도 다르면 저장하지 않음)
+    const notices = ctx.notices ?? REQUIRED_NOTICES;
+    const hashes = JSON.stringify(noticeHashes(notices));
+    await run(async (tx) => {
+      await tx`select api.notice_intake_gate(${notices.version}, ${hashes}::text::jsonb)`;
+      return tx`
       select api.create_lead(${a.token}, ${a.nameEnc}, ${a.nameMasked}, ${a.phoneEnc}, ${a.phoneHmac}, ${a.phoneLast4},
                              ${a.interest}, ${a.contactTime}, ${a.utmSource}, ${a.utmMedium}, ${a.utmCampaign},
-                             ${a.idempotencyKey}, ${a.privacyVersion}, ${a.consentCollection}, ${a.marketingOptIn}, ${a.ipHash})`);
+                             ${a.idempotencyKey}, ${a.privacyVersion}, ${a.consentCollection}, ${a.marketingOptIn}, ${a.ipHash})`;
+    });
     return { ok: true };
   } catch (e) {
     if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' ? 503 : 400);
     const code = (e as { code?: string }).code;
     if (code === '54000') return rejected('RATE_LIMITED', 429);
+    const msg = String((e as { message?: unknown }).message ?? '').trim();
+    if (code === '55000' && GATE_CODES.has(msg)) return rejected(msg, 503);
     if (code === '55000') return rejected('SERVICE_NOT_READY', 503);
     if (code === '22023') return rejected('INVALID_INPUT');
     if (code === 'FP001') return rejected('PRODUCT_NOT_ACTIVE', 403); // DB 상품 상태가 예약(코드와 불일치 포함)

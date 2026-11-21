@@ -32,7 +32,7 @@ as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PGP -k $SOCK -c listen_addresses=127
 PSQL=(psql -X -q -h 127.0.0.1 -p "$PGP" -U postgres -v ON_ERROR_STOP=1)
 "${PSQL[@]}" -d postgres -c "create database \"$DB\"" || exit 1
 for f in db/migrations/0*.sql db/migrations/zz_grants.sql; do "${PSQL[@]}" -d "$DB" -f "$f" >/dev/null || { echo "FAIL | 마이그레이션 $f"; exit 1; }; done
-"${PSQL[@]}" -d "$DB" -f db/seed/test_seed.sql >/dev/null && "${PSQL[@]}" -d "$DB" -f db/seed/test_notices.sql >/dev/null || { echo "FAIL | 가상 시드"; exit 1; }
+"${PSQL[@]}" -d "$DB" -f db/seed/test_seed.sql >/dev/null && "${PSQL[@]}" -d "$DB" -f db/seed/test_notices.sql >/dev/null && "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null || { echo "FAIL | 가상 시드"; exit 1; }
 export DATABASE_URL="postgresql://app_server@127.0.0.1:$PGP/$DB"
 export E2E_ADMIN_URL="postgresql://postgres@127.0.0.1:$PGP/$DB"
 export E2E_BASE="http://127.0.0.1:$WEB"

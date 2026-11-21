@@ -5,7 +5,7 @@ import { submitLead } from '../../src/server/leads/submitLead';
 import { createPiiCrypto, piiKeysFromEnv } from '../../src/server/security/piiCrypto';
 import { signingKeyFromEnv } from '../../src/server/security/token';
 
-const NOTICES = { version: 'privacy-test-v1', confirmed: true, items: ['collection_purpose', 'not_a_contract', 'policy_confirm'].map((key) => ({ key, title: '시험 고지', body: '시험용 문구' })) };
+const NOTICES = { version: 'privacy-test-v1', confirmed: true, items: Object.entries({ collection_purpose: '수집 목적: 상담 연락(가상 고지)', not_a_contract: '상담 신청은 가입 확정이 아닙니다(가상 고지)', policy_confirm: '요금·사은품은 상담 시 확인한 정책 기준입니다(가상 고지)' }).map(([key, body]) => ({ key, title: '시험 고지', body })) }; // 본문은 db/seed/test_notices.sql과 같아야 한다(접수 게이트가 문구 해시를 대조)
 const sql = postgres(process.env.DATABASE_URL as string, { prepare: false, max: 1, onnotice: () => {} });
 try {
   const r = await submitLead(

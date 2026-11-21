@@ -44,7 +44,7 @@ const editor = who(EDITOR, EDITOR_S, 'policy_editor');
 // 화면이 만드는 고지 설정과 같은 모양(시험 DB의 가상 문구 키 3개). 실제 문구 아님
 const TEST_NOTICES = {
   version: 'privacy-test-v1', confirmed: true,
-  items: ['collection_purpose', 'not_a_contract', 'policy_confirm'].map((key) => ({ key, title: '시험 고지', body: '시험용 문구' })),
+  items: Object.entries({ collection_purpose: '수집 목적: 상담 연락(가상 고지)', not_a_contract: '상담 신청은 가입 확정이 아닙니다(가상 고지)', policy_confirm: '요금·사은품은 상담 시 확인한 정책 기준입니다(가상 고지)' }).map(([key, body]) => ({ key, title: '시험 고지', body })), // 본문은 db/seed/test_notices.sql과 같아야 한다(접수 게이트가 문구 해시를 대조)
 };
 const ctx = (over: Partial<IntakeContext> = {}): IntakeContext => ({
   crypto: createPiiCrypto({ encKeys: { '1': Buffer.alloc(32, 1) }, currentVersion: '1', hmacKey: Buffer.alloc(32, 3), ipHashKey: Buffer.alloc(32, 4) }),
@@ -97,6 +97,14 @@ test('E3 같은 요청 키 재전송: 리드 중복 생성 없음', async () => 
   const l0 = await count(LEADS);
   const r = await submitLead(body(), ctx({ clientIp: '203.0.113.202' }), run);
   assert.equal(r.ok, true);
+  assert.equal(await count(LEADS), l0);
+});
+
+test('E4b 서버 상수 문구가 DB 승인 문구와 한 글자라도 다르면 접수 게이트가 막음(NOTICE_HASH_MISMATCH 503), DB에 쓰지 않음', async () => {
+  const l0 = await count(LEADS);
+  const tampered = { ...TEST_NOTICES, items: TEST_NOTICES.items.map((n, i) => (i === 0 ? { ...n, body: n.body + '!' } : n)) };
+  const r = await submitLead(body({ idempotencyKey: 'e2e-intake-0000000000004' }), ctx({ notices: tampered }), run);
+  assert.deepEqual(r, { ok: false, code: 'NOTICE_HASH_MISMATCH', status: 503 });
   assert.equal(await count(LEADS), l0);
 });
 

@@ -85,7 +85,8 @@ grant execute on function
 grant execute on function
   api.create_lead(text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text),
   api.policy_published(),
-  api.consult_event_record(text, text)   -- 0012: 상담 시작 건수(개인정보 없음)
+  api.consult_event_record(text, text),   -- 0012: 상담 시작 건수(개인정보 없음)
+  api.notice_intake_gate(text, jsonb)     -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
   to app_public;
 
 grant execute on function

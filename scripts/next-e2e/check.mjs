@@ -281,14 +281,26 @@ try {
   const rev = (c, body) => adm(rurl, c, { method: 'POST', body: JSON.stringify(body) });
   const RC = { source_matched: true, version_matched: true, keys_complete: true, conditions_checked: true, screen_checked: true };
   const RB = { version: 'next-e2e-v1', decision: 'approved', checks: RC, reason: 'Next E2E 검수' };
-  const rc = (w = '') => n(`select count(*)::int as n from core.notice_reviews ${w}`);
+  const rc = (w = '') => n(`select count(*)::int as n from core.notice_reviews where version = 'next-e2e-v1' ${w ? 'and ' + w.replace(/^where /, '') : ''}`);
   const rd = []; for (const [nm, c] of [['편집자', editorC], ['상담원', counselorC], ['무인증', null]]) { const r = await rev(c, RB); if (![401, 403].includes(r.status)) rd.push(`${nm}:${r.status}`); }
   check('RV1 검수 기록은 대표·검토자만: 편집자·상담원·무인증 거부, DB 0건', rd.length === 0 && (await rc()) === 0, rd.join(' '));
   const inc = await rev(reviewerC, { ...RB, checks: { ...RC, conditions_checked: false } }); const incj = await pj(inc);
   check('RV2 적용 조건 확인이 빠지면 승인 불가(422 CHECKS_INCOMPLETE)', inc.status === 422 && incj.code === 'CHECKS_INCOMPLETE' && (await rc()) === 0, `status=${inc.status} ${incj.code}`);
-  const flow0 = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
-  const fl0 = await n(`select count(*)::int as n from core.leads where idempotency_key = 'next-e2e-flow-0000000001'`);
-  check('RV3 검수 승인 전에는 시험 접수 흐름이 시작되지 않음(종료 3), 접수 0건', flow0.status === 3 && fl0 === 0, (flow0.stdout + flow0.stderr).slice(0, 120).replace(/\n/g, ' '));
+  // 접수 문서 버전은 DB 설정(privacy_policy_version)과 같아야 한다 — 고지 버전을 바꾸는 배포에서는 이 설정도 함께 바뀌어야 한다(시험 뒤 원래 값으로 복구)
+  const pv = async (v) => sql.unsafe(`update core.settings set value = '${JSON.stringify(v)}'::jsonb where key = 'privacy_policy_version'`);
+  const pv0 = (await sql.unsafe(`select value #>> '{}' as v from core.settings where key = 'privacy_policy_version'`))[0]?.v;
+  const runFlow = async (env = {}, { version = true } = {}) => {
+    try {
+      if (version) await pv('next-e2e-v1');
+      const r = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: { ...process.env, ...env }, encoding: 'utf8', timeout: 60000 });
+      let j = null; try { j = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { /* 아래에서 실패 처리 */ }
+      return { status: r.status, j, raw: (r.stdout + r.stderr).slice(0, 140).replace(/\n/g, ' ') };
+    } finally { await pv(pv0); }
+  };
+  const lc = () => n(`select count(*)::int as n from core.leads`);
+  const lf0 = await lc();
+  const f0 = await runFlow();
+  check('RV3 검수 승인 전에는 서버 접수 게이트가 막음(NOTICE_NOT_APPROVED 503), 접수 0건', f0.j?.code === 'NOTICE_NOT_APPROVED' && f0.j?.status === 503 && (await lc()) === lf0, f0.raw);
   const self = await rev(ownerC, RB);
   check('RV4 문구를 입력한 대표는 같은 버전을 승인할 수 없음(403), 승인 기록 0건', self.status === 403 && (await rc(`where decision = 'approved'`)) === 0, `status=${self.status}`);
   const rej = await rev(ownerC, { ...RB, decision: 'rejected', checks: { ...RC, screen_checked: false }, reason: '화면 확인 전 반려' });
@@ -298,26 +310,37 @@ try {
   check('RV6 검토자 승인 201, 승인 감사 기록 1건 증가', okr.status === 201 && (await rc(`where decision = 'approved'`)) === 1 && (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_approved'`)) === ra0 + 1, `status=${okr.status}`);
   const rl = await adm(rurl, reviewerC); const rlj = await pj(rl);
   check('RV7 검수 이력 조회: 승인(현재 문구 기준) 표시, 정책 담당·무인증은 조회 불가', rl.status === 200 && rlj.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === true) && [401, 403].includes((await adm(rurl, editorC)).status) && (await adm(rurl)).status === 401);
-  // 승인 이후 전체 흐름: DB 승인 문구로 구성한 화면 설정 → 동의·고지 키 → 접수(암호화) → 노출 기록 해시 → 관리자 목록(마스킹)
-  const lf0 = await n(`select count(*)::int as n from core.leads`);
-  // 접수 문서 버전은 DB 설정(privacy_policy_version)과 같아야 한다 — 고지 버전을 바꾸는 배포에서는 이 설정도 함께 바뀌어야 한다(시험 뒤 원래 값으로 복구)
-  const pv = async (v) => sql.unsafe(`update core.settings set value = '${JSON.stringify(v)}'::jsonb where key = 'privacy_policy_version'`);
-  const pv0 = (await sql.unsafe(`select value #>> '{}' as v from core.settings where key = 'privacy_policy_version'`))[0]?.v;
-  let flow;
-  try { await pv('next-e2e-v1'); flow = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 }); } finally { await pv(pv0); }
-  check('FL1 승인된 고지 설정으로 접수 코드 실행: 성공, DB에 1건 저장', flow.status === 0 && (await n(`select count(*)::int as n from core.leads`)) === lf0 + 1, (flow.stdout + flow.stderr).slice(0, 120).replace(/\n/g, ' '));
+  // 승인 이후 전체 흐름: DB 승인 문구로 구성한 화면 설정 → 동의·고지 키 → 서버 게이트(버전·해시·승인) → 접수(암호화) → 노출 기록 해시 → 관리자 목록(마스킹)
+  const flow = await runFlow();
+  check('FL1 승인된 고지 설정으로 접수: 서버 게이트 통과, DB에 1건 저장', flow.status === 0 && (await lc()) === lf0 + 1, flow.raw);
   check('FL2 고객별 고지 노출 기록의 해시가 승인된 DB 문구 해시와 같음, 동의 기록 있음', (await n(`select count(*)::int as n from pii.notice_exposures e join core.notice_texts t on t.version = e.doc_version and t.notice_key = e.notice_key and t.body_sha256 = e.body_sha256 where e.doc_version = 'next-e2e-v1'`)) === 1 && (await n(`select count(*)::int as n from pii.consents where doc_version = 'next-e2e-v1' and granted`)) === 1);
   check('FL3 개인정보 암호화 저장(평문 이름·전화 없음)', (await n(`select count(*)::int as n from pii.customers c where to_jsonb(c)::text like '%8888%' or to_jsonb(c)::text like '%김플로우%'`)) === 0 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%8888%' or to_jsonb(l)::text like '%김플로우%'`)) === 0);
   const fll = await adm('/api/admin/leads?limit=1', ownerC); const flt = await fll.text();
   check('FL4 관리자 목록(Next→DB): 방금 접수가 마스킹되어 보임, 원문 전화·이름 없음', fll.status === 200 && flt.includes('010-****-4321') && !flt.includes('8888') && !flt.includes('김플로우'), `status=${fll.status}`);
   const cm = await adm('/api/admin/leads?limit=1', counselorC); const cmt = await cm.text();
   check('FL4b 상담원은 본인 배정만 보므로 미배정 신규 접수·원문이 없고, 검토자는 목록 거부(403), 무인증 401', cm.status === 200 && !cmt.includes('4321') && !cmt.includes('8888') && !cmt.includes('김플로우') && (await adm('/api/admin/leads?limit=1', reviewerC)).status === 403 && (await adm('/api/admin/leads?limit=1')).status === 401);
+  // 서버 게이트 차단 시나리오: 모두 접수 0건 증가, 사유 코드 503
+  const blocked = async (name, r, code) => check(name, r.j?.code === code && r.j?.status === 503 && (await lc()) === lf0 + okFlows, `${r.raw}`);
+  let okFlows = 1;
+  await blocked('G1 서버 상수 문구가 DB 승인 문구와 한 글자 다르면 차단(NOTICE_HASH_MISMATCH)', await runFlow({ FLOW_TAMPER: '1', FLOW_IDEM: 'next-e2e-flow-0000000002' }), 'NOTICE_HASH_MISMATCH');
+  await blocked('G2 접수 문서 버전 설정(privacy_policy_version)이 고지 버전과 다르면 차단(NOTICE_VERSION_MISMATCH)', await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000002' }, { version: false }), 'NOTICE_VERSION_MISMATCH');
+  const cancel = await rev(reviewerC, { ...RB, decision: 'rejected', checks: { ...RC, conditions_checked: false }, reason: '승인 취소 시험' });
+  await blocked('G3 승인 취소(이후 반려 기록) 즉시 차단(NOTICE_NOT_APPROVED)', await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000002' }), 'NOTICE_NOT_APPROVED');
+  const reap = await rev(reviewerC, RB);
+  const g3 = await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000003', FLOW_PHONE: '010-8888-4322' }); okFlows += g3.status === 0 ? 1 : 0;
+  check('G3b 취소 기록 201 → 재승인 201 → 다시 접수 가능(+1건)', cancel.status === 201 && reap.status === 201 && g3.status === 0 && (await lc()) === lf0 + okFlows, g3.raw);
   // 문구가 더 추가되면 이전 승인은 최신이 아님(다시 검수 필요)
   await nad(ownerC, { version: 'next-e2e-v1', key: 'not_a_contract', body: '[검수용 시험 문구 2 — 실제 고지 아님]', reason: 'Next E2E 항목 추가' });
   const rl2 = await pj(await adm(rurl, reviewerC));
   check('RV8 승인 뒤 문구가 추가되면 이전 승인은 "최신 아님"으로 표시', rl2.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === false) && rl2.items?.every((i) => !(i.decision === 'approved' && i.is_current === true)));
+  await blocked('G4 승인 뒤 문구 변경(항목 추가) 즉시 차단(NOTICE_CHANGED)', await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000004' }), 'NOTICE_CHANGED');
+  await blocked('G4b 서버 상수가 옛 항목 그대로면 키 불일치로 차단(NOTICE_KEYS_MISMATCH)', await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000004', FLOW_ONLY_KEYS: 'collection_purpose' }), 'NOTICE_KEYS_MISMATCH');
+  const reap2 = await rev(reviewerC, RB);
+  const g5 = await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000005', FLOW_PHONE: '010-8888-4323' }); okFlows += g5.status === 0 ? 1 : 0;
+  check('G5 변경된 문구를 다시 검수·승인하면 새 문구로 접수 가능(+1건), 고지 노출 기록은 새 문구 2건 해시(누적 4건)', reap2.status === 201 && g5.status === 0 && (await lc()) === lf0 + okFlows && (await n(`select count(*)::int as n from pii.notice_exposures e join core.notice_texts t on t.version = e.doc_version and t.notice_key = e.notice_key and t.body_sha256 = e.body_sha256 where e.doc_version = 'next-e2e-v1'`)) === 1 + 1 + 2, g5.raw);
+  check('G6 승인 취소·재승인·변경 모두 감사 기록(반려·승인) 남음, 작성자(대표)의 승인 시도는 계속 거부', (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_rejected' and detail ->> 'version' = 'next-e2e-v1'`)) >= 2 && (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.review_approved' and detail ->> 'version' = 'next-e2e-v1'`)) === 3 && (await rev(ownerC, RB)).status === 403);
   const blk2 = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], idempotencyKey: 'next-e2e-lead-000000003', turnstileToken: 'ok' });
-  check('RV9 검수 승인 이후에도 실제 서버는 코드 상수 미확정이라 접수 차단 유지(503)', blk2.status === 503 && blk2.j?.code === 'NOTICE_NOT_CONFIRMED' && (await n(`select count(*)::int as n from core.leads`)) === lf0 + 1, `status=${blk2.status}`);
+  check('RV9 검수 승인 이후에도 실제 서버는 코드 상수 미확정이라 접수 차단 유지(503), 접수 건수 변화 없음', blk2.status === 503 && blk2.j?.code === 'NOTICE_NOT_CONFIRMED' && (await lc()) === lf0 + okFlows, `status=${blk2.status}`);
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);

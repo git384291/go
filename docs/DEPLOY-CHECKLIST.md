@@ -60,3 +60,11 @@
 - 복구: `db/rollback/0015_down.sql`은 함수 2개만 제거하고 검수 기록·감사는 보존(M15 복구 시험).
 - 확정 이후 전체 흐름 시험(E2E FL1–FL4): DB의 승인된 문구로 화면 설정을 구성 → 동의·고지 키 → 접수(암호화) → 고객별 노출 기록 해시가 승인 문구 해시와 같음 → Next 관리자 목록에 마스킹되어 조회. 실제 상수가 확정되면 같은 시험을 실제 문구로 다시 돌린다.
 - **버전 3곳 일치**: 접수 직전 DB가 `core.settings.privacy_policy_version`과 접수 문서 버전의 일치를 다시 검사한다. 고지 버전을 바꾸는 배포는 ① DB 고지 문구(`/admin/notices`) ② `requiredNotices.ts` 상수 ③ DB `privacy_policy_version` 설정(+환경변수 `PRIVACY_POLICY_VERSION`)을 함께 같은 값으로 맞춰야 한다. 하나라도 다르면 접수는 거부된다(E2E FL1은 설정을 시험 버전으로 바꿨다가 복구해 이 경로를 확인).
+
+## K. 접수 직전 서버 고지 게이트 (기준 7fb9299 이후)
+- 접수 API(`submitLead`)는 `api.create_lead` 직전에 같은 트랜잭션에서 `api.notice_intake_gate(버전, 서버 상수의 항목별 문구 sha256)`을 호출한다. 하나라도 어긋나면 **저장하지 않고 503 + 사유 코드**로 닫는다(문구·개인정보는 응답·로그에 없음).
+  `NOTICE_VERSION_MISMATCH`(접수 문서 버전 ≠ `privacy_policy_version` 설정) · `NOTICE_NOT_FOUND`(DB 문구 없음) · `NOTICE_KEYS_MISMATCH`(DB 항목 키 집합 ≠ 서버 상수) · `NOTICE_HASH_MISMATCH`(DB 문구 해시 ≠ 서버 상수 해시) · `NOTICE_NOT_APPROVED`(최신 검수 기록이 승인이 아님 — 기록 없음 또는 이후 반려 = 승인 취소) · `NOTICE_CHANGED`(승인 뒤 문구가 추가됨) · `NOTICE_SELF_APPROVED`(승인자가 문구 작성자 — 직접 삽입 우회 방어) · `NOTICE_INVALID`.
+- 순서: 서버 상수가 미확정이면 DB를 부르기 전에 `NOTICE_NOT_CONFIRMED`로 먼저 막힌다(현재 상태). 상수 확정 후에도 DB 게이트가 한 번 더 막는다. 변경·승인 취소·버전 불일치는 **다음 접수부터 즉시** 반영된다(요청마다 DB 조회, 캐시 없음).
+- 작성자·승인자 분리: 검수 승인 함수(`notice_review_add`)가 작성자 승인을 거부하고, 게이트가 승인 기록 자체를 다시 대조한다.
+- 통합·E2E용 가상 승인은 `db/seed/test_notice_review.sql`(테스트 DB 전용). 시험용 고지 본문은 `db/seed/test_notices.sql`과 글자까지 같아야 한다.
+- 롤백: `db/rollback/0016_down.sql`은 게이트 함수만 제거한다. 접수 코드가 이 함수를 부르므로, 롤백 시 접수 코드도 이전 커밋으로 함께 되돌린다(함수만 빼면 접수가 SERVICE_NOT_READY로 막힘).

@@ -63,6 +63,7 @@ run db/tests/90_consult_ai_confirm.sql >/dev/null   # 상담 집계·AI 정산(0
 run db/tests/95_ad_alerts_ai_limit.sql >/dev/null   # 광고 중지 경고·AI 한도(0013)
 run db/tests/96_policy_publish_notice_texts.sql >/dev/null   # 정책 게시 ON/OFF·고지 문구 관리(0014)
 run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(0015)
+run db/tests/98_notice_intake_gate.sql >/dev/null   # 접수 직전 고지 승인 게이트(0016)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -582,8 +583,17 @@ D -f db/migrations/0015_notice_reviews.sql >/dev/null
 back15=$(D -At -c "select (to_regprocedure('api.notice_review_add(uuid,uuid,text,text,jsonb,text,text)') is not null and to_regprocedure('api.notice_review_list(uuid,uuid,text)') is not null)")
 [ "$gone15" = t ] && [ "$keep15" = 1 ] && [ "$back15" = t ] || { echo "FAIL | M15 0015 롤백 gone=$gone15 기록보존=$keep15 재적용=$back15" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M15 고지 검수 0015 롤백: 함수 2개 제거, 이미 남긴 검수 기록(추가 전용)은 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0016 접수 직전 고지 게이트: 적용 → 롤백(함수만 제거) → 재적용
+D -f db/migrations/0016_notice_intake_gate.sql >/dev/null
+D -f db/rollback/0016_down.sql >/dev/null
+gone16=$(D -At -c "select to_regprocedure('api.notice_intake_gate(text,jsonb)') is null")
+D -f db/migrations/0016_notice_intake_gate.sql >/dev/null
+back16=$(D -At -c "select to_regprocedure('api.notice_intake_gate(text,jsonb)') is not null")
+[ "$gone16" = t ] && [ "$back16" = t ] || { echo "FAIL | M16 0016 롤백 gone=$gone16 재적용=$back16" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M16 접수 직전 고지 게이트 0016 롤백: 함수 제거, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
+"${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"
 # 앱과 같은 TypeScript 배선을 실제 가상 DB에 실행한다. postgres 드라이버가 없으면 통과로 처리하지 않고 실패한다.
 if ! node -e "require.resolve('postgres')" >/dev/null 2>&1; then
