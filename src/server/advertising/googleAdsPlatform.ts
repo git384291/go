@@ -65,6 +65,10 @@ export function googleAdsConfigFromEnv(env: Readonly<Record<string, string | und
 }
 
 const enc = new TextEncoder();
+/** 예산·캠페인 생성 본문(어댑터와 테스트 계정 진단 스크립트가 같은 값을 쓰게 공유). 광고 그룹·소재 없음 */
+export const budgetCreatePayload = (name: string, krw: number) => ({ name, amountMicros: String(krw * MICROS), deliveryMethod: 'STANDARD', explicitlyShared: false });
+export const campaignCreatePayload = (name: string, status: 'PAUSED' | 'ENABLED', budget: string) =>
+  ({ name, status, campaignBudget: budget, advertisingChannelType: 'SEARCH', manualCpc: {}, containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING' });
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
 /** 요청 거부(집행 안 됨이 확실)와 집행 여부 불명을 나눈다 */
@@ -128,7 +132,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       // 1) 일 예산(승인 금액 이하). 아직 캠페인이 없으므로 여기서의 거부·불명은 집행 영향 없음(예산만 있으면 지출 없음)
       let budgetRes: string | null;
       try {
-        budgetRes = resourceOf(await call('campaignBudgets:mutate', { operations: [{ create: { name, amountMicros: String(krw * MICROS), deliveryMethod: 'STANDARD', explicitlyShared: false } }], validateOnly }, token, req.deadlineAt, false));
+        budgetRes = resourceOf(await call('campaignBudgets:mutate', { operations: [{ create: budgetCreatePayload(name, krw) }], validateOnly }, token, req.deadlineAt, false));
       } catch (e) {
         if (e instanceof PlatformError) throw new PlatformError('failed', e.code === 'TIMEOUT' || e.code === 'BAD_RESPONSE' ? 'BUDGET_CREATE_FAILED' : e.code);
         throw e;
@@ -136,7 +140,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       if (validateOnly) throw new PlatformError('failed', 'VALIDATE_ONLY');
       if (!budgetRes) throw new PlatformError('failed', 'BAD_RESPONSE');
       // 2) 캠페인(광고 그룹·소재 없음). 여기서 불명이면 캠페인이 생겼는지 모른다 → unknown(자동 재시도 금지)
-      const campRes = resourceOf(await call('campaigns:mutate', { operations: [{ create: { name, status, campaignBudget: budgetRes, advertisingChannelType: 'SEARCH', manualCpc: {}, containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING' } }] }, token, req.deadlineAt, true));
+      const campRes = resourceOf(await call('campaigns:mutate', { operations: [{ create: campaignCreatePayload(name, status, budgetRes) }] }, token, req.deadlineAt, true));
       const m = campRes?.match(/\/campaigns\/(\d{1,20})$/);
       if (!m) throw new PlatformError('unknown', 'BAD_RESPONSE');
       const externalId = m[1]!;
