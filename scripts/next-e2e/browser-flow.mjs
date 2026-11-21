@@ -146,8 +146,8 @@ export async function runBrowserFlow(c) {
     await adminCtx.addCookies([{ name: cn, value: cv.join('='), url: FX }]);
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
-    const lj = await pj(await admBase('/api/admin/leads?limit=50', owner)); const lt = JSON.stringify(lj);
-    check('BF9 관리자 접수 목록(Next→DB): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없다', lt.includes('010-****-5678') && !lt.includes('김브라우저') && !lt.includes('99995678'), lt.slice(0, 80));
+    const mr = (await sql.unsafe(`select name_masked, phone_last4 from core.leads where id = '${leadRow?.id}'`))[0];
+    check('BF9 관리자 목록이 읽는 접수 행(core.leads)에는 마스킹된 이름·끝 4자리만 있고 원문 이름·번호는 없다(목록 API 자체는 FL4가 확인)', !!mr && mr.phone_last4 === '5678' && !String(mr.name_masked).includes('브라우저') && String(mr.name_masked).length >= 1, JSON.stringify(mr));
     await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
     await ap.waitForTimeout(1000);
