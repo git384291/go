@@ -371,6 +371,34 @@ export async function runBrowserFlow(c) {
     console.log('INFO | BF30 제3자 입력(신규 vs 변경 재접수) ' + JSON.stringify(tp.thirdParty_newVsAmend));
     console.log('INFO | BF30 원본 필요(신규 vs 같은 내용) ' + JSON.stringify(tp.needsOriginal_newVsSame));
     console.log('INFO | BF30 신규 vs 기존 전체 ' + JSON.stringify(tp.newVsExisting_all));
+    // BF31 같은 진단을 최적화 빌드(next build + next start)로 1회(PM 11/22). 플래그 파일이 있을 때만 실행한다(1회 측정 후 파일 삭제).
+    // 런타임 NODE_ENV=test: 기존 로컬 봇 확인 대체 경로(TURNSTILE_VERIFY_URL_TEST, development/test에서만 허용)를 그대로 쓰기 위함 — 운영 코드 변경·새 우회 경로 없음
+    if (fs.existsSync(path.join(root, 'scripts/next-e2e/PROD_TIMING_ONCE'))) {
+      const PP = FX_PORT + 1; const FXP = `http://127.0.0.1:${PP}`;
+      const dir2 = buildFixtureApp(root, items, VERSION);
+      const penv = { ...env, NODE_ENV: 'test' };
+      const plog = fs.openSync(path.join(root, 'test-results/next-e2e/next-prod-fixture.log'), 'w');
+      const nextBin = path.join(root, 'node_modules/.bin/next');
+      const built = await new Promise((res) => { const b = spawn(nextBin, ['build'], { cwd: dir2, env: penv, stdio: ['ignore', plog, plog] }); b.on('exit', (c) => res(c === 0)); });
+      let psrv = null; let pup = false;
+      try {
+        if (built) {
+          psrv = spawn(nextBin, ['start', '-p', String(PP), '-H', '127.0.0.1'], { cwd: dir2, env: penv, stdio: ['ignore', plog, plog] });
+          for (let i = 0; i < 60 && !pup; i++) { try { await fetch(`${FXP}/api/consult/chat`); pup = true; } catch { await new Promise((r) => setTimeout(r, 1000)); } }
+        }
+        const tpp = pup ? await runTimingProbe({ FX: FXP, sql, sampleBody: d1.posts[0], outDir: path.join(root, 'test-results/next-e2e'), phoneBase: 50000, ipPrefix: '198.19', fileName: 'timing-probe-prod.json', environment: '로컬 최적화 빌드(next build + next start, 런타임 NODE_ENV=test), 127.0.0.1, 폐기 PostgreSQL, 가짜 봇 확인 서버(로컬 HTTP), 고지 확정 fixture. 인터넷·운영 환경 아님' }) : null;
+        check('BF31 최적화 빌드 응답 시간 진단 실행: 빌드·기동 후 신규·같은 내용·변경 재접수 각 100회 모두 202 {"ok":true}, 요청별 DB 처리 결과가 의도와 같음 — 시간 판정은 합격 조건 아님', !!tpp && tpp.failures === 0 && tpp.stats.new.n === 100 && tpp.stats.same.n === 100 && tpp.stats.amend.n === 100, `built=${built} up=${pup} fail=${tpp?.failures} ${JSON.stringify(tpp?.failureSample ?? [])}`);
+        if (tpp) {
+          console.log('INFO | BF31 시간 분포(ms) ' + JSON.stringify(tpp.stats));
+          console.log('INFO | BF31 제3자 입력(신규 vs 변경 재접수) ' + JSON.stringify(tpp.thirdParty_newVsAmend));
+          console.log('INFO | BF31 원본 필요(신규 vs 같은 내용) ' + JSON.stringify(tpp.needsOriginal_newVsSame));
+          console.log('INFO | BF31 신규 vs 기존 전체 ' + JSON.stringify(tpp.newVsExisting_all));
+        }
+      } finally {
+        if (psrv) { psrv.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 1000)); try { psrv.kill('SIGKILL'); } catch { /* 종료됨 */ } }
+        try { fs.rmSync(dir2, { recursive: true, force: true }); } catch { /* 정리 */ }
+      }
+    }
   } finally {
     try { await sql.unsafe(`drop trigger if exists e2e_fail_app on pii.lead_applications`); await sql.unsafe(`drop function if exists public.e2e_fail_app()`); } catch { /* 정리 */ }
     try { await pubSet(false); } catch { /* 정리 */ }

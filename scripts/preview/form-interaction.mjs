@@ -252,7 +252,8 @@ async function scenarioDoubleSubmit(browser) {
   await page.evaluate(() => { const f = document.querySelector('form'); f.requestSubmit(); f.requestSubmit(); f.requestSubmit(); });
   await page.dblclick('button[type=submit]', { force: true }).catch(() => {});
   await page.keyboard.press('Enter');
-  const busy = (await page.getAttribute('form', 'aria-busy')) === 'true' && (await page.evaluate(() => document.querySelector('fieldset').disabled));
+  // 응답은 gate로 붙잡혀 있으므로 '전송 중' 상태는 풀리지 않는다. React가 그 상태를 실제로 그릴 때까지 기다린 뒤 확인한다(즉시 읽으면 렌더 전일 수 있음 — 357af40 F16 간헐 실패)
+  const busy = await page.waitForFunction(() => document.querySelector('form')?.getAttribute('aria-busy') === 'true' && document.querySelector('fieldset')?.disabled === true, null, { timeout: 5000 }).then(() => true, () => false);
   release();
   check('F16 전송 중 표시·잠금(aria-busy, fieldset disabled)', busy);
   await page.waitForFunction(() => document.querySelector('.form-result.done'));
