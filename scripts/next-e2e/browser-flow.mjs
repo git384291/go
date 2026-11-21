@@ -363,6 +363,14 @@ export async function runBrowserFlow(c) {
     const base = allR[0][1];
     check('BF29 존재 여부 추론 방지: 새 접수·재접수(같은 내용)·변경 요청·같은 변경 재전송 응답이 상태 202·헤더·본문 {"ok":true}까지 동일(화면 문구도 동일)', !!base && base.status === 202 && JSON.stringify(JSON.parse(base.body)) === '{"ok":true}' && allR.every(([, r]) => r && r.status === base.status && r.body === base.body && r.names === base.names && r.vals === base.vals) && [stext.trim(), a1.t, a1b.t, a2.t].every((t) => t === dtext.trim()), `${base?.status} ${base?.body} ms=${allR.map(([k, r]) => `${k}:${r?.ms}`).join(',')}`);
     check('BF28 감사 로그: 변경 요청 2건이 기록되고(개수·누락 수만), 이름·주소·이메일·전화·암호문 원문 0건', amAudit === 2 && auditLeak === 0, `amend=${amAudit} leak=${auditLeak}`);
+    // BF30 응답 시간 진단(PM 11/22 P2, 범위 한정): 시간 값은 합격 조건이 아니다. 합격은 '진단 실행 + 요청별 실제 처리 결과가 의도와 같음'만
+    const { runTimingProbe } = await import('./timing-probe.mjs');
+    const tp = await runTimingProbe({ FX, sql, sampleBody: d1.posts[0], outDir: path.join(root, 'test-results/next-e2e') });
+    check('BF30 응답 시간 진단 실행: 예열 후 신규·같은 내용 재접수·변경 재접수 각 100회(무작위 순서) 모두 202 {"ok":true}, 요청별 DB 처리 결과(리드·변경 요청·재문의 증가)가 의도와 같음 — 시간 판정은 합격 조건 아님', tp.failures === 0 && tp.stats.new.n === 100 && tp.stats.same.n === 100 && tp.stats.amend.n === 100, `fail=${tp.failures} ${JSON.stringify(tp.failureSample)}`);
+    console.log('INFO | BF30 시간 분포(ms) ' + JSON.stringify(tp.stats));
+    console.log('INFO | BF30 제3자 입력(신규 vs 변경 재접수) ' + JSON.stringify(tp.thirdParty_newVsAmend));
+    console.log('INFO | BF30 원본 필요(신규 vs 같은 내용) ' + JSON.stringify(tp.needsOriginal_newVsSame));
+    console.log('INFO | BF30 신규 vs 기존 전체 ' + JSON.stringify(tp.newVsExisting_all));
   } finally {
     try { await sql.unsafe(`drop trigger if exists e2e_fail_app on pii.lead_applications`); await sql.unsafe(`drop function if exists public.e2e_fail_app()`); } catch { /* 정리 */ }
     try { await pubSet(false); } catch { /* 정리 */ }
