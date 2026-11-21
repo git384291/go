@@ -164,7 +164,7 @@ export async function createPolicyDraft(deps: PolicyAdminDeps, body: unknown): P
     const rows = await deps.runInTransaction(async (tx) =>
       tx`select api.policy_create_draft(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${u.supplierId}, ${u.segment}, ${u.carrier}, ${u.productId},
            ${u.category}, ${u.sourceKind}, ${u.confirmedAt}::timestamptz, ${u.validFrom}::timestamptz, ${u.validUntil}::timestamptz,
-           ${u.productLabel}, ${JSON.stringify(u.terms)}::jsonb) as id`);
+           ${u.productLabel}, ${JSON.stringify(u.terms)}::text::jsonb) as id`);
     const id = (rows as readonly { id?: unknown }[])[0]?.id;
     if (typeof id !== 'string' || !UUID.test(id)) return fail('INVALID_DATA', 502);
     return json({ ok: true, id, ...check }, 201);
@@ -195,7 +195,7 @@ export async function policyAction(deps: PolicyAdminDeps, id: string, body: unkn
     if (!exactKeys(b, ['action', 'reason', 'checks']) || !isObj(b.checks) || !exactKeys(b.checks, CHECKS) || Object.keys(b.checks).length !== CHECKS.length
         || !CHECKS.every((k) => (b.checks as Record<string, unknown>)[k] === true)) return fail('CHECKS_REQUIRED', 422);
     await deps.runInTransaction(async (tx) =>
-      tx`select api.policy_approve(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${id}::uuid, ${reason}, ${JSON.stringify(b.checks)}::jsonb)`);
+      tx`select api.policy_approve(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${id}::uuid, ${reason}, ${JSON.stringify(b.checks)}::text::jsonb)`);
     return json({ ok: true }, 200);
   } catch (e) { return dbError(e); }
 }

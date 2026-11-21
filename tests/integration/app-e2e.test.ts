@@ -96,6 +96,7 @@ test('E4 접수 거부: 고지 항목 누락·버전 불일치는 DB에 쓰지 �
   assert.equal(await count(LEADS), l0);
 });
 
+// 시험 DB에는 앞선 시험이 만든 예약 상품 등 다른 행이 있어, 가장 최근 1건(= 위 E2 접수 건)만 조회한다
 test('E5 관리자 조회: 접수 건이 마스킹되어 목록에 보이고 원문은 없다', async () => {
   const res = await adminLeadsList({
     env: () => ({ ADMIN_LEADS_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_1_abcdef01' }),
@@ -104,7 +105,7 @@ test('E5 관리자 조회: 접수 건이 마스킹되어 목록에 보이고 원
     runInTransaction: (fn) => withRoleOn(app, 'staff', (tx) => fn(tx as never)),
     mockList: async () => new Response('{}', { status: 500 }),
     mockDetail: async () => new Response('{}', { status: 500 }),
-  }, new Request('http://x/api/admin/leads?limit=200'));
+  }, new Request('http://x/api/admin/leads?limit=1'));
   const text = await res.text();
   assert.equal(res.status, 200, text.slice(0, 200));
   assert.match(text, /010-\*\*\*\*-1234/);
@@ -161,7 +162,7 @@ test('E7 관리자 정책: 초안 → 제출 → 승인, 승인 권한 우회 �
   assert.equal(viaServer.status, 403);
   // 서버를 거치지 않고 DB 함수를 직접 불러도 DB가 막는다
   await assert.rejects(
-    withRoleOn(app, 'staff', (tx) => tx`select api.policy_approve(${EDITOR}::uuid, ${EDITOR_S}::uuid, ${editor.token}, ${id}::uuid, ${'확인 완료'}, ${JSON.stringify(ALL)}::jsonb)`),
+    withRoleOn(app, 'staff', (tx) => tx`select api.policy_approve(${EDITOR}::uuid, ${EDITOR_S}::uuid, ${editor.token}, ${id}::uuid, ${'확인 완료'}, ${JSON.stringify(ALL)}::text::jsonb)`),
     (e: { code?: string }) => e.code === '42501',
   );
   assert.equal(await stateOf(id), 'draft');
