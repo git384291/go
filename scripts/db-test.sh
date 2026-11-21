@@ -60,6 +60,7 @@ run db/tests/61_policy_list.sql >/dev/null   # 정책 조회 함수(0009)
 run db/tests/70_ad_budget.sql >/dev/null    # 광고 예산 통제(0010)
 run db/tests/80_ad_performance.sql >/dev/null   # 광고 성과·AI 사용료(0011)
 run db/tests/90_consult_ai_confirm.sql >/dev/null   # 상담 집계·AI 정산(0012)
+run db/tests/95_ad_alerts_ai_limit.sql >/dev/null   # 광고 중지 경고·AI 한도(0013)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -544,6 +545,21 @@ D -q -f db/rollback/0012_restore.sql >/dev/null
 r12=$(D -At -c "select (select count(*) from core.consult_events) || '/' || (select sum(actual_cost_krw) from core.ai_usage_closures)")
 [ "$r12" = "1/4" ] || { echo "FAIL | M12c 0012 복구 건수 불일치 $r12" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M12 상담 집계·AI 정산 0012 롤백: 상담 1건·정산 4원 보관, 새 객체 제거·예약 함수 0011로 복귀, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
+# 0013 광고 중지 경고·AI 한도: 적용 → 경고 기록 → 롤백(보관, 승인·지출 판정은 0010 정의로) → 복구
+D -f db/migrations/0013_ad_alerts_ai_limit.sql >/dev/null
+D -q -c "insert into core.ad_alerts (id, campaign_key, kind, detail, created_by) values ('50000000-0000-4000-8000-0000000000a1', 'drill-camp', 'stop_failed', '{\"paused\": false}', '00000000-0000-4000-8000-000000000001')"
+D -f db/rollback/0013_down.sql >/dev/null
+gone13=$(D -At -c "select (to_regclass('core.ad_alerts') is null and to_regprocedure('api.ad_alert_open(uuid,uuid,text,text,jsonb)') is null and to_regprocedure('api.ai_budget_limit_set(uuid,uuid,text,int,text)') is null and to_regprocedure('api.ad_spend_request(uuid,uuid,text,text,int,text)') is not null and (select prosrc not like '%ad_alerts%' from pg_proc where oid = 'api.ad_spend_request(uuid,uuid,text,text,int,text)'::regprocedure))::text")
+a13=$(D -At -c "select count(*) from core.ad_alerts_rollback_archive")
+prot13=$(D -At -c "select count(*) from pg_class c where c.oid = 'core.ad_alerts_rollback_archive'::regclass and c.relrowsecurity and c.relforcerowsecurity")
+open13=$(D -At -c "select count(*) from (values ('public'), ('app_public'), ('app_staff'), ('app_server'), ('app_ai')) g(role) where has_table_privilege(g.role, 'core.ad_alerts_rollback_archive', 'SELECT')")
+[ "$gone13" = true ] && [ "$a13" = 1 ] && [ "$prot13" = 1 ] && [ "$open13" = 0 ] || { echo "FAIL | M13 0013 롤백 gone=$gone13 보관=$a13 RLS=$prot13 열림=$open13" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+if D -q -f db/rollback/0013_down.sql >/dev/null 2>&1; then echo "FAIL | M13b 0013 보관본이 있는데 롤백이 다시 성공" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
+D -f db/migrations/0013_ad_alerts_ai_limit.sql >/dev/null
+D -q -f db/rollback/0013_restore.sql >/dev/null
+r13=$(D -At -c "select count(*) from core.ad_alerts where state = 'open'")
+[ "$r13" = 1 ] || { echo "FAIL | M13c 0013 복구 건수 불일치 $r13" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M13 중지 경고·AI 한도 0013 롤백: 경고 1건 보관, 새 객체 제거·승인/지출 판정 0010으로 복귀, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

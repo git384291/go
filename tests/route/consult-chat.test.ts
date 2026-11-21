@@ -113,9 +113,10 @@ test('CH7 모델 이름 설정: mock만 모델이 있고 나머지(실제 API �
 test('CH8 입력 검사: 빈 글·301자·문자열 아님', async () => {
   for (const m of ['', '   ', 'a'.repeat(301), 5, null, { a: 1 }]) assert.deepEqual(await answerChat(deps(), input(m), NOW), { ok: false, code: 'INVALID_INPUT' });
 });
-const HD = (over: Record<string, unknown> = {}) => ({ enabled: true, chat: deps(), limiter: createLimiter(2, 60_000), ip: '203.0.113.9', now: () => NOW, ...over }) as never;
+const KEY = Buffer.alloc(32, 7);
+const HD = (over: Record<string, unknown> = {}) => ({ enabled: true, chat: deps(), limiter: createLimiter(2, 60_000), ip: '203.0.113.9', now: () => NOW, sessionKey: KEY, newSessionLimiter: createLimiter(50, 60_000), ...over }) as never;
 const post = (b: unknown, raw?: string) => new Request('http://x/api/consult/chat', { method: 'POST', body: raw ?? JSON.stringify(b) });
-const good = { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금?', session: 'sess-0123456789abcdef' };
+const good = { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금?' };
 test('CH9 핸들러: 꺼짐 503·크기 413·형식 400·여분 키 400·횟수 제한 429·no-store', async () => {
   assert.equal((await handleChat(post(good), HD({ enabled: false }))).status, 503);
   assert.equal((await handleChat(post(good), HD({ chat: null }))).status, 503);
@@ -123,7 +124,7 @@ test('CH9 핸들러: 꺼짐 503·크기 413·형식 400·여분 키 400·횟수 
   assert.equal((await handleChat(post(null, '{bad'), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, extra: 1 }), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, session: 'short' }), HD())).status, 400);
-  { const { session: _s, ...noSession } = good; assert.equal((await handleChat(post(noSession), HD())).status, 400); }
+  assert.equal((await handleChat(post(good), HD({ sessionKey: null }))).status, 503);
   assert.equal((await handleChat(post({ ...good, campaign: 'Bad Key!' }), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, carrier: 'Bad Key!' }), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, message: '' }), HD())).status, 400);
@@ -146,12 +147,17 @@ test('CH10 정적: 키 환경변수는 서버 모듈에서만, 클라이언트 �
   }
 });
 
-test('CH11 상담 시작 기록: 성공 응답 때만 1회, 캠페인은 있을 때만 전달, 기록 실패는 상담에 영향 없음, 입력 오류·꺼짐·횟수 제한은 기록 0', async () => {
+test('CH11 상담 시작 기록: 서버 발급 세션만 기록, 같은 세션 재전송은 같은 id, 캠페인은 있을 때만, 기록 실패·입력 오류·꺼짐·횟수 제한 처리', async () => {
   const seen: [string, string | null][] = [];
   const rec = async (s: string, c: string | null) => { seen.push([s, c]); };
-  assert.equal((await handleChat(post({ ...good, campaign: 'camp-q' }), HD({ recordConsult: rec }))).status, 200);
-  assert.equal((await handleChat(post(good), HD({ recordConsult: rec }))).status, 200);
-  assert.deepEqual(seen, [['sess-0123456789abcdef', 'camp-q'], ['sess-0123456789abcdef', null]]);
+  const r1 = await handleChat(post({ ...good, campaign: 'camp-q' }), HD({ recordConsult: rec }));
+  assert.equal(r1.status, 200);
+  const tok = (await r1.json()).session as string;
+  assert.match(tok, /^[0-9a-f]{32}\.\d+\.[0-9a-f]{64}$/);
+  assert.equal((await handleChat(post({ ...good, session: tok }), HD({ recordConsult: rec }))).status, 200);
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0][0], seen[1][0]); // 같은 세션 id → DB가 1건만 센다
+  assert.deepEqual([seen[0][1], seen[1][1]], ['camp-q', null]);
   const before = seen.length;
   await handleChat(post({ ...good, message: '' }), HD({ recordConsult: rec }));
   await handleChat(post(good), HD({ recordConsult: rec, enabled: false }));
@@ -161,4 +167,38 @@ test('CH11 상담 시작 기록: 성공 응답 때만 1회, 캠페인은 있을 
   assert.equal(seen.length, before + 1);
   const bad = await handleChat(post(good), HD({ recordConsult: async () => { throw new Error('db down'); } }));
   assert.equal(bad.status, 200);
+});
+test('CH12 세션 조작 방지: 위조·변조·만료·다른 키·브라우저가 만든 id → 400 기록 0, 새 세션은 IP별 제한', async () => {
+  const seen: string[] = [];
+  const rec = async (s: string) => { seen.push(s); };
+  const tok = (await (await handleChat(post(good), HD({ recordConsult: rec }))).json()).session as string;
+  const [id, exp, sig] = tok.split('.');
+  const flip = sig.replace(/^./, sig[0] === 'a' ? 'b' : 'a');
+  const NOWSEC = Math.floor(NOW.getTime() / 1000);
+  const forged = [`${id}.${exp}.${flip}`, `${'0'.repeat(32)}.${exp}.${sig}`, `${id}.${Number(exp) + 999}.${sig}`, 'sess-0123456789abcdef', `${id}.${NOWSEC - 5}.${sig}`, 'x'.repeat(500)];
+  for (const f of forged) assert.equal((await handleChat(post({ ...good, session: f }), HD({ recordConsult: rec }))).status, 400, f.slice(0, 20));
+  assert.equal((await handleChat(post({ ...good, session: tok }), HD({ recordConsult: rec, sessionKey: Buffer.alloc(32, 9) }))).status, 400);
+  assert.equal((await handleChat(post({ ...good, session: tok }), HD({ recordConsult: rec, now: () => new Date(NOW.getTime() + 25 * 3600_000) }))).status, 400);
+  assert.equal(seen.length, 1);
+  const nl = createLimiter(2, 60_000);
+  const codes = [];
+  for (let i = 0; i < 3; i++) codes.push((await handleChat(post(good), HD({ newSessionLimiter: nl, limiter: createLimiter(99, 60_000) }))).status);
+  assert.deepEqual(codes, [200, 200, 429]);
+});
+test('CH13 AI 정산 재시도: 일시 장애는 최대 3회까지 다시 시도, 끝내 실패해도 예외 없음, 성공 뒤 중복 호출 없음, 확정·취소는 각각 1종 호출', async () => {
+  const mkb = (failFirst: number) => { const log: string[] = []; let n = 0;
+    const b = createDbAiBudget(async (fn) => fn(((s: TemplateStringsArray) => { const q = s.join('?'); if (q.includes('ai_budget_hold')) return Promise.resolve([{ id: '5' }]); log.push(q); if (++n <= failFirst) return Promise.reject(new Error('down')); return Promise.resolve([{}]); }) as never));
+    return { b, log }; };
+  for (const [fails, calls] of [[0, 1], [1, 2], [2, 3], [3, 3], [9, 3]] as const) {
+    const { b, log } = mkb(fails);
+    const h = await b.reserve(5);
+    assert.ok(h);
+    await assert.doesNotReject(h.confirm(3));
+    assert.equal(log.length, calls, `실패 ${fails}회`);
+    assert.ok(log.every((q) => q.includes('ai_budget_confirm')));
+  }
+  const { b, log } = mkb(1);
+  const h = await b.reserve(5);
+  await h?.cancel();
+  assert.deepEqual([log.length, log.every((q) => q.includes('ai_budget_release'))], [2, true]);
 });

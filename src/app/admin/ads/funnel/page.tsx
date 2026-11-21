@@ -4,7 +4,7 @@ import { requireStaff } from '@/server/auth/requireStaff';
 import { adFunnel } from '@/server/admin/adRun';
 import type { SqlTag } from '@/server/admin/adBudget';
 import { withRole } from '@/server/db/client';
-import { FunnelLocked, FunnelView, type FunnelItem } from './FunnelView';
+import { FunnelLocked, FunnelView, type AlertRow, type FunnelItem } from './FunnelView';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: '광고 성과', robots: { index: false, follow: false, nocache: true } };
@@ -21,6 +21,6 @@ export default async function FunnelPage() {
   if (res.status === 403) return <FunnelLocked kind="forbidden" />;
   if (res.status === 503) return <FunnelLocked kind="disabled" />;
   if (res.status !== 200) return <FunnelLocked kind="failed" />;
-  const b = (await res.json()) as { role: string; from: string; to: string; items: FunnelItem[] };
-  return <FunnelView items={b.items} role={b.role} from={b.from} to={b.to} />;
+  const b = (await res.json()) as { role: string; from: string; to: string; items: FunnelItem[]; alerts: AlertRow[]; alertsError: boolean };
+  return <FunnelView items={b.items} role={b.role} from={b.from} to={b.to} alerts={b.alerts} alertsError={b.alertsError} />;
 }

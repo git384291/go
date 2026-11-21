@@ -22,6 +22,7 @@ export type AdRunDeps = AdBudgetDeps & { platform: AdPlatform | null };
 const CAMPAIGN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const REQ_KEY = /^[A-Za-z0-9-]{16,64}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const exact = (o: Record<string, unknown>, keys: readonly string[]) => Object.keys(o).length === keys.length && keys.every((k) => k in o);
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
@@ -30,10 +31,17 @@ const kstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().
 
 export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Response> {
   const action = isObj(body) ? body.action : undefined;
-  if (action !== 'launch' && action !== 'collect') return adFail('INVALID_ACTION', 400);
+  if (action !== 'launch' && action !== 'collect' && action !== 'alert_resolve') return adFail('INVALID_ACTION', 400);
   const g = await adGate(deps, action);
   if (g instanceof Response) return action === 'launch' ? adBlock(await g.clone().json().then((j: { code?: string }) => j.code ?? 'ERROR').catch(() => 'ERROR'), g.status) : g;
   const b = body as Record<string, unknown>;
+  if (action === 'alert_resolve') {
+    if (!exact(b, ['action', 'id', 'note']) || typeof b.id !== 'string' || !UUID.test(b.id) || typeof b.note !== 'string' || b.note.trim().length < 2 || b.note.trim().length > 500) return adFail('INVALID_INPUT', 422);
+    try {
+      await deps.runInTransaction(async (tx) => tx`select api.ad_alert_resolve(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${b.id as string}::uuid, ${(b.note as string).trim()})`);
+      return adJson({ ok: true }, 200);
+    } catch (e) { return adDbError(e); }
+  }
   const platform = deps.platform;
   if (action === 'launch') {
     if (!platform) return adBlock('PLATFORM_UNAVAILABLE', 503);
@@ -96,7 +104,19 @@ async function autoStopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdP
   }
   let paused = false;
   try { paused = (await platform.pause(campaign))?.paused === true; } catch { paused = false; }
-  return { revoked, revokeNote, paused, simulated: !platform.live };
+  // 끝까지 중지되지 않았으면(철회 실패 또는 플랫폼 중지 실패) 관리자 경고를 연다. 경고가 열려 있는 동안 DB가 지출·새 승인을 막는다
+  const complete = (revoked || revokeNote === 'NO_ACTIVE_APPROVAL') && paused;
+  let alert: { opened: boolean } | null = null;
+  if (!complete) {
+    alert = { opened: false };
+    try {
+      const rows = await deps.runInTransaction(async (tx) =>
+        tx`select api.ad_alert_open(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${JSON.stringify({ revoked, revokeNote, paused, simulated: !platform.live, trigger: 'overspend' })}::text::jsonb) as id`);
+      const id = (rows as readonly { id?: unknown }[])[0]?.id;
+      alert = { opened: typeof id === 'string' && UUID.test(id) };
+    } catch { alert = { opened: false }; }
+  }
+  return { revoked, revokeNote, paused, simulated: !platform.live, alert };
 }
 
 type Row = { campaign_key: string; impressions: string | number; clicks: string | number; cost_krw: string | number; ledger_krw: string | number; consults: string | number; leads: string | number; overspend_days: string | number };
@@ -124,7 +144,16 @@ export async function adFunnel(deps: AdBudgetDeps, req: Request): Promise<Respon
       if (typeof r.campaign_key !== 'string' || Object.values(v).some(Number.isNaN)) throw new Error('INVALID_DATA');
       return { campaign: r.campaign_key, ...v, clickRate: ratio(v.clicks, v.impressions), consultRate: ratio(v.consults, v.clicks), leadRate: ratio(v.leads, v.consults), costPerLeadKrw: v.leads > 0 ? Math.round(v.costKrw / v.leads) : null, overBudget: v.overspendDays > 0 };
     });
-    return adJson({ ok: true, role: g.role, from, to, consultTracked: true, items }, 200);
+    // 중지 실패 경고(열린 것 먼저). 조회가 실패해도 분석은 보여 주되 alertsError로 알린다(경고가 없다고 오해하지 않게)
+    let alerts: unknown[] = [];
+    let alertsError = false;
+    try {
+      const ar = await deps.runInTransaction(async (tx) =>
+        tx`select id, campaign_key, state, detail, created_at, resolved_at, resolve_note from api.ad_alert_list(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${50}::int)`);
+      if (!Array.isArray(ar)) throw new Error('x');
+      alerts = ar as unknown[];
+    } catch { alertsError = true; }
+    return adJson({ ok: true, role: g.role, from, to, consultTracked: true, items, alerts, alertsError }, 200);
   } catch (e) {
     if ((e as Error)?.message === 'INVALID_DATA') return adFail('INVALID_DATA', 502);
     return adDbError(e);

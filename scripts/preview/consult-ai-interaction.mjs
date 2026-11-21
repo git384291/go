@@ -23,6 +23,7 @@ try {
   const seen = { external: [], api: [], errors: [] };
   page.on('pageerror', (e) => seen.errors.push(e.message.split('\n')[0]));
   let mode = 'ok';
+  const TOKEN = `${'a1'.repeat(16)}.1893456000.${'b2'.repeat(32)}`;
   await ctx.route('**/*', async (route) => {
     const req = route.request(); const u = new URL(req.url());
     if (u.origin !== ORIGIN) { seen.external.push(u.host); return route.abort('blockedbyclient'); }
@@ -30,7 +31,7 @@ try {
     if (u.pathname === '/a.js') return route.fulfill({ contentType: 'text/javascript', body: js });
     if (u.pathname === '/api/consult/chat') {
       seen.api.push(JSON.parse(req.postData() ?? '{}'));
-      if (mode === 'ok') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, kind: 'quote', source: 'model', next: 'signup', text: '월 11,111원(가상 승인 안내)\n- 사은품: 3,333원 상품권' }) });
+      if (mode === 'ok') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, kind: 'quote', source: 'model', next: 'signup', text: '월 11,111원(가상 승인 안내)\n- 사은품: 3,333원 상품권', session: TOKEN }) });
       if (mode === 'down') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'DISABLED' }) });
       return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"text":123}' });
     }
@@ -52,11 +53,12 @@ try {
   await send.click();
   await page.waitForSelector('[data-from="ai"]');
   const b = seen.api[0];
-  check('C5 요청 본문: 고정 코드 3개 + 글 + 상담 세션 키(키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode', 'session']) && /^[A-Za-z0-9-]{16,64}$/.test(b.session) && b.message === '요금이 얼마예요?');
+  check('C5 요청 본문: 고정 코드 3개 + 글 + 첫 요청엔 세션 없음(서버가 발급, 키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode']) && b.message === '요금이 얼마예요?');
   check('C6 승인 안내가 AI 도우미 말풍선에 표시, 입력칸 비워짐', (await page.locator('[data-from="ai"]').innerText()).includes('11,111원') && (await box.inputValue()) === '');
   await page.screenshot({ path: `${OUT}/23-consult-ai-answer-w390.png`, fullPage: true });
   mode = 'down'; await box.fill('또 질문'); await send.click();
   await page.waitForFunction(() => document.querySelectorAll('[data-from="ai"]').length === 2);
+  check('C6b 두 번째 요청은 서버가 내려 준 세션 토큰을 그대로 보냄(브라우저가 만들지 않음)', seen.api[1]?.session === TOKEN);
   const safe = await page.locator('[data-from="ai"]').nth(1).innerText();
   check('C7 서버 장애(503)는 안전 안내문, 내부 코드 노출 없음', safe.includes('담당자가 확인한 뒤') && !safe.includes('DISABLED'));
   mode = 'bad'; await box.fill('형식 밖'); await send.click();

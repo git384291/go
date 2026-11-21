@@ -1,6 +1,7 @@
 import { clientIpFrom } from '@/server/http/clientIp';
 import { createLimiter, handleChat } from '@/server/consult/chatHandler';
 import { createDbAiBudget, createModel } from '@/server/consult/chatModel';
+import { sessionKeyFromEnv } from '@/server/consult/consultSession';
 import { dbPolicyProvider } from '@/server/consult/publishedPolicies';
 import { withRole } from '@/server/db/client';
 
@@ -9,6 +10,7 @@ export const dynamic = 'force-dynamic';
 
 // 기본 꺼짐(CONSULT_CHAT_ENABLED). 모델은 무료 모의(CONSULT_AI_MODEL=mock)뿐이고, 월 사용료 한도는 DB 집계(기본 0원). 실제 API 호출 없음.
 const limiter = createLimiter(10, 60_000);
+const newSessionLimiter = createLimiter(5, 3_600_000); // IP당 새 상담 세션은 1시간에 5개
 const budget = createDbAiBudget((fn) => withRole('ai', (tx) => fn(tx as never)));
 
 export async function POST(req: Request) {
@@ -23,6 +25,7 @@ export async function POST(req: Request) {
       }),
     },
     recordConsult: async (session, campaign) => { await withRole('public', (tx) => tx`select api.consult_event_record(${session}, ${campaign})`); },
+    sessionKey: sessionKeyFromEnv(process.env), newSessionLimiter,
     limiter, ip: clientIpFrom((n) => req.headers.get(n)), now: () => new Date(),
   });
 }

@@ -1,14 +1,16 @@
-import { FunnelConsole } from './FunnelConsole';
+import { AlertResolve, FunnelConsole } from './FunnelConsole';
 
 export type FunnelItem = {
   campaign: string; impressions: number; clicks: number; costKrw: number; ledgerKrw: number; consults: number; leads: number; overspendDays: number;
   clickRate: number | null; consultRate: number | null; leadRate: number | null; costPerLeadKrw: number | null; overBudget: boolean;
 };
+export type AlertRow = { id: string; campaign_key: string; state: string; detail: Record<string, unknown>; created_at: string; resolved_at: string | null; resolve_note: string | null };
 const won = (n: number | null) => (n === null ? '-' : `${n.toLocaleString('ko-KR')}원`);
 const pct = (n: number | null) => (n === null ? '-' : `${(n * 100).toFixed(1)}%`);
 const ROLE: Record<string, string> = { owner: '대표', reviewer: '검토자' };
 
-export function FunnelView({ items, role, from, to }: { items: readonly FunnelItem[]; role: string; from: string; to: string }) {
+export function FunnelView({ items, role, from, to, alerts = [], alertsError = false }: { items: readonly FunnelItem[]; role: string; from: string; to: string; alerts?: readonly AlertRow[]; alertsError?: boolean }) {
+  const open = alerts.filter((a) => a.state === 'open');
   return (
     <main className="admin-main" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <header className="admin-bar">
@@ -19,6 +21,21 @@ export function FunnelView({ items, role, from, to }: { items: readonly FunnelIt
         {from} ~ {to}. 노출 → 클릭 → 상담 시작 → 접수(건수만, 개인정보 없음)와 광고비를 캠페인별로 봅니다. 성과는 <b>모의 광고 플랫폼의 가상 값</b>이며 실제 광고 집행·과금은 연결되어 있지 않습니다.
         상담 시작은 AI 상담창을 연 횟수(세션당 1회)입니다.
       </p>
+      {alertsError ? <p role="alert" className="form-result error">경고 목록을 불러오지 못했습니다. 광고 중지 실패 경고가 없다는 뜻이 아닙니다. 새로고침하거나 대표에게 확인하세요.</p> : null}
+      {open.length > 0 ? (
+        <section aria-label="광고 중지 실패 경고" role="alert" className="admin-card" style={{ borderColor: 'crimson' }}>
+          <h2>⚠ 광고 중지 실패 경고 {open.length}건</h2>
+          <p>자동 중지가 끝까지 되지 않았습니다. 해결 처리 전에는 해당 캠페인의 지출 판정과 새 승인이 모두 차단됩니다. 광고 플랫폼에서 직접 중지됐는지 확인한 뒤 해결 처리하세요.</p>
+          <ul>
+            {open.map((a) => (
+              <li key={a.id} data-alert-id={a.id}>
+                <b>{a.campaign_key}</b> · 승인 철회 {a.detail.revoked === true ? '완료' : '실패'} · 플랫폼 중지 {a.detail.paused === true ? '완료' : '실패'} · {a.created_at.slice(0, 16).replace('T', ' ')}
+                {role === 'owner' ? <AlertResolve id={a.id} /> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {role === 'owner' ? <FunnelConsole /> : <p className="muted">이 역할은 조회만 가능합니다.</p>}
       <section aria-label="전환 분석">
         <h2>전환·광고비 분석</h2>

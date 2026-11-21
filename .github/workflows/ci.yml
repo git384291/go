@@ -41,6 +41,8 @@ jobs:
         run: npm run test:route
       - name: DB security tests (local virtual DB, PostgreSQL from runner image)
         run: npm run test:db
+      - name: Next server E2E (consult → DB, disposable local DB, mock model)
+        run: npm run test:next-e2e
       - name: Restore drill (virtual data)
         run: npm run test:restore
       - run: npm run build

@@ -49,3 +49,19 @@ export function FunnelConsole() {
     </section>
   );
 }
+
+/** 중지 실패 경고 해결(대표). 서버·DB가 대표 권한과 사유를 다시 판정한다 */
+export function AlertResolve({ id }: { id: string }) {
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState('');
+  async function resolve() {
+    const r = await post({ action: 'alert_resolve', id, note });
+    if (r.ok === true) location.reload(); else setMsg(`거부됨: ${String(r.code)}`);
+  }
+  return (
+    <span>{' '}
+      <input aria-label="해결 사유" placeholder="플랫폼에서 직접 중지 확인(사유)" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />{' '}
+      <button type="button" disabled={note.trim().length < 2} onClick={resolve}>해결 처리</button> <span role="status">{msg}</span>
+    </span>
+  );
+}

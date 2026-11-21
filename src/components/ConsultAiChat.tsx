@@ -14,11 +14,8 @@ export function ConsultAiChat({ choice }: { choice: ChatChoice }) {
   const [text, setText] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
-  // 상담 한 번(창을 연 동안)에 하나의 무작위 키 — 서버가 상담 시작 건수를 세는 데만 쓰고 개인정보가 아니다
-  const [session] = useState(() => {
-    const c = globalThis.crypto;
-    return c?.randomUUID ? c.randomUUID() : Array.from(c.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
-  });
+  // 서버가 첫 응답에서 내려 주는 서명 세션 토큰(상담 시작 건수 집계용, 개인정보 아님). 브라우저가 직접 만들지 않는다
+  const [session, setSession] = useState<string | null>(null);
   const ready = text.trim().length > 0 && text.length <= 300 && !busy;
   async function send() {
     const message = text.trim();
@@ -27,9 +24,10 @@ export function ConsultAiChat({ choice }: { choice: ChatChoice }) {
     setText('');
     let reply = SAFE;
     try {
-      const res = await fetch('/api/consult/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message, session, ...campaignOf() }) });
-      const j = (await res.json()) as { ok?: boolean; text?: unknown };
+      const res = await fetch('/api/consult/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message, ...(session ? { session } : {}), ...campaignOf() }) });
+      const j = (await res.json()) as { ok?: boolean; text?: unknown; session?: unknown };
       if (res.ok && j.ok === true && typeof j.text === 'string') reply = j.text;
+      if (typeof j.session === 'string' && j.session.length <= 200) setSession(j.session);
     } catch { /* 안전 안내문 유지 */ }
     setMsgs((m) => [...m, { from: 'ai', text: reply }]);
     setBusy(false);

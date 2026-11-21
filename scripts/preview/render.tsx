@@ -17,6 +17,7 @@ import { ProgressView } from '../../src/app/admin/progress/ProgressView';
 import { LeadsReadLocked, LeadsReadView } from '../../src/app/admin/LeadsReadView';
 import { AdBudgetLocked, AdBudgetView, type BudgetRow } from '../../src/app/admin/ads/AdBudgetView';
 import { FunnelLocked, FunnelView, type FunnelItem } from '../../src/app/admin/ads/funnel/FunnelView';
+import { AiBudgetLocked, AiBudgetView } from '../../src/app/admin/ai-budget/AiBudgetView';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from '../../src/app/admin/policies/PolicyAdminView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
@@ -187,6 +188,13 @@ async function main() {
     ['25-admin-ads-funnel-owner', <FunnelView key="fn-owner" items={FUNNEL_FIXTURE} role="owner" from="2026-11-15" to="2026-11-21" />],
     ['26-admin-ads-funnel-reviewer', <FunnelView key="fn-rev" items={FUNNEL_FIXTURE} role="reviewer" from="2026-11-15" to="2026-11-21" />],
     ['27-admin-ads-funnel-locked', <FunnelLocked key="fn-locked" kind="disabled" />],
+    // 광고 중지 실패 경고(열린 1건 + 해결됨 1건) / 경고 목록 조회 실패 안내
+    ['31-admin-ads-funnel-alert', <FunnelView key="fn-alert" items={FUNNEL_FIXTURE} role="owner" from="2026-11-15" to="2026-11-21" alerts={[{ id: '20000000-0000-4000-8000-000000000001', campaign_key: 'sample-camp', state: 'open', detail: { revoked: true, paused: false }, created_at: '2026-11-21T09:10:00Z', resolved_at: null, resolve_note: null }, { id: '20000000-0000-4000-8000-000000000002', campaign_key: 'old-camp', state: 'resolved', detail: { revoked: true, paused: true }, created_at: '2026-11-20T09:10:00Z', resolved_at: '2026-11-20T10:00:00Z', resolve_note: '직접 확인' }]} />],
+    ['32-admin-ads-funnel-alert-error', <FunnelView key="fn-alert-err" items={FUNNEL_FIXTURE} role="reviewer" from="2026-11-15" to="2026-11-21" alertsError />],
+    // 관리자 AI 월 비용 한도(기본 0원): 대표 / 검토자 / 잠금
+    ['33-admin-ai-budget-owner', <AiBudgetView key="ai-owner" data={{ role: 'owner', month: '2026-11', limitKrw: 0, usedKrw: 0, unconfirmed: 0, maxLimitKrw: 100000 }} />],
+    ['34-admin-ai-budget-reviewer', <AiBudgetView key="ai-rev" data={{ role: 'reviewer', month: '2026-11', limitKrw: 5000, usedKrw: 1200, unconfirmed: 2, maxLimitKrw: 100000 }} />],
+    ['35-admin-ai-budget-locked', <AiBudgetLocked key="ai-locked" kind="disabled" />],
     // AI 상담창 + 접수 양식(필수 고지 미확정 실제 설정 → 양식이 접수를 막는 상태)
     ['30-consult-ai-with-form', <PageShell key="consult-ai"><section className="section"><ConsultAiChat choice={{ carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }} /></section><section className="section" id="apply" aria-label="가입 상담 신청"><ConsultForm options={[{ value: 'internet_tv', label: '인터넷+TV' }]} kakaoUrl={null} /></section></PageShell>],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
@@ -280,7 +288,7 @@ async function main() {
   console.log(report.join('\n'));
   // 광고 예산 화면(19·20)의 금액은 상품 요금이 아니라 관리자 한도 숫자이므로 요금 노출 검사에서만 제외한다(나머지 검사는 동일).
   const bad = report.filter((r) =>
-    r.includes('가로 넘침=true') || (/금액 표기=[1-9]/.test(r) && !/^(19|20|25|26)-admin-ads/.test(r)) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
+    r.includes('가로 넘침=true') || (/금액 표기=[1-9]/.test(r) && !/^(19|20|25|26|31|32)-admin-ads|^3[3-5]-admin-ai/.test(r)) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
     || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
     || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r)
     || /카톡문의 [^=\t]+=false/.test(r) || /카톡문의 (외부요소|요청)=[1-9]/.test(r));

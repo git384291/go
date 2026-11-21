@@ -15,6 +15,8 @@ import { answerChat } from '../../src/server/consult/chatAnswer';
 import { handleChat } from '../../src/server/consult/chatHandler';
 import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type ChatModel } from '../../src/server/consult/chatModel';
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
+import { aiBudgetGet, aiBudgetSet } from '../../src/server/admin/aiBudget';
+import { issueSession } from '../../src/server/consult/consultSession';
 import { adFunnel, adRunAction } from '../../src/server/admin/adRun';
 import { mockPlatform, type AdPlatform } from '../../src/server/advertising/platform';
 import { adBudgetAction, adBudgetOverview, type AdBudgetDeps } from '../../src/server/admin/adBudget';
@@ -394,7 +396,7 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   const over = await body0(await col(kst(1), 100));
   assert.equal(over.overLedger, true);
   // 초과 감지 → 자동 중지: 승인 철회 + 플랫폼 중지, 이후 모든 지출 차단
-  assert.deepEqual(over.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true });
+  assert.deepEqual(over.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true, alert: null });
   assert.equal(paused, 1);
   assert.equal((await body0(await launch(owner, 'e11-key-0000000000006', 100))).reason, 'NO_APPROVAL');
   assert.equal(await ledgerSum(camp), 500);
@@ -474,18 +476,25 @@ test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확�
 });
 
 // 상담(AI 상담창) → 필수 고지 → 동의 → 접수 → DB 암호화 저장 → 관리자 마스킹 조회. 상담 시작은 캠페인별로 집계된다
-test('E13 상담 시작 집계(API 핸들러→DB): 세션당 1건, 캠페인 연결, 접수까지 이어진 전환이 분석에 보임, 고지 미확정은 접수 차단 유지', async () => {
+test('E13 상담 시작 집계(API 핸들러→DB): 서버 서명 세션당 1건, 위조·변조 세션 0건, 캠페인 연결, 접수까지 이어진 전환이 분석에 보임, 고지 미확정은 접수 차단 유지', async () => {
   const camp = 'e13-camp';
-  const mkChat = (session: string, campaign?: string) => handleChat(new Request('http://x/api/consult/chat', { method: 'POST', body: JSON.stringify({ carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1', message: '요금이 궁금해요', session, ...(campaign ? { campaign } : {}) }) }), {
-    enabled: true, limiter: () => true, ip: '203.0.113.50', now: () => new Date(),
+  const SKEY = Buffer.alloc(32, 5);
+  const nsl = (() => { let n = 0; return () => ++n <= 3; })(); // 새 세션 발급은 이 시험에서 3개까지
+  const mkChat = (session: string | null, campaign?: string, key: Buffer | null = SKEY) => handleChat(new Request('http://x/api/consult/chat', { method: 'POST', body: JSON.stringify({ carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1', message: '요금이 궁금해요', ...(session ? { session } : {}), ...(campaign ? { campaign } : {}) }) }), {
+    enabled: true, limiter: () => true, ip: '203.0.113.50', now: () => new Date(), sessionKey: key, newSessionLimiter: nsl,
     chat: { provider: dbPolicyProvider(async () => []), supplierId: 'supplier-a', model: mockModel, budget: createAiBudget({}) },
     recordConsult: async (sess, c) => { await withRoleOn(app, 'public', (tx) => tx`select api.consult_event_record(${sess}, ${c})`); },
   });
+  const tokenOf = async (r: Response) => ((await r.json()) as { session: string }).session;
   const c0 = await count(`select count(*)::int as n from core.consult_events where campaign_key = '${camp}'`);
-  assert.equal((await mkChat('e13-session-000000001', camp)).status, 200);
-  assert.equal((await mkChat('e13-session-000000001', camp)).status, 200); // 같은 창에서 계속 대화해도 1건
-  assert.equal((await mkChat('e13-session-000000002', camp)).status, 200);
-  assert.equal((await mkChat('e13-session-000000003')).status, 200);       // 캠페인 없는 상담
+  const r1 = await mkChat(null, camp);
+  assert.equal(r1.status, 200);
+  const t1 = await tokenOf(r1);
+  assert.equal((await mkChat(t1, camp)).status, 200); // 같은 창에서 계속 대화해도 1건
+  assert.equal((await mkChat(t1, camp)).status, 200);
+  assert.equal((await mkChat(null, camp)).status, 200); // 새 창 = 새 세션 1건
+  assert.equal((await mkChat(null)).status, 200);       // 캠페인 없는 상담
+  assert.equal((await mkChat(null, camp)).status, 429); // IP별 새 세션 발급 제한
   assert.equal(await count(`select count(*)::int as n from core.consult_events where campaign_key = '${camp}'`), c0 + 2);
   // 접수는 고지 확정 전에는 막힌다(실제 설정), 시험 고지를 넣은 경우에만 저장된다
   const { notices: _omit, ...real } = ctx();
@@ -501,8 +510,112 @@ test('E13 상담 시작 집계(API 핸들러→DB): 세션당 1건, 캠페인 �
   assert.ok(row, ft.slice(0, 300));
   assert.deepEqual([row.consults, row.leads, row.leadRate], [c0 + 2, 1, Math.round((1 / (c0 + 2)) * 10000) / 10000]);
   assert.ok(!ft.includes('3333') && !ft.includes('김일삼') && !ft.includes('2468'));
-  // 형식 밖 세션은 핸들러가 막아 DB 0회, 앱 역할은 상담 기록을 직접 읽거나 지울 수 없다
-  assert.equal((await mkChat('short')).status, 400);
+  // 조작: 브라우저가 만든 id·변조·다른 키·만료 토큰은 핸들러가 막아 DB 0건. 앱 역할은 상담 기록을 직접 읽거나 지울 수 없다
+  const total = await count(`select count(*)::int as n from core.consult_events`);
+  const [id, exp, sig] = t1.split('.');
+  const forged = ['short', 'e13-session-000000009', `${id}.${exp}.${'0'.repeat(64)}`, `${'f'.repeat(32)}.${exp}.${sig}`, issueSession(Buffer.alloc(32, 6)).token, issueSession(SKEY, 1000).token];
+  for (const f of forged) assert.equal((await mkChat(f, camp)).status, 400, f.slice(0, 24));
+  assert.equal(await count(`select count(*)::int as n from core.consult_events`), total);
+  assert.equal((await mkChat(null, camp, null)).status, 503); // 서명 키 없으면 상담 경로 닫힘
   await assert.rejects(withRoleOn(app, 'public', (tx) => tx`select * from core.consult_events`), (e: { code?: string }) => e.code === '42501');
   await assert.rejects(admin`delete from core.consult_events`, (e: { code?: string }) => e.code === '42501');
+});
+
+test('E14 광고 중지 실패: 경고 열림 → 지출·새 승인 차단 → 목록 노출 → 대표만 해결 → 재개, 감사 기록', async () => {
+  const runDeps = (w: StaffIdentity, platform: AdPlatform) => ({ ...adDeps(w), platform, env: () => adDeps(w).env() });
+  const camp = 'e14-camp';
+  const body0 = async (r: Response) => (await r.json()) as Record<string, unknown>;
+  const f0 = await count(`select count(*)::int as n from core.audit_logs where action = 'ad.stop_failed'`);
+  const r0 = await count(`select count(*)::int as n from core.audit_logs where action = 'ad.alert_resolve'`);
+  assert.equal((await adBudgetAction(adDeps(owner), { action: 'approve', campaign: camp, dailyCapKrw: 1000, totalCapKrw: 3000, hours: 24, reason: 'E14 승인' })).status, 201);
+  // 초과 수집 + 플랫폼 중지 실패 → 승인은 철회됐지만 경고가 열린다(응답은 성공, 비밀 노출 없음)
+  const broken: AdPlatform = { ...mockPlatform, async pause() { throw new Error('platform secret 123'); }, async fetchPerformance() { return { impressions: 100, clicks: 10, costKrw: 100 }; } };
+  const col = await adRunAction(runDeps(owner, broken), { action: 'collect', campaign: camp, day: kst(1) });
+  const cb = await body0(col);
+  assert.equal(col.status, 200);
+  assert.deepEqual(cb.autoStop, { revoked: true, revokeNote: null, paused: false, simulated: true, alert: { opened: true } });
+  assert.ok(!JSON.stringify(cb).includes('secret'));
+  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.stop_failed'`), f0 + 1);
+  // 같은 캠페인에서 다시 실패해도 열린 경고는 1건(멱등)
+  await adRunAction(runDeps(owner, broken), { action: 'collect', campaign: camp, day: kst(2) });
+  assert.equal(await count(`select count(*)::int as n from core.ad_alerts where campaign_key = '${camp}' and state = 'open'`), 1);
+  // 경고가 열려 있는 동안: 지출 STOP_PENDING, 새 승인 ALERT_OPEN
+  const sp = await body0(await adRunAction(runDeps(owner, mockPlatform), { action: 'launch', campaign: camp, amountKrw: 100, requestKey: 'e14-key-0000000000001' }));
+  assert.deepEqual([sp.decision, sp.reason], ['BLOCK', 'STOP_PENDING']);
+  const na = await adBudgetAction(adDeps(owner), { action: 'approve', campaign: camp, dailyCapKrw: 1000, totalCapKrw: 3000, hours: 24, reason: 'E14 재승인' });
+  assert.deepEqual([na.status, (await body0(na)).code], [422, 'ALERT_OPEN']);
+  // 관리자 목록에 보이고(검토자도 조회), 해결은 대표만
+  const list = async (w: StaffIdentity) => { const r = await adFunnel(adDeps(w), new Request(`http://x/api/admin/ads/funnel?from=${kst(7)}&to=${kst(0)}`)); return (await body0(r)).alerts as { id: string; campaign_key: string; state: string }[]; };
+  const open = (await list(reviewer)).find((a) => a.campaign_key === camp && a.state === 'open');
+  assert.ok(open);
+  for (const w of [reviewer, editor]) assert.equal((await adRunAction(runDeps(w, mockPlatform), { action: 'alert_resolve', id: open.id, note: '확인' })).status, 403);
+  assert.equal((await adRunAction(runDeps(owner, mockPlatform), { action: 'alert_resolve', id: open.id, note: '플랫폼에서 직접 중지 확인' })).status, 200);
+  assert.equal((await adRunAction(runDeps(owner, mockPlatform), { action: 'alert_resolve', id: open.id, note: '다시' })).status, 422); // 이미 해결됨
+  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.alert_resolve'`), r0 + 1);
+  assert.equal((await list(owner)).find((a) => a.id === open.id)?.state, 'resolved');
+  // 해결 뒤에는 새 승인·집행이 다시 가능
+  assert.equal((await adBudgetAction(adDeps(owner), { action: 'approve', campaign: camp, dailyCapKrw: 1000, totalCapKrw: 3000, hours: 24, reason: 'E14 재개' })).status, 201);
+  assert.equal((await body0(await adRunAction(runDeps(owner, mockPlatform), { action: 'launch', campaign: camp, amountKrw: 100, requestKey: 'e14-key-0000000000002' }))).ok, true);
+  // 앱 역할은 경고를 직접 읽거나 고치거나 지울 수 없다
+  await assert.rejects(withRoleOn(app, 'staff', (tx) => tx`select * from core.ad_alerts`), (e: { code?: string }) => e.code === '42501');
+  await assert.rejects(admin`update core.ad_alerts set state = 'open'`, (e: { code?: string }) => e.code === '42501');
+  await assert.rejects(admin`delete from core.ad_alerts`, (e: { code?: string }) => e.code === '42501');
+});
+
+test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수·상한, 감사에 변경 전후 기록, AI 정산 중복·경합·장애 복구', async () => {
+  const get = async (w: StaffIdentity) => { const r = await aiBudgetGet(adDeps(w)); return { status: r.status, b: (await r.json()) as Record<string, unknown> }; };
+  const a0 = await count(`select count(*)::int as n from core.audit_logs where action = 'ai.budget_limit_set'`);
+  const g0 = await get(reviewer);
+  assert.deepEqual([g0.status, g0.b.limitKrw], [200, 0]);
+  assert.equal((await get(editor)).status, 403);
+  const set = (w: StaffIdentity, b: unknown) => aiBudgetSet(adDeps(w), b);
+  for (const w of [reviewer, editor]) assert.equal((await set(w, { limitKrw: 100, reason: '시험' })).status, 403);
+  assert.equal((await set(owner, { limitKrw: 100001, reason: '시험' })).status, 422);
+  assert.equal((await set(owner, { limitKrw: 100, reason: '' })).status, 422);
+  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ai.budget_limit_set'`), a0);
+  const budget = createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never)));
+  const used0 = (await get(owner)).b.usedKrw as number;
+  try {
+    assert.equal((await set(owner, { limitKrw: used0 + 20, reason: 'E15 시험' })).status, 200);
+    const g1 = await get(owner);
+    assert.equal(g1.b.limitKrw, used0 + 20);
+    assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ai.budget_limit_set'`), a0 + 1);
+    const [au] = await admin`select detail from core.audit_logs where action = 'ai.budget_limit_set' order by at desc limit 1`;
+    assert.ok(JSON.stringify(au.detail).includes(String(used0 + 20)));
+    // 같은 예약을 확정·취소·재확정해도 정산은 1번만, 사용액은 처음 정산대로
+    const h = await budget.reserve(5);
+    assert.ok(h);
+    await Promise.all([h.confirm(2), h.cancel(), h.confirm(4)]); // 경합: 먼저 들어온 1건만 반영
+    await h.confirm(3);
+    await h.cancel();
+    assert.equal(await count(`select count(*)::int as n from core.ai_usage_closures where reservation_id = (select max(id) from core.ai_usage_ledger)`), 1);
+    const used1 = (await get(owner)).b.usedKrw as number;
+    assert.ok([used0, used0 + 2, used0 + 4].includes(used1), String(used1));
+    // 장애 복구: 정산이 일시 실패해도 재시도로 반영, 3번 모두 실패하면 미정산(예약 전액)으로 남고 예외는 없다
+    let fail = 2;
+    const flakyRun = (n: () => number) => createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(((s: TemplateStringsArray, ...v: unknown[]) => {
+      if (s.join('?').includes('ai_budget_confirm') && n() > 0) { fail--; throw new Error('db blip'); }
+      return (tx as never as (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>)(s, ...v);
+    }) as never)));
+    const h2 = await flakyRun(() => fail).reserve(6);
+    assert.ok(h2);
+    await h2.confirm(1);
+    assert.equal(fail, 0);
+    assert.deepEqual(await admin`select kind, actual_cost_krw from core.ai_usage_closures where reservation_id = (select max(id) from core.ai_usage_ledger)`.then((r) => r.map((x) => [x.kind, x.actual_cost_krw])), [['confirm', 1]]);
+    fail = 99;
+    const h3 = await flakyRun(() => fail).reserve(7);
+    assert.ok(h3);
+    const unc0 = (await get(owner)).b.unconfirmed as number;
+    await assert.doesNotReject(h3.confirm(2));
+    assert.equal(fail, 96); // 3번만 시도
+    assert.equal((await get(owner)).b.unconfirmed, unc0); // 미정산 그대로(예약 전액으로 계산)
+    fail = 0;
+    await h3.confirm(2); // 이후 정산은 여전히 가능(멱등 1회)
+    assert.equal((await get(owner)).b.unconfirmed, (unc0 as number) - 1);
+    // 한도를 줄여도 이미 쓴 금액은 유지되고 새 예약은 거부
+    assert.equal((await set(owner, { limitKrw: 0, reason: 'E15 복구' })).status, 200);
+    assert.equal(await budget.reserve(1), null);
+  } finally {
+    await admin`update core.ai_budget_config set monthly_limit_krw = 0 where singleton`;
+  }
 });

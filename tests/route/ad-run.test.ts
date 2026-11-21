@@ -139,7 +139,7 @@ test('AR10 초과 감지 자동 중지: 초과일 때만 승인 철회(DB)+플�
   const m2 = mk({ platform: s2.p, tx: (q) => { order.push(q.includes('ad_budget_revoke') ? 'revoke' : 'record'); return [{ r: { recorded: true, over_ledger: true } }]; } });
   const b2 = await j(await adRunAction(m2.d, collect()));
   assert.deepEqual(order, ['record', 'revoke', 'pause']);
-  assert.deepEqual(b2.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true });
+  assert.deepEqual(b2.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true, alert: null });
   // 철회 실패(승인 이미 없음 22023 / 그 밖의 오류)여도 플랫폼 중지는 진행, 결과 그대로 보고
   for (const [code, note] of [['22023', 'NO_ACTIVE_APPROVAL'], ['XX000', 'REVOKE_FAILED']] as const) {
     const s3 = spy();
@@ -154,6 +154,32 @@ test('AR10 초과 감지 자동 중지: 초과일 때만 승인 철회(DB)+플�
   const b4 = await j(r4);
   assert.deepEqual([r4.status, (b4.autoStop as Record<string, unknown>).revoked, (b4.autoStop as Record<string, unknown>).paused], [200, true, false]);
   assert.ok(!JSON.stringify(b4).includes('secret'));
+  // 중지 불완전(플랫폼 실패·철회 실패) → 관리자 경고를 연다(ad_alert_open). 완전 성공·승인 이미 없음은 경고 없음
+  assert.ok(m4.c.sql.some((q) => q.includes('ad_alert_open')));
+  assert.ok(!m2.c.sql.some((q) => q.includes('ad_alert_open')));
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const m5 = mk({ platform: spy(false, { async pause() { throw new Error('x'); } }).p, tx: (q) => (q.includes('ad_alert_open') ? [{ id: ID }] : [{ r: { recorded: true, over_ledger: true } }]) });
+  assert.deepEqual(((await j(await adRunAction(m5.d, collect()))).autoStop as Record<string, unknown>).alert, { opened: true });
+  // 경고 기록까지 실패해도 응답은 성공이며 opened=false로 정직하게 보고
+  const m6 = mk({ platform: spy(false, { async pause() { throw new Error('x'); } }).p, tx: (q) => (q.includes('ad_alert_open') ? Object.assign(new Error('db'), { code: 'XX000' }) : [{ r: { recorded: true, over_ledger: true } }]) });
+  const r6 = await adRunAction(m6.d, collect());
+  assert.deepEqual([r6.status, ((await j(r6)).autoStop as Record<string, unknown>).alert], [200, { opened: false }]);
+});
+test('AR11 경고 해결: owner만, 사유·id 형식 검사, DB 오류 그대로 안전하게 변환, 플랫폼 호출 0', async () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const s = spy(); const m = mk({ platform: s.p, tx: () => [{ ok: true }] });
+  const r = await adRunAction(m.d, { action: 'alert_resolve', id: ID, note: '플랫폼 콘솔에서 직접 중지 확인' });
+  assert.equal(r.status, 200);
+  assert.ok(m.c.sql.some((q) => q.includes('ad_alert_resolve')));
+  assert.equal(s.c.pause + s.c.launch + s.c.fetch, 0);
+  for (const bad of [{ id: 'x', note: 'nn' }, { id: ID, note: '' }, { id: ID, note: '   ' }, { id: ID }, { id: ID, note: 'nn', extra: 1 }]) {
+    const mm = mk(); assert.equal((await adRunAction(mm.d, { action: 'alert_resolve', ...bad })).status, 422); assert.equal(mm.c.tx, 0);
+  }
+  const mn = mk({ tx: () => Object.assign(new Error('NO_OPEN_ALERT'), { code: '22023' }) });
+  assert.equal((await adRunAction(mn.d, { action: 'alert_resolve', id: ID, note: 'nn' })).status, 422);
+  const mf = mk({ staff: who('reviewer') });
+  assert.equal((await adRunAction(mf.d, { action: 'alert_resolve', id: ID, note: 'nn' })).status, 403);
+  assert.equal(mf.c.tx, 0);
 });
 test('AR9 모의 어댑터는 결정적이고 형식이 맞음, AD_PLATFORM=mock 외에는 어댑터 없음, 정적: 실제 광고 API 주소·fetch 없음', async () => {
   const a = await mockPlatform.fetchPerformance('camp-a', '2026-11-20');

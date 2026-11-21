@@ -64,13 +64,16 @@ export function createDbAiBudget(run: RunAi): AiBudget {
         id = rows[0]?.id;
       } catch { return null; }
       if (typeof id !== 'string' || !/^\d{1,18}$/.test(id)) return null;
+      // 정산은 예약당 1번만 DB에 반영되는 멱등 호출이라 일시 장애는 최대 3번까지 다시 시도한다(false = 이미 정산됨 → 끝).
+      // 끝내 안 되면 미정산으로 남고, DB는 예약 비용 전액으로 센다(비용을 줄여 세지 않는다).
+      const settle = async (q: (tx: Parameters<Parameters<RunAi>[0]>[0]) => PromiseLike<unknown>) => {
+        for (let i = 0; i < 3; i++) {
+          try { await run(async (tx) => q(tx)); return; } catch { /* 다시 시도 */ }
+        }
+      };
       return {
-        async confirm(actual) {
-          try { await run(async (tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(0, Math.min(1000, Math.trunc(actual)))}::int)`); } catch { /* 미정산 = 예약 비용 전액 */ }
-        },
-        async cancel() {
-          try { await run(async (tx) => tx`select api.ai_budget_release(${id as string}::bigint)`); } catch { /* 미정산 = 예약 비용 전액 */ }
-        },
+        confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(0, Math.min(1000, Math.trunc(actual)))}::int)`),
+        cancel: () => settle((tx) => tx`select api.ai_budget_release(${id as string}::bigint)`),
       };
     },
   };

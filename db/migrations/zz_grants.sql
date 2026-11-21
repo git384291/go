@@ -109,7 +109,12 @@ grant execute on function
   api.ad_spend_request(uuid, uuid, text, text, int, text),
   api.ad_budget_overview(uuid, uuid, text, int),
   api.ad_performance_record(uuid, uuid, text, text, date, int, int, int, text),
-  api.ad_funnel(uuid, uuid, text, date, date)
+  api.ad_funnel(uuid, uuid, text, date, date),
+  api.ad_alert_open(uuid, uuid, text, text, jsonb),
+  api.ad_alert_resolve(uuid, uuid, text, uuid, text),
+  api.ad_alert_list(uuid, uuid, text, int),
+  api.ai_budget_limit_get(uuid, uuid, text),
+  api.ai_budget_limit_set(uuid, uuid, text, int, text)
   to app_staff;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
