@@ -47,8 +47,10 @@ const newKey = (): string => {
 // 카카오톡은 상품 문의 창구이며 가입 접수가 아니다(PM 6938169689).
 export type ApplicationChoice = { carrier: string; productId: string; regionCode: string };
 // choice: AI 상담 화면이 서버 설정으로 고정한 상품 선택. 넘기면 'AI 신청서 도우미'가 열리고 접수 때 총판 전달용 신청서 답변을 함께 보낸다(없으면 기존 양식 그대로).
-export function ConsultForm({ options, kakaoUrl, choice }: { options: readonly ConsultOption[]; kakaoUrl: string | null; choice?: ApplicationChoice }) {
-  const [appAnswers, setAppAnswers] = useState<Application>({});
+// app: 신청서 답을 바깥(AI 상담 화면)이 들고 있을 때 넘긴다. 이때 도우미는 바깥에서 보여 주므로 이 양식 안에는 그리지 않는다(없으면 기존대로 양식 안에서 묻는다).
+export function ConsultForm({ options, kakaoUrl, choice, app }: { options: readonly ConsultOption[]; kakaoUrl: string | null; choice?: ApplicationChoice; app?: Application }) {
+  const [ownAnswers, setAppAnswers] = useState<Application>({});
+  const appAnswers = app ?? ownAnswers;
   const hasOption = options.length > 0;
   // 공개 준비값(사이트 키·처리방침 버전)이 하나라도 비면 위젯 외부 요청과 접수 요청을 모두 만들지 않는다
   const noticeReady = noticeReadiness(REQUIRED_NOTICES, PRIVACY_VERSION).ready;
@@ -304,7 +306,7 @@ export function ConsultForm({ options, kakaoUrl, choice }: { options: readonly C
           <input name="contactTime" maxLength={50} placeholder="예: 평일 저녁 7시 이후" />
         </label>
 
-        {choice && <ApplicationAssistant app={appAnswers} onChange={setAppAnswers} />}
+        {choice && app === undefined && <ApplicationAssistant app={appAnswers} onChange={setAppAnswers} />}
         <div className="consent-box">
           <label className="check">
             <input
