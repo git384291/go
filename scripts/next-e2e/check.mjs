@@ -348,7 +348,7 @@ try {
     await pg.goto(`${BASE}/admin/leads/${lid}/packet`);
     await pg.selectOption('select[aria-label="열람 사유"]', 'dealer_handoff');
     await pg.click('button:has-text("신청서 열기")');
-    await pg.waitForSelector('pre[data-field=packet]', { timeout: 15000 });
+    await pg.waitForSelector('pre[data-field=packet]', { timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} url=${pg.url()} msg=${await pg.locator('[data-field=msg]').textContent().catch(() => 'n/a')} body=${(await pg.locator('body').textContent().catch(() => '')).slice(0, 160)}`); });
     const shown = await pg.locator('pre[data-field=packet]').textContent();
     const st = await pg.locator('[data-field=status]').textContent();
     const sentDisabled = await pg.locator('button:has-text("총판 전달 완료 기록")').isDisabled();
