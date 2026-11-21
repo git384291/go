@@ -110,7 +110,7 @@ try {
   check('N12 접수 코드 실행(시험 고지): 성공, DB 저장', sd.status === 0 && (await n(`select count(*)::int as n from core.leads`)) === l0 + 1, (sd.stdout + sd.stderr).slice(0, 120).replace(/\n/g, ' '));
   const enc = await sql.unsafe(`select count(*)::int as n from core.leads where idempotency_key = 'next-e2e-seed-0000000001' and name_masked is not null`);
   check('N12b 개인정보는 암호화 저장(원문 이름·전화가 평문 열에 없음)', Number(enc[0].n) === 1 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%7777%' or to_jsonb(l)::text like '%김이투이%'`)) === 0);
-  const ll = await adm('/api/admin/leads', ownerC);
+  const ll = await adm('/api/admin/leads?limit=1', ownerC);
   const lt = await ll.text();
   check('N13 관리자 접수 목록(Next→DB): 200, 마스킹된 전화번호 표시, 원문 전화·이름 없음', ll.status === 200 && lt.includes('010-****-1234') && !lt.includes('7777') && !lt.includes('김이투이'), `status=${ll.status} ${ll.status === 200 ? '' : lt.slice(0, 120)}`);
   check('N13b 무인증·검토자 외 역할 규칙: 무인증 목록 401', (await adm('/api/admin/leads')).status === 401);
