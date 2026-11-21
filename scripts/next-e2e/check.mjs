@@ -300,7 +300,11 @@ try {
   check('RV7 검수 이력 조회: 승인(현재 문구 기준) 표시, 정책 담당·무인증은 조회 불가', rl.status === 200 && rlj.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === true) && [401, 403].includes((await adm(rurl, editorC)).status) && (await adm(rurl)).status === 401);
   // 승인 이후 전체 흐름: DB 승인 문구로 구성한 화면 설정 → 동의·고지 키 → 접수(암호화) → 노출 기록 해시 → 관리자 목록(마스킹)
   const lf0 = await n(`select count(*)::int as n from core.leads`);
-  const flow = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+  // 접수 문서 버전은 DB 설정(privacy_policy_version)과 같아야 한다 — 고지 버전을 바꾸는 배포에서는 이 설정도 함께 바뀌어야 한다(시험 뒤 원래 값으로 복구)
+  const pv = async (v) => sql.unsafe(`update core.settings set value = '${JSON.stringify(v)}'::jsonb where key = 'privacy_policy_version'`);
+  const pv0 = (await sql.unsafe(`select value #>> '{}' as v from core.settings where key = 'privacy_policy_version'`))[0]?.v;
+  let flow;
+  try { await pv('next-e2e-v1'); flow = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/flow-approved.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 }); } finally { await pv(pv0); }
   check('FL1 승인된 고지 설정으로 접수 코드 실행: 성공, DB에 1건 저장', flow.status === 0 && (await n(`select count(*)::int as n from core.leads`)) === lf0 + 1, (flow.stdout + flow.stderr).slice(0, 120).replace(/\n/g, ' '));
   check('FL2 고객별 고지 노출 기록의 해시가 승인된 DB 문구 해시와 같음, 동의 기록 있음', (await n(`select count(*)::int as n from pii.notice_exposures e join core.notice_texts t on t.version = e.doc_version and t.notice_key = e.notice_key and t.body_sha256 = e.body_sha256 where e.doc_version = 'next-e2e-v1'`)) === 1 && (await n(`select count(*)::int as n from pii.consents where doc_version = 'next-e2e-v1' and granted`)) === 1);
   check('FL3 개인정보 암호화 저장(평문 이름·전화 없음)', (await n(`select count(*)::int as n from pii.customers c where to_jsonb(c)::text like '%8888%' or to_jsonb(c)::text like '%김플로우%'`)) === 0 && (await n(`select count(*)::int as n from core.leads l where to_jsonb(l)::text like '%8888%' or to_jsonb(l)::text like '%김플로우%'`)) === 0);
