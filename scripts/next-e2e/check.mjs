@@ -340,7 +340,7 @@ try {
   try {
     const { chromium } = await import('playwright');
     const br = await chromium.launch();
-    const ctx = await br.newContext({ viewport: { width: 1000, height: 1400 } });
+    const ctx = await br.newContext({ viewport: { width: 1000, height: 1400 }, bypassCSP: true }) // next dev는 eval을 써서 운영 CSP와 충돌: 시험 서버에서만 우회;
     const [cn, ...cv] = ownerC.split('=');
     await ctx.addCookies([{ name: cn, value: cv.join('='), url: BASE }]);
     await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin }).catch(() => {});
