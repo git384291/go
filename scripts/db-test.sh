@@ -59,6 +59,7 @@ run db/tests/60_policy_store.sql >/dev/null   # 정책 저장소(0008)
 run db/tests/61_policy_list.sql >/dev/null   # 정책 조회 함수(0009)
 run db/tests/70_ad_budget.sql >/dev/null    # 광고 예산 통제(0010)
 run db/tests/80_ad_performance.sql >/dev/null   # 광고 성과·AI 사용료(0011)
+run db/tests/90_consult_ai_confirm.sql >/dev/null   # 상담 집계·AI 정산(0012)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -526,6 +527,23 @@ D -q -f db/rollback/0011_restore.sql >/dev/null
 r11=$(D -At -c "select (select count(*) from core.ad_performance) || '/' || (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger) || '/' || (select monthly_limit_krw from core.ai_budget_config)")
 [ "$r11" = "1/7/40" ] || { echo "FAIL | M11c 0011 복구 건수 불일치 $r11" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M11 광고 성과·AI 사용료 0011 롤백: 성과 1건·사용 7원·한도 40원 보관, 새 객체 제거, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
+# 0012 상담 집계·AI 정산: 적용 → 기록 → 롤백(보관, ai_budget_reserve는 0011 정의로) → 복구
+D -f db/migrations/0012_consult_events_ai_confirm.sql >/dev/null
+D -q -c "insert into core.consult_events (session_key, campaign_key) values ('drill-session-000000001', 'drill-camp')"
+D -q -c "insert into core.ai_usage_ledger (month, cost_krw) values ('2026-11', 9)"
+D -q -c "insert into core.ai_usage_closures (reservation_id, kind, actual_cost_krw) select max(id), 'confirm', 4 from core.ai_usage_ledger"
+D -f db/rollback/0012_down.sql >/dev/null
+gone12=$(D -At -c "select (to_regclass('core.consult_events') is null and to_regclass('core.ai_usage_closures') is null and to_regprocedure('api.ai_budget_hold(int)') is null and to_regprocedure('api.ai_budget_reserve(int)') is not null)::text")
+a12=$(D -At -c "select (select count(*) from core.consult_events_rollback_archive) || '/' || (select sum(actual_cost_krw) from core.ai_usage_closures_rollback_archive)")
+prot12=$(D -At -c "select count(*) from pg_class c where c.oid in ('core.consult_events_rollback_archive'::regclass, 'core.ai_usage_closures_rollback_archive'::regclass) and c.relrowsecurity and c.relforcerowsecurity")
+open12=$(D -At -c "select count(*) from (values ('core.consult_events_rollback_archive'), ('core.ai_usage_closures_rollback_archive')) t(r) cross join (values ('public'), ('app_public'), ('app_staff'), ('app_server'), ('app_ai')) g(role) where has_table_privilege(g.role, t.r, 'SELECT')")
+[ "$gone12" = true ] && [ "$a12" = "1/4" ] && [ "$prot12" = 2 ] && [ "$open12" = 0 ] || { echo "FAIL | M12 0012 롤백 gone=$gone12 보관=$a12 RLS=$prot12 열림=$open12" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+if D -q -f db/rollback/0012_down.sql >/dev/null 2>&1; then echo "FAIL | M12b 0012 보관본이 있는데 롤백이 다시 성공" | tee -a "$LOG_DIR/db-test.log"; exit 1; fi
+D -f db/migrations/0012_consult_events_ai_confirm.sql >/dev/null
+D -q -f db/rollback/0012_restore.sql >/dev/null
+r12=$(D -At -c "select (select count(*) from core.consult_events) || '/' || (select sum(actual_cost_krw) from core.ai_usage_closures)")
+[ "$r12" = "1/4" ] || { echo "FAIL | M12c 0012 복구 건수 불일치 $r12" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M12 상담 집계·AI 정산 0012 롤백: 상담 1건·정산 4원 보관, 새 객체 제거·예약 함수 0011로 복귀, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

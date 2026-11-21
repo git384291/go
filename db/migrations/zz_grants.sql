@@ -84,7 +84,8 @@ grant execute on function
 
 grant execute on function
   api.create_lead(text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text),
-  api.policy_published()
+  api.policy_published(),
+  api.consult_event_record(text, text)   -- 0012: 상담 시작 건수(개인정보 없음)
   to app_public;
 
 grant execute on function
@@ -112,7 +113,8 @@ grant execute on function
   to app_staff;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
-grant execute on function api.ai_budget_reserve(int) to app_ai;
+grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint) to app_ai;
+grant execute on function api.ad_funnel_full(uuid, uuid, text, date, date) to app_staff;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.
 -- AI 예산 함수(3단계)는 app_public이 아닌 서버 내부 전용 역할에만 부여한다(REV-004 SEC-04).

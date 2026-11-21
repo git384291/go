@@ -12,7 +12,8 @@ import { signToken } from '../../src/server/security/token';
 import { adminLeadsList } from '../../src/server/admin/leadsRoute';
 import { answerQuote } from '../../src/server/consult/quoteAnswer';
 import { answerChat } from '../../src/server/consult/chatAnswer';
-import { createAiBudget, createDbAiBudget, mockModel, type ChatModel } from '../../src/server/consult/chatModel';
+import { handleChat } from '../../src/server/consult/chatHandler';
+import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type ChatModel } from '../../src/server/consult/chatModel';
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
 import { adFunnel, adRunAction } from '../../src/server/admin/adRun';
 import { mockPlatform, type AdPlatform } from '../../src/server/advertising/platform';
@@ -384,11 +385,20 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   assert.equal((await body0(await launch(owner, 'e11-key-0000000000005', 600))).reason, 'DAILY_CAP_EXCEEDED');
   assert.equal(await ledgerSum(camp), 500);
   // 4) 성과 수집: 원장 안(400 ≤ 500)은 정상, 원장 없는 어제 100원은 초과 표시, 같은 날 재수집은 중복 없음
-  const fake = (cost: number): AdPlatform => ({ ...mockPlatform, async fetchPerformance() { return { impressions: 1000, clicks: 40, costKrw: cost }; } });
+  let paused = 0;
+  const fake = (cost: number): AdPlatform => ({ ...mockPlatform, async pause() { paused++; return { paused: true }; }, async fetchPerformance() { return { impressions: 1000, clicks: 40, costKrw: cost }; } });
   const col = async (day: string, cost: number, w = owner) => adRunAction(runDeps(w, fake(cost)), { action: 'collect', campaign: camp, day });
   assert.deepEqual(await body0(await col(kst(0), 400)), { ok: true, recorded: true, overLedger: false, source: 'mock' });
   assert.equal((await body0(await col(kst(0), 400))).recorded, false);
-  assert.equal((await body0(await col(kst(1), 100))).overLedger, true);
+  assert.equal(paused, 0); // 정상 수집은 중지하지 않는다
+  const over = await body0(await col(kst(1), 100));
+  assert.equal(over.overLedger, true);
+  // 초과 감지 → 자동 중지: 승인 철회 + 플랫폼 중지, 이후 모든 지출 차단
+  assert.deepEqual(over.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true });
+  assert.equal(paused, 1);
+  assert.equal((await body0(await launch(owner, 'e11-key-0000000000006', 100))).reason, 'NO_APPROVAL');
+  assert.equal(await ledgerSum(camp), 500);
+  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.budget_revoke' and reason = '광고비 초과 감지 자동 중지'`) >= 1, true);
   assert.equal((await col(kst(0), 400, reviewer)).status, 403);
   assert.equal((await col(kst(-1), 100)).status, 422); // 미래 날짜
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.performance_overspend'`), over0 + 1);
@@ -405,37 +415,94 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   assert.equal((await adFunnel(adDeps(who('00000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'counselor')), new Request('http://x/'))).status, 403);
 });
 
-test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 한도 안에서만 예약, 전용 역할만 실행, 원장·설정 직접 접근 불가', async () => {
+test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확정/취소, 호출 전 실패만 취소·장애는 확정, 한도 안에서만(동시 포함), 전용 역할만 실행', async () => {
   const budget = createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never)));
-  const reserved = async () => count(`select coalesce(sum(cost_krw), 0)::int as n from core.ai_usage_ledger`);
-  const r0 = await reserved();
+  const used = async () => count(`select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0)::int as n
+    from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id`);
+  const u0 = await used();
   const [cfg] = await admin`select monthly_limit_krw from core.ai_budget_config where singleton`;
   assert.equal(cfg.monthly_limit_krw, 0);
-  assert.equal(await budget.reserve(3), false);
-  assert.equal(await reserved(), r0);
+  assert.equal(await budget.reserve(3), null);
+  assert.equal(await used(), u0);
   // 유료로 가정한 모델은 한도 0원이면 호출 0회(상담 경로 전체)
   let calls = 0;
   const paid: ChatModel = { name: 'paid-fake', costPerCallKrw: 3, async generate() { calls++; return '안내'; } };
   const provider = dbPolicyProvider(async () => []);
-  const chat = await answerChat({ provider, supplierId: 'supplier-a', model: paid, budget }, { message: '요금?', carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1' }, new Date());
+  const ask = (model: ChatModel) => answerChat({ provider, supplierId: 'supplier-a', model, budget }, { message: '요금?', carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1' }, new Date());
+  const chat = await ask(paid);
   assert.ok(chat.ok && chat.source === 'fallback' && calls === 0);
   try {
-    await admin`update core.ai_budget_config set monthly_limit_krw = ${r0 + 5} where singleton`;
-    assert.equal(await budget.reserve(3), true);
-    assert.equal(await budget.reserve(3), false);
-    assert.equal(await budget.reserve(2), true);
-    assert.equal(await reserved(), r0 + 5);
-    // 동시 예약: 한도 안에서만 성공
-    await admin`update core.ai_budget_config set monthly_limit_krw = ${r0 + 15} where singleton`;
-    const got = await Promise.all(Array.from({ length: 6 }, () => budget.reserve(3)));
-    assert.equal(got.filter(Boolean).length, 3); // 남은 10원 → 3원씩 3번
-    assert.equal(await reserved(), r0 + 14);
+    await admin`update core.ai_budget_config set monthly_limit_krw = ${u0 + 10} where singleton`;
+    // 정상 호출: 예약 3 → 호출 → 확정(모델 비용 3)
+    const ok = await ask(paid);
+    assert.ok(ok.ok && ok.source === 'model' && calls === 1);
+    assert.equal(await used(), u0 + 3);
+    // 호출 전 실패(설정 누락 등)는 취소 → 사용액 변화 없음
+    const unsent: ChatModel = { name: 'no-key', costPerCallKrw: 3, async generate() { throw new ModelNotCalledError('no key'); } };
+    const c1 = await ask(unsent);
+    assert.ok(c1.ok && c1.source === 'fallback');
+    assert.equal(await used(), u0 + 3);
+    // 장애(비용이 났을 수 있음)는 확정 → 사용액 증가
+    const down: ChatModel = { name: 'down', costPerCallKrw: 3, async generate() { throw new Error('upstream 500'); } };
+    const c2 = await ask(down);
+    assert.ok(c2.ok && c2.source === 'fallback');
+    assert.equal(await used(), u0 + 6);
+    // 직접 확정·취소: 같은 예약 재정산 불가, 실제 비용이 예약보다 작으면 줄어듦
+    const r = await budget.reserve(4);
+    assert.ok(r);
+    await r.confirm(1);
+    await r.cancel(); // 이미 확정됨 → 무시
+    assert.equal(await used(), u0 + 7);
+    // 동시 예약: 남은 3원 → 3원짜리는 정확히 1건만
+    const got = await Promise.all(Array.from({ length: 5 }, () => budget.reserve(3)));
+    assert.equal(got.filter(Boolean).length, 1);
+    assert.equal(await used(), u0 + 10);
+    // 미정산 예약은 전액으로 센다(보수적) — 위 동시 예약 1건이 미정산
+    assert.equal(await budget.reserve(1), null);
   } finally {
     await admin`update core.ai_budget_config set monthly_limit_krw = 0 where singleton`;
   }
   // 다른 역할·직접 접근 차단
-  await assert.rejects(withRoleOn(app, 'public', (tx) => tx`select api.ai_budget_reserve(1)`), (e: { code?: string }) => e.code === '42501');
-  await assert.rejects(withRoleOn(app, 'staff', (tx) => tx`select api.ai_budget_reserve(1)`), (e: { code?: string }) => e.code === '42501');
+  for (const role of ['public', 'staff'] as const) {
+    await assert.rejects(withRoleOn(app, role, (tx) => tx`select api.ai_budget_hold(1)`), (e: { code?: string }) => e.code === '42501');
+    await assert.rejects(withRoleOn(app, role, (tx) => tx`select api.ai_budget_confirm(1, 1)`), (e: { code?: string }) => e.code === '42501');
+  }
   await assert.rejects(withRoleOn(app, 'ai', (tx) => tx`select * from core.ai_usage_ledger`), (e: { code?: string }) => e.code === '42501');
+  await assert.rejects(withRoleOn(app, 'ai', (tx) => tx`select * from core.ai_usage_closures`), (e: { code?: string }) => e.code === '42501');
+  await assert.rejects(admin`update core.ai_usage_closures set actual_cost_krw = 0`, (e: { code?: string }) => e.code === '42501');
   await assert.rejects(admin`update core.ai_usage_ledger set cost_krw = 1`, (e: { code?: string }) => e.code === '42501');
+});
+
+// 상담(AI 상담창) → 필수 고지 → 동의 → 접수 → DB 암호화 저장 → 관리자 마스킹 조회. 상담 시작은 캠페인별로 집계된다
+test('E13 상담 시작 집계(API 핸들러→DB): 세션당 1건, 캠페인 연결, 접수까지 이어진 전환이 분석에 보임, 고지 미확정은 접수 차단 유지', async () => {
+  const camp = 'e13-camp';
+  const mkChat = (session: string, campaign?: string) => handleChat(new Request('http://x/api/consult/chat', { method: 'POST', body: JSON.stringify({ carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1', message: '요금이 궁금해요', session, ...(campaign ? { campaign } : {}) }) }), {
+    enabled: true, limiter: () => true, ip: '203.0.113.50', now: () => new Date(),
+    chat: { provider: dbPolicyProvider(async () => []), supplierId: 'supplier-a', model: mockModel, budget: createAiBudget({}) },
+    recordConsult: async (sess, c) => { await withRoleOn(app, 'public', (tx) => tx`select api.consult_event_record(${sess}, ${c})`); },
+  });
+  const c0 = await count(`select count(*)::int as n from core.consult_events where campaign_key = '${camp}'`);
+  assert.equal((await mkChat('e13-session-000000001', camp)).status, 200);
+  assert.equal((await mkChat('e13-session-000000001', camp)).status, 200); // 같은 창에서 계속 대화해도 1건
+  assert.equal((await mkChat('e13-session-000000002', camp)).status, 200);
+  assert.equal((await mkChat('e13-session-000000003')).status, 200);       // 캠페인 없는 상담
+  assert.equal(await count(`select count(*)::int as n from core.consult_events where campaign_key = '${camp}'`), c0 + 2);
+  // 접수는 고지 확정 전에는 막힌다(실제 설정), 시험 고지를 넣은 경우에만 저장된다
+  const { notices: _omit, ...real } = ctx();
+  const l0 = await count(LEADS);
+  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e13-signup-0000000001', phone: '010-3333-2468', name: '김일삼', utmCampaign: camp }), real, run), { ok: false, code: 'NOTICE_NOT_CONFIRMED', status: 503 });
+  assert.equal(await count(LEADS), l0);
+  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e13-signup-0000000001', phone: '010-3333-2468', name: '김일삼', utmCampaign: camp }), ctx(), run), { ok: true });
+  // 분석: 상담 2 → 접수 1, 개인정보는 응답에 없음
+  const fr = await adFunnel(adDeps(owner), new Request(`http://x/api/admin/ads/funnel?from=${kst(1)}&to=${kst(0)}`));
+  const ft = await fr.text();
+  assert.equal(fr.status, 200, ft.slice(0, 200));
+  const row = (JSON.parse(ft).items as Record<string, unknown>[]).find((i) => i.campaign === camp);
+  assert.ok(row, ft.slice(0, 300));
+  assert.deepEqual([row.consults, row.leads, row.leadRate], [c0 + 2, 1, Math.round((1 / (c0 + 2)) * 10000) / 10000]);
+  assert.ok(!ft.includes('3333') && !ft.includes('김일삼') && !ft.includes('2468'));
+  // 형식 밖 세션은 핸들러가 막아 DB 0회, 앱 역할은 상담 기록을 직접 읽거나 지울 수 없다
+  assert.equal((await mkChat('short')).status, 400);
+  await assert.rejects(withRoleOn(app, 'public', (tx) => tx`select * from core.consult_events`), (e: { code?: string }) => e.code === '42501');
+  await assert.rejects(admin`delete from core.consult_events`, (e: { code?: string }) => e.code === '42501');
 });

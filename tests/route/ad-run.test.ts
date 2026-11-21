@@ -12,7 +12,7 @@ const NOW = new Date('2026-11-21T03:00:00Z'); // KST 12:00 11/21
 const ENV = { ADMIN_AD_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_123_abcdef01' };
 const KEY = 'req-0123456789abcdef';
 const who = (role: string) => ({ actor: '00000000-0000-4000-8000-000000000001', session: '00000000-0000-4000-8000-0000000000aa', token: 'secret-tok', role }) as StaffIdentity;
-const spy = (live = false, over: Partial<AdPlatform> = {}) => { const c = { launch: 0, fetch: 0 }; const p: AdPlatform = { name: 'spy', live, async launch() { c.launch++; return { externalId: 'ext-1' }; }, async fetchPerformance() { c.fetch++; return { impressions: 1000, clicks: 40, costKrw: 400 }; }, ...over }; return { p, c }; };
+const spy = (live = false, over: Partial<AdPlatform> = {}) => { const c = { launch: 0, fetch: 0, pause: 0 }; const p: AdPlatform = { name: 'spy', live, async launch() { c.launch++; return { externalId: 'ext-1' }; }, async pause() { c.pause++; return { paused: true }; }, async fetchPerformance() { c.fetch++; return { impressions: 1000, clicks: 40, costKrw: 400 }; }, ...over }; return { p, c }; };
 function mk(o: { env?: Record<string, string | undefined>; staff?: StaffIdentity | Error; platform?: AdPlatform | null; tx?: (q: string) => unknown } = {}) {
   const c = { staff: 0, tx: 0, sql: [] as string[] };
   const d: AdRunDeps = {
@@ -111,18 +111,49 @@ test('AR7 성과 수집: 어댑터 값 재검증(클릭>노출·음수·비정�
   assert.equal(boom.status, 502);
 });
 test('AR8 분석: owner·reviewer 조회, 기간 검증, 비율 계산, 상담 단계 미집계 표시, 이상 값은 거부', async () => {
-  const rows = [{ campaign_key: 'camp-a', impressions: '1000', clicks: '40', cost_krw: '400', ledger_krw: '500', leads: '2', overspend_days: '0' }, { campaign_key: 'camp-b', impressions: '0', clicks: '0', cost_krw: '0', ledger_krw: '0', leads: '1', overspend_days: '1' }];
+  const rows = [{ campaign_key: 'camp-a', impressions: '1000', clicks: '40', cost_krw: '400', ledger_krw: '500', consults: '8', leads: '2', overspend_days: '0' }, { campaign_key: 'camp-b', impressions: '0', clicks: '0', cost_krw: '0', ledger_krw: '0', consults: '0', leads: '1', overspend_days: '1' }];
   const ok = await adFunnel(mk({ staff: who('reviewer'), tx: () => rows }).d, new Request('http://x/api/admin/ads/funnel'));
   const b = await j(ok);
-  assert.equal(ok.status, 200); assert.equal(b.consultTracked, false);
+  assert.equal(ok.status, 200); assert.equal(b.consultTracked, true);
   const [a, c2] = b.items as Record<string, unknown>[];
-  assert.deepEqual([a.clickRate, a.leadRate, a.costPerLeadKrw, a.overBudget], [0.04, 0.05, 200, false]);
-  assert.deepEqual([c2.clickRate, c2.leadRate, c2.overBudget], [null, null, true]);
+  assert.deepEqual([a.clickRate, a.consultRate, a.leadRate, a.costPerLeadKrw, a.overBudget], [0.04, 0.2, 0.25, 200, false]);
+  assert.deepEqual([c2.clickRate, c2.consultRate, c2.leadRate, c2.overBudget], [null, null, null, true]);
   assert.equal((await adFunnel(mk({ staff: who('counselor') }).d, new Request('http://x/'))).status, 403);
   for (const q of ['from=2026-11-22&to=2026-11-21', 'to=2026-11-22', 'from=bad', 'from=2026-02-31']) assert.equal((await adFunnel(mk().d, new Request(`http://x/?${q}`))).status, 400, q);
   assert.equal((await adFunnel(mk({ tx: () => [{ ...rows[0], clicks: 'abc' }] }).d, new Request('http://x/'))).status, 502);
   assert.equal((await adFunnel(mk({ tx: () => new Error('x') }).d, new Request('http://x/'))).status, 503);
   assert.equal(ok.headers.get('cache-control'), 'private, no-store');
+});
+test('AR10 초과 감지 자동 중지: 초과일 때만 승인 철회(DB)+플랫폼 중지, 정상·중복은 중지 안 함, 한쪽 실패해도 다른 쪽 진행·결과 그대로 보고', async () => {
+  // 정상(초과 아님) → 중지 없음
+  const s0 = spy(); const m0 = mk({ platform: s0.p, tx: () => [{ r: { recorded: true, over_ledger: false } }] });
+  const b0 = await j(await adRunAction(m0.d, collect()));
+  assert.deepEqual([b0.ok, 'autoStop' in b0, s0.c.pause, m0.c.sql.some((q) => q.includes('ad_budget_revoke'))], [true, false, 0, false]);
+  // 이미 기록된 날짜(recorded=false) → 중지 없음
+  const s1 = spy(); const m1 = mk({ platform: s1.p, tx: () => [{ r: { recorded: false, over_ledger: null } }] });
+  assert.equal('autoStop' in (await j(await adRunAction(m1.d, collect()))), false);
+  assert.equal(s1.c.pause, 0);
+  // 초과 → 철회 먼저, 그다음 플랫폼 중지
+  const order: string[] = [];
+  const s2 = spy(false, { async pause() { order.push('pause'); return { paused: true }; } });
+  const m2 = mk({ platform: s2.p, tx: (q) => { order.push(q.includes('ad_budget_revoke') ? 'revoke' : 'record'); return [{ r: { recorded: true, over_ledger: true } }]; } });
+  const b2 = await j(await adRunAction(m2.d, collect()));
+  assert.deepEqual(order, ['record', 'revoke', 'pause']);
+  assert.deepEqual(b2.autoStop, { revoked: true, revokeNote: null, paused: true, simulated: true });
+  // 철회 실패(승인 이미 없음 22023 / 그 밖의 오류)여도 플랫폼 중지는 진행, 결과 그대로 보고
+  for (const [code, note] of [['22023', 'NO_ACTIVE_APPROVAL'], ['XX000', 'REVOKE_FAILED']] as const) {
+    const s3 = spy();
+    const m3 = mk({ platform: s3.p, tx: (q) => (q.includes('ad_budget_revoke') ? Object.assign(new Error('x'), { code }) : [{ r: { recorded: true, over_ledger: true } }]) });
+    const b3 = await j(await adRunAction(m3.d, collect()));
+    assert.deepEqual([(b3.autoStop as Record<string, unknown>).revoked, (b3.autoStop as Record<string, unknown>).revokeNote, (b3.autoStop as Record<string, unknown>).paused, s3.c.pause], [false, note, true, 1]);
+  }
+  // 플랫폼 중지 실패여도 철회는 끝났고 paused=false로 알림(응답은 성공, 비밀 노출 없음)
+  const s4 = spy(false, { async pause() { throw new Error('platform secret xyz'); } });
+  const m4 = mk({ platform: s4.p, tx: () => [{ r: { recorded: true, over_ledger: true } }] });
+  const r4 = await adRunAction(m4.d, collect());
+  const b4 = await j(r4);
+  assert.deepEqual([r4.status, (b4.autoStop as Record<string, unknown>).revoked, (b4.autoStop as Record<string, unknown>).paused], [200, true, false]);
+  assert.ok(!JSON.stringify(b4).includes('secret'));
 });
 test('AR9 모의 어댑터는 결정적이고 형식이 맞음, AD_PLATFORM=mock 외에는 어댑터 없음, 정적: 실제 광고 API 주소·fetch 없음', async () => {
   const a = await mockPlatform.fetchPerformance('camp-a', '2026-11-20');
@@ -130,6 +161,7 @@ test('AR9 모의 어댑터는 결정적이고 형식이 맞음, AD_PLATFORM=mock
   const p = a as { impressions: number; clicks: number; costKrw: number };
   assert.ok(p.clicks <= p.impressions && p.costKrw === p.clicks * 10);
   assert.equal(mockPlatform.live, false);
+  assert.deepEqual(await mockPlatform.pause('camp-a'), { paused: true });
   assert.equal(createPlatform({ AD_PLATFORM: 'mock' }), mockPlatform);
   for (const v of [undefined, '', 'google', 'naver', 'MOCK']) assert.equal(createPlatform({ AD_PLATFORM: v }), null);
   const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const f = path.join(d, n); return statSync(f).isDirectory() ? walk(f) : [f]; });

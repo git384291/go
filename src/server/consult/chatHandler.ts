@@ -23,7 +23,10 @@ export function createLimiter(max: number, windowMs: number): Limiter {
   };
 }
 
-export type HandlerDeps = { enabled: boolean; chat: ChatDeps | null; limiter: Limiter; ip: string; now: () => Date };
+/** 상담 시작 기록(개인정보 없음). 실패해도 상담 응답에는 영향이 없다 */
+export type RecordConsult = (session: string, campaign: string | null) => Promise<void>;
+export type HandlerDeps = { enabled: boolean; chat: ChatDeps | null; limiter: Limiter; ip: string; now: () => Date; recordConsult?: RecordConsult };
+const SESSION = /^[A-Za-z0-9-]{16,64}$/;
 
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
   if (!d.enabled) return json(503, { ok: false, code: 'DISABLED' });
@@ -41,8 +44,12 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   const b = body as Record<string, unknown>;
   const keys = Object.keys(b).sort().join(',');
   const ok = (v: unknown): v is string => typeof v === 'string' && CODE.test(v);
-  if (keys !== 'carrier,message,productId,regionCode' || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode)) return json(400, { ok: false, code: 'INVALID_INPUT' });
+  const hasCampaign = 'campaign' in b;
+  if (keys !== (hasCampaign ? 'campaign,carrier,message,productId,regionCode,session' : 'carrier,message,productId,regionCode,session')
+      || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode) || typeof b.session !== 'string' || !SESSION.test(b.session)
+      || (hasCampaign && !ok(b.campaign))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode }, d.now());
   if (!r.ok) return json(400, r);
+  if (d.recordConsult) { try { await d.recordConsult(b.session, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }
   return json(200, r);
 }

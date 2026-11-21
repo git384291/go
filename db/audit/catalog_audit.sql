@@ -34,6 +34,8 @@ exec_allow(rolname, proname) as (
     ('app_staff', 'ad_budget_approve'), ('app_staff', 'ad_budget_revoke'), ('app_staff', 'ad_spend_request'), ('app_staff', 'ad_budget_overview'),
     -- 0011 광고 성과 수집·분석, AI 사용료 예약(전용 역할)
     ('app_staff', 'ad_performance_record'), ('app_staff', 'ad_funnel'), ('app_ai', 'ai_budget_reserve'),
+    -- 0012 상담 시작 집계·전환 분석·AI 정산
+    ('app_public', 'consult_event_record'), ('app_staff', 'ad_funnel_full'), ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),

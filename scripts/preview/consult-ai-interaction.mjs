@@ -52,7 +52,7 @@ try {
   await send.click();
   await page.waitForSelector('[data-from="ai"]');
   const b = seen.api[0];
-  check('C5 요청 본문: 고정 코드 3개 + 글만(키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode']) && b.message === '요금이 얼마예요?');
+  check('C5 요청 본문: 고정 코드 3개 + 글 + 상담 세션 키(키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode', 'session']) && /^[A-Za-z0-9-]{16,64}$/.test(b.session) && b.message === '요금이 얼마예요?');
   check('C6 승인 안내가 AI 도우미 말풍선에 표시, 입력칸 비워짐', (await page.locator('[data-from="ai"]').innerText()).includes('11,111원') && (await box.inputValue()) === '');
   await page.screenshot({ path: `${OUT}/23-consult-ai-answer-w390.png`, fullPage: true });
   mode = 'down'; await box.fill('또 질문'); await send.click();
@@ -63,7 +63,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('[data-from="ai"]').length === 3);
   check('C8 형식 밖 응답도 안전 안내문', (await page.locator('[data-from="ai"]').nth(2).innerText()).includes('담당자가 확인한 뒤'));
   await page.screenshot({ path: `${OUT}/24-consult-ai-fallback-w390.png`, fullPage: true });
-  check('C9 신청 링크는 기존 접수 양식(/consult)', (await page.getByRole('link', { name: '가입 상담 신청하기' }).getAttribute('href')) === '/consult');
+  check('C9 신청 링크는 같은 화면의 접수 양식으로 이동', (await page.getByRole('link', { name: '가입 상담 신청하기' }).getAttribute('href')) === '#apply');
   check('C10 외부 요청 0·예외 0·가로 넘침 없음', seen.external.length === 0 && seen.errors.length === 0 && (await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)));
   await ctx.close();
 } catch (e) { check('실행 중 예외 없음', false, String(e.message).split('\n')[0]); } finally { await browser.close(); }

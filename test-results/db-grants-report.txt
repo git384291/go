@@ -5,10 +5,15 @@
  api.ad_budget_overview          | fideon_api | app_staff, fideon_api  | t
  api.ad_budget_revoke            | fideon_api | app_staff, fideon_api  | t
  api.ad_funnel                   | fideon_api | app_staff, fideon_api  | t
+ api.ad_funnel_full              | fideon_api | app_staff, fideon_api  | t
  api.ad_performance_record       | fideon_api | app_staff, fideon_api  | t
  api.ad_spend_request            | fideon_api | app_staff, fideon_api  | t
+ api.ai_budget_confirm           | fideon_api | app_ai, fideon_api     | t
+ api.ai_budget_hold              | fideon_api | app_ai, fideon_api     | t
+ api.ai_budget_release           | fideon_api | app_ai, fideon_api     | t
  api.ai_budget_reserve           | fideon_api | app_ai, fideon_api     | t
  api.assign_lead                 | fideon_api | app_staff, fideon_api  | t
+ api.consult_event_record        | fideon_api | app_public, fideon_api | t
  api.create_lead                 | fideon_api | app_public, fideon_api | t
  api.export_leads_masked         | fideon_api | app_staff, fideon_api  | t
  api.list_leads                  | fideon_api | app_staff, fideon_api  | t
@@ -31,7 +36,7 @@
  core.product_catalog_guard      | postgres   |                        | t
  security.assert_staff           | postgres   | fideon_api             | t
  security.verify_token           | postgres   | fideon_api             | t
-(30 rows)
+(35 rows)
 
 psql:db/tests/10_grants.sql:21: NOTICE:  PASS | G1 모든 테이블 RLS+FORCE | 0
  expect_eq 
@@ -57,31 +62,31 @@ psql:db/tests/10_grants.sql:40: NOTICE:  PASS | G4 search_path 고정 | 0
  
 (1 row)
 
-psql:db/tests/10_grants.sql:62: NOTICE:  PASS | G5 EXECUTE 허용 목록 외 권한 0 | 
+psql:db/tests/10_grants.sql:63: NOTICE:  PASS | G5 EXECUTE 허용 목록 외 권한 0 | 
  expect_eq 
 -----------
  
 (1 row)
 
-psql:db/tests/10_grants.sql:67: NOTICE:  PASS | G6 PUBLIC 실행 가능 함수 0 | <NULL>
+psql:db/tests/10_grants.sql:68: NOTICE:  PASS | G6 PUBLIC 실행 가능 함수 0 | <NULL>
  expect_eq 
 -----------
  
 (1 row)
 
-psql:db/tests/10_grants.sql:75: NOTICE:  PASS | G7 역할 간 함수 교차 실행 불가 | falsefalsefalsefalse
+psql:db/tests/10_grants.sql:76: NOTICE:  PASS | G7 역할 간 함수 교차 실행 불가 | falsefalsefalsefalse
  expect_eq 
 -----------
  
 (1 row)
 
-psql:db/tests/10_grants.sql:80: NOTICE:  PASS | G8 api 함수 소유자 fideon_api | 0
+psql:db/tests/10_grants.sql:81: NOTICE:  PASS | G8 api 함수 소유자 fideon_api | 0
  expect_eq 
 -----------
  
 (1 row)
 
-psql:db/tests/10_grants.sql:82: NOTICE:  PASS | G9 fideon_api 서명 키 조회 불가 | false
+psql:db/tests/10_grants.sql:83: NOTICE:  PASS | G9 fideon_api 서명 키 조회 불가 | false
  expect_eq 
 -----------
  

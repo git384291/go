@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { answerChat } from '../../src/server/consult/chatAnswer';
-import { createAiBudget, createDbAiBudget, createModel, mockModel } from '../../src/server/consult/chatModel';
+import { createAiBudget, createDbAiBudget, createModel, mockModel, ModelNotCalledError } from '../../src/server/consult/chatModel';
 import type { ChatModel, ModelInput } from '../../src/server/consult/chatModel';
 import { maskPii } from '../../src/server/consult/piiMask';
 import { createLimiter, handleChat } from '../../src/server/consult/chatHandler';
@@ -55,7 +55,7 @@ test('CH4 모델 장애·시간 초과는 안전 안내문, 오류 문구는 고
   const slow = await answerChat(deps({ timeoutMs: 20, model: fake((_i, s) => new Promise((res) => { s.addEventListener('abort', () => res('late')); })) }), input(), NOW);
   assert.ok(slow.ok && slow.source === 'fallback');
 });
-test('CH5 사용료 예약: 기본 0원이면 유료 모델은 호출 0회, 한도 초과 뒤에도 호출 안 함(모의는 0원이라 통과), 집계 오류는 호출 금지', async () => {
+test('CH5 사용료 예약·확정·취소: 기본 0원이면 유료 모델 호출 0회, 한도 초과 뒤 호출 안 함, 호출 전 실패만 취소, 집계 오류는 호출 금지', async () => {
   let calls = 0;
   const paid = fake(async () => { calls++; return '안내'; }, 5);
   const r0 = await answerChat(deps({ model: paid, budget: createAiBudget({}) }), input(), NOW);
@@ -63,18 +63,37 @@ test('CH5 사용료 예약: 기본 0원이면 유료 모델은 호출 0회, 한�
   const b = createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '10' });
   for (let i = 0; i < 4; i++) await answerChat(deps({ model: paid, budget: b }), input(), NOW);
   assert.equal(calls, 2);
-  assert.equal(await createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '-5' }).reserve(1), false);
-  assert.equal(await createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: 'abc' }).reserve(1), false);
-  assert.equal(await createAiBudget({}).reserve(0), true);
-  // DB 집계: true만 통과, false·형식 밖·예외는 모두 호출 금지, 비용 0은 DB를 부르지 않음
-  const mk = (rows: unknown, boom = false) => { let n = 0; return { n: () => n, b: createDbAiBudget(async (fn) => { n++; if (boom) throw new Error('db down'); return fn((() => Promise.resolve(rows)) as never); }) }; };
-  assert.equal(await mk([{ ok: true }]).b.reserve(5), true);
-  for (const bad of [[{ ok: false }], [], [{ ok: 'true' }], null]) assert.equal(await mk(bad).b.reserve(5), false);
-  assert.equal(await mk([], true).b.reserve(5), false);
-  const free = mk([{ ok: true }]);
-  assert.equal(await free.b.reserve(0), true);
-  assert.equal(free.n(), 0);
-  assert.equal(await mk([{ ok: true }]).b.reserve(-1), false);
+  // 호출 전 실패(ModelNotCalledError)는 취소(0원) → 한도 안에서 다시 호출 가능, 그 밖의 실패는 확정(비용 유지)
+  const nb = createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '5' });
+  const notCalled = fake(async () => { throw new ModelNotCalledError('no key'); }, 5);
+  for (let i = 0; i < 3; i++) assert.ok((await answerChat(deps({ model: notCalled, budget: nb }), input(), NOW)).ok);
+  assert.ok(await nb.reserve(5), '취소된 예약은 비용 0원이라 다시 예약 가능');
+  const eb = createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '5' });
+  await answerChat(deps({ model: fake(async () => { throw new Error('upstream 500'); }, 5), budget: eb }), input(), NOW);
+  assert.equal(await eb.reserve(5), null, '장애로 실패한 호출은 비용이 났을 수 있어 확정(한도 소진)');
+  assert.equal(await createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '-5' }).reserve(1), null);
+  assert.equal(await createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: 'abc' }).reserve(1), null);
+  assert.ok(await createAiBudget({}).reserve(0));
+  // DB 집계: hold 번호가 있어야 통과, 확정·취소는 번호로 DB 함수 호출, 오류는 거부/삼킴
+  const log: string[] = [];
+  const mk = (rows: unknown, boom = false) => createDbAiBudget(async (fn) => { if (boom) throw new Error('db down'); return fn(((s: TemplateStringsArray, ...v: unknown[]) => { log.push(s.join('?') + '|' + v.join(',')); return Promise.resolve(rows); }) as never); });
+  const res = await mk([{ id: '42' }]).reserve(5);
+  assert.ok(res);
+  await res.confirm(3);
+  await res.cancel();
+  assert.ok(log[0].includes('api.ai_budget_hold') && log[1].includes('api.ai_budget_confirm') && log[1].endsWith('42,3') && log[2].includes('api.ai_budget_release') && log[2].endsWith('42'));
+  for (const bad of [[{ id: null }], [], [{ id: 'abc' }], [{ id: 5 }], null]) assert.equal(await mk(bad).reserve(5), null);
+  assert.equal(await mk([], true).reserve(5), null);
+  const free = createDbAiBudget(async () => { throw new Error('호출되면 안 됨'); });
+  assert.ok(await free.reserve(0));
+  assert.equal(await mk([{ id: '1' }]).reserve(-1), null);
+  // 정산 중 DB 오류는 삼킨다(미정산 = 예약 비용 전액으로 DB가 계산)
+  let first = true;
+  const flaky = createDbAiBudget(async (fn) => { if (!first) throw new Error('down'); first = false; return fn((() => Promise.resolve([{ id: '7' }])) as never); });
+  const h = await flaky.reserve(5);
+  assert.ok(h);
+  await h.confirm(5);
+  await h.cancel();
 });
 test('CH6 개인정보는 모델에 가려서만 전달된다', async () => {
   let seen = '';
@@ -96,13 +115,16 @@ test('CH8 입력 검사: 빈 글·301자·문자열 아님', async () => {
 });
 const HD = (over: Record<string, unknown> = {}) => ({ enabled: true, chat: deps(), limiter: createLimiter(2, 60_000), ip: '203.0.113.9', now: () => NOW, ...over }) as never;
 const post = (b: unknown, raw?: string) => new Request('http://x/api/consult/chat', { method: 'POST', body: raw ?? JSON.stringify(b) });
-const good = { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금?' };
+const good = { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금?', session: 'sess-0123456789abcdef' };
 test('CH9 핸들러: 꺼짐 503·크기 413·형식 400·여분 키 400·횟수 제한 429·no-store', async () => {
   assert.equal((await handleChat(post(good), HD({ enabled: false }))).status, 503);
   assert.equal((await handleChat(post(good), HD({ chat: null }))).status, 503);
   assert.equal((await handleChat(post(null, 'x'.repeat(3000)), HD())).status, 413);
   assert.equal((await handleChat(post(null, '{bad'), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, extra: 1 }), HD())).status, 400);
+  assert.equal((await handleChat(post({ ...good, session: 'short' }), HD())).status, 400);
+  { const { session: _s, ...noSession } = good; assert.equal((await handleChat(post(noSession), HD())).status, 400); }
+  assert.equal((await handleChat(post({ ...good, campaign: 'Bad Key!' }), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, carrier: 'Bad Key!' }), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, message: '' }), HD())).status, 400);
   const d = HD();
@@ -122,4 +144,21 @@ test('CH10 정적: 키 환경변수는 서버 모듈에서만, 클라이언트 �
     if (f.startsWith(path.join('src', 'server', 'consult'))) assert.ok(!/api\.openai\.com|api\.anthropic\.com|from ['"]openai['"]|fetch\(/.test(s), `${f}: 실제 API 호출 없음`);
     if (/CONSULT_AI_API_KEY/.test(s)) assert.ok(f.startsWith(path.join('src', 'server')), `${f}: 키는 서버 코드에서만`);
   }
+});
+
+test('CH11 상담 시작 기록: 성공 응답 때만 1회, 캠페인은 있을 때만 전달, 기록 실패는 상담에 영향 없음, 입력 오류·꺼짐·횟수 제한은 기록 0', async () => {
+  const seen: [string, string | null][] = [];
+  const rec = async (s: string, c: string | null) => { seen.push([s, c]); };
+  assert.equal((await handleChat(post({ ...good, campaign: 'camp-q' }), HD({ recordConsult: rec }))).status, 200);
+  assert.equal((await handleChat(post(good), HD({ recordConsult: rec }))).status, 200);
+  assert.deepEqual(seen, [['sess-0123456789abcdef', 'camp-q'], ['sess-0123456789abcdef', null]]);
+  const before = seen.length;
+  await handleChat(post({ ...good, message: '' }), HD({ recordConsult: rec }));
+  await handleChat(post(good), HD({ recordConsult: rec, enabled: false }));
+  const d = HD({ recordConsult: rec, limiter: createLimiter(1, 60_000) });
+  await handleChat(post(good), d);
+  await handleChat(post(good), d);
+  assert.equal(seen.length, before + 1);
+  const bad = await handleChat(post(good), HD({ recordConsult: async () => { throw new Error('db down'); } }));
+  assert.equal(bad.status, 200);
 });

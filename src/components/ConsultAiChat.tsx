@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { AI_NOTICE } from '../content/consultPreview';
+import { resolveAttribution } from '../content/attribution';
 
 // AI 24시간 상담창(PM 11/21 ②). 글을 서버(/api/consult/chat)로만 보낸다. 요금·사은품은 서버가 승인 정책에서 만든 문장만 돌려준다.
 // 개인정보는 여기 쓰지 않도록 안내하고(서버도 가림), 신청은 기존 접수 양식(/consult)으로 이어진다. 모델·키·비용 정보는 화면에 없다.
@@ -13,6 +14,11 @@ export function ConsultAiChat({ choice }: { choice: ChatChoice }) {
   const [text, setText] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
+  // 상담 한 번(창을 연 동안)에 하나의 무작위 키 — 서버가 상담 시작 건수를 세는 데만 쓰고 개인정보가 아니다
+  const [session] = useState(() => {
+    const c = globalThis.crypto;
+    return c?.randomUUID ? c.randomUUID() : Array.from(c.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  });
   const ready = text.trim().length > 0 && text.length <= 300 && !busy;
   async function send() {
     const message = text.trim();
@@ -21,7 +27,7 @@ export function ConsultAiChat({ choice }: { choice: ChatChoice }) {
     setText('');
     let reply = SAFE;
     try {
-      const res = await fetch('/api/consult/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message }) });
+      const res = await fetch('/api/consult/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message, session, ...campaignOf() }) });
       const j = (await res.json()) as { ok?: boolean; text?: unknown };
       if (res.ok && j.ok === true && typeof j.text === 'string') reply = j.text;
     } catch { /* 안전 안내문 유지 */ }
@@ -30,7 +36,7 @@ export function ConsultAiChat({ choice }: { choice: ChatChoice }) {
   }
   return (
     <section aria-label="AI 상담" className="admin-card">
-      <p className="muted">{AI_NOTICE} 이름·전화번호·주소는 여기에 적지 마세요. 신청은 아래 버튼의 양식에서 합니다.</p>
+      <p className="muted">{AI_NOTICE} 이름·전화번호·주소는 여기에 적지 마세요. 가입 신청은 화면 아래 신청 양식에서 합니다.</p>
       <div role="log" aria-live="polite" style={{ display: 'grid', gap: 8, margin: '12px 0' }}>
         {msgs.map((m, i) => (
           <p key={i} data-from={m.from} style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', textAlign: m.from === 'me' ? 'right' : 'left' }}>
@@ -39,7 +45,15 @@ export function ConsultAiChat({ choice }: { choice: ChatChoice }) {
         ))}
       </div>
       <textarea aria-label="상담 내용" placeholder="궁금한 점을 적어 주세요(300자 이내)" maxLength={300} rows={3} value={text} onChange={(e) => setText(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }} />
-      <p><button type="button" disabled={!ready} onClick={send}>보내기</button> <a href="/consult">가입 상담 신청하기</a></p>
+      <p><button type="button" disabled={!ready} onClick={send}>보내기</button> <a href="#apply">가입 상담 신청하기</a></p>
     </section>
   );
+}
+
+/** 첫 유입 출처의 캠페인 키(접수 양식과 같은 규칙). 형식이 맞을 때만 보낸다 */
+function campaignOf(): { campaign?: string } {
+  try {
+    const v = resolveAttribution(window.location.search, window.sessionStorage).utmCampaign;
+    return typeof v === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(v) ? { campaign: v } : {};
+  } catch { return {}; }
 }

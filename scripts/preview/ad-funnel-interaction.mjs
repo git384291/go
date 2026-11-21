@@ -11,7 +11,7 @@ mkdirSync(OUT, { recursive: true });
 const ORIGIN = 'http://funnel.test';
 const results = [];
 const check = (name, cond, detail = '') => { results.push(!!cond); console.log(`${cond ? 'PASS' : 'FAIL'} | ${name}${detail ? ` | ${detail}` : ''}`); };
-const ITEMS = [{ campaign: 'sample-camp', impressions: 1800, clicks: 60, costKrw: 600, ledgerKrw: 500, leads: 3, overspendDays: 1, clickRate: 0.0333, leadRate: 0.05, costPerLeadKrw: 200, overBudget: true }, { campaign: 'naver-brand', impressions: 2400, clicks: 96, costKrw: 960, ledgerKrw: 1000, leads: 4, overspendDays: 0, clickRate: 0.04, leadRate: 0.0417, costPerLeadKrw: 240, overBudget: false }];
+const ITEMS = [{ campaign: 'sample-camp', impressions: 1800, clicks: 60, costKrw: 600, ledgerKrw: 500, consults: 12, leads: 3, overspendDays: 1, clickRate: 0.0333, consultRate: 0.2, leadRate: 0.25, costPerLeadKrw: 200, overBudget: true }, { campaign: 'naver-brand', impressions: 2400, clicks: 96, costKrw: 960, ledgerKrw: 1000, consults: 20, leads: 4, overspendDays: 0, clickRate: 0.04, consultRate: 0.2083, leadRate: 0.2, costPerLeadKrw: 240, overBudget: false }];
 async function bundle(role) {
   const entry = `import { createRoot } from 'react-dom/client';
     import { FunnelView } from './src/app/admin/ads/funnel/FunnelView';
@@ -41,11 +41,11 @@ const browser = await chromium.launch();
 try {
   const o = await open(browser, 'owner', (route, b) => b.action === 'launch'
     ? (b.amountKrw === 500 ? json(200, { ok: true, decision: 'ALLOW', executed: false, simulated: true, externalId: 'mock-1' })(route) : json(200, { ok: false, decision: 'BLOCK', reason: 'NO_APPROVAL' })(route))
-    : json(200, { ok: true, recorded: b.day === '2026-11-20', overLedger: true, source: 'mock' })(route));
+    : json(200, { ok: true, recorded: b.day === '2026-11-20', overLedger: true, source: 'mock', autoStop: { revoked: true, paused: true, simulated: true } })(route));
   const { page, seen } = o;
   const text = await page.innerText('main');
-  check('F1 분석 표: 노출·클릭·접수·접수당 비용, 점검 열에 승인 밖 지출 의심 표시', text.includes('1,800') && text.includes('3.3%') && text.includes('200원') && text.includes('승인 밖 지출 의심 1일') && text.includes('정상'));
-  check('F2 실제 집행 없음·상담 단계 미집계 안내', text.includes('실제 광고 집행·과금은 연결되어 있지 않습니다') && text.includes('상담 시작 단계는 아직 집계하지 않습니다'));
+  check('F1 분석 표: 노출·클릭·접수·접수당 비용, 점검 열에 승인 밖 지출 의심 표시', text.includes('1,800') && text.includes('3.3%') && text.includes('20.0%') && text.includes('25.0%') && text.includes('200원') && text.includes('승인 밖 지출 의심 1일') && text.includes('정상'));
+  check('F2 실제 집행 없음·상담 시작 집계 안내', text.includes('실제 광고 집행·과금은 연결되어 있지 않습니다') && text.includes('상담 시작은 AI 상담창을 연 횟수'));
   await page.screenshot({ path: `${OUT}/28-ad-funnel-owner-w390.png`, fullPage: true });
   const launch = page.getByRole('button', { name: '모의 집행 요청' });
   const collect = page.getByRole('button', { name: '성과 수집' });
@@ -64,7 +64,7 @@ try {
   await page.fill('input[aria-label="수집 날짜"]', '2026-11-20');
   await collect.click();
   await page.waitForFunction(() => document.querySelector('[aria-label="수집 결과"]')?.textContent?.includes('수집됨'));
-  check('F7 수집 결과: 승인 원장보다 크면 점검 필요 표시', (await page.textContent('[aria-label="수집 결과"]')).includes('점검 필요'));
+  check('F7 수집 결과: 초과면 점검 필요·자동 중지(승인 철회·플랫폼 중지) 결과 표시', (await page.textContent('[aria-label="수집 결과"]')).includes('점검 필요') && (await page.textContent('[aria-label="수집 결과"]')).includes('승인 철회 완료') && (await page.textContent('[aria-label="수집 결과"]')).includes('플랫폼 중지 완료'));
   await page.fill('input[aria-label="수집 날짜"]', '2026-11-19');
   await collect.click();
   await page.waitForFunction(() => document.querySelector('[aria-label="수집 결과"]')?.textContent?.includes('이미 수집'));

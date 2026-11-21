@@ -26,6 +26,7 @@ import { GUIDE_TOPICS } from '../../src/content/productGuide';
 import type { Page } from 'playwright';
 import { ProductPage } from '../../src/components/ProductPage';
 import { ConsultForm } from '../../src/components/ConsultForm';
+import { ConsultAiChat } from '../../src/components/ConsultAiChat';
 import { resolveKakaoInquiry } from '../../src/content/kakaoInquiry';
 import { KAKAO_INQUIRY_NOTES } from '../../src/content/channels';
 
@@ -154,8 +155,8 @@ const BUDGET_FIXTURE: BudgetRow[] = [
 ];
 
 const FUNNEL_FIXTURE: FunnelItem[] = [
-  { campaign: 'sample-camp', impressions: 1800, clicks: 60, costKrw: 600, ledgerKrw: 500, leads: 3, overspendDays: 1, clickRate: 0.0333, leadRate: 0.05, costPerLeadKrw: 200, overBudget: true },
-  { campaign: 'naver-brand', impressions: 2400, clicks: 96, costKrw: 960, ledgerKrw: 1000, leads: 4, overspendDays: 0, clickRate: 0.04, leadRate: 0.0417, costPerLeadKrw: 240, overBudget: false },
+  { campaign: 'sample-camp', impressions: 1800, clicks: 60, costKrw: 600, ledgerKrw: 500, consults: 12, leads: 3, overspendDays: 1, clickRate: 0.0333, consultRate: 0.2, leadRate: 0.25, costPerLeadKrw: 200, overBudget: true },
+  { campaign: 'naver-brand', impressions: 2400, clicks: 96, costKrw: 960, ledgerKrw: 1000, consults: 20, leads: 4, overspendDays: 0, clickRate: 0.04, consultRate: 0.2083, leadRate: 0.2, costPerLeadKrw: 240, overBudget: false },
 ];
 
 const OUT = process.argv[2] ?? 'test-results/screens';
@@ -186,6 +187,8 @@ async function main() {
     ['25-admin-ads-funnel-owner', <FunnelView key="fn-owner" items={FUNNEL_FIXTURE} role="owner" from="2026-11-15" to="2026-11-21" />],
     ['26-admin-ads-funnel-reviewer', <FunnelView key="fn-rev" items={FUNNEL_FIXTURE} role="reviewer" from="2026-11-15" to="2026-11-21" />],
     ['27-admin-ads-funnel-locked', <FunnelLocked key="fn-locked" kind="disabled" />],
+    // AI 상담창 + 접수 양식(필수 고지 미확정 실제 설정 → 양식이 접수를 막는 상태)
+    ['30-consult-ai-with-form', <PageShell key="consult-ai"><section className="section"><ConsultAiChat choice={{ carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }} /></section><section className="section" id="apply" aria-label="가입 상담 신청"><ConsultForm options={[{ value: 'internet_tv', label: '인터넷+TV' }]} kakaoUrl={null} /></section></PageShell>],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님
     ['11-official-intake-fake', <PageShell key="intake-fake"><section className="hero"><h1>가상 공식 접수처 표시</h1><OfficialIntakeCta intake={FAKE_INTAKE} /></section></PageShell>],
     // 선택형 상품 안내 패널(실제 코드 상수는 false). 가상 켜짐 화면: 접수 꺼짐(12)과 가상 접수 켜짐(13). 공개 화면 아님

@@ -22,6 +22,7 @@ export async function POST(req: Request) {
         return (rows as unknown as { p: unknown }[]).map((r) => r.p);
       }),
     },
+    recordConsult: async (session, campaign) => { await withRole('public', (tx) => tx`select api.consult_event_record(${session}, ${campaign})`); },
     limiter, ip: clientIpFrom((n) => req.headers.get(n)), now: () => new Date(),
   });
 }

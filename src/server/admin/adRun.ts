@@ -4,13 +4,15 @@ import { createPlatform } from '../advertising/platform';
 import type { AdPlatform } from '../advertising/platform';
 import { adBlock, adDbError, adFail, adGate, adJson } from './adBudget';
 import type { AdBudgetDeps, SqlTag } from './adBudget';
+import type { StaffIdentity } from '../auth/staffSession';
 
 /**
  * 광고 집행 요청·성과 수집·전환 분석 (PM 11/21). 모든 판정은 서버가 한다 — 화면 버튼·클라이언트 값은 믿지 않는다.
  * 집행(launch) 순서: 대표 권한 → 플랫폼 있음 → (실제 플랫폼이면 AD_EXECUTION_ENABLED=true 필요, 기본 꺼짐) → DB 예산 판정(승인·한도·중복) → 플랫폼 호출.
  *  어느 단계든 막히거나 오류면 BLOCK이고 플랫폼은 불리지 않는다. 모의 어댑터는 과금·집행이 없다(executed=false).
  * 성과 수집(collect): 플랫폼이 준 값은 형식을 다시 검사하고, 보고 광고비가 그날 승인 원장보다 크면 DB가 over_ledger로 표시하고 감사 기록을 남긴다.
- * 분석(funnel): 노출→클릭→접수 건수와 광고비만 센다(개인정보 읽기 없음). 상담 시작 단계는 아직 집계하지 않는다(consultTracked=false).
+ *  초과가 감지되면 자동 중지한다: ① 승인 철회(이후 모든 지출 차단) ② 플랫폼 중지 요청. 철회가 먼저이고, 어느 쪽이 실패해도 다른 쪽은 진행하며 결과를 응답에 그대로 알린다.
+ * 분석(funnel): 노출→클릭→상담 시작→접수 건수와 광고비만 센다(개인정보 읽기 없음).
  */
 /** 라우트가 광고 서버 모듈을 직접 import하지 않도록 이 모듈이 어댑터 선택을 감싼다(AD_PLATFORM=mock만) */
 export const adRunPlatform = (env: Readonly<Record<string, string | undefined>>): AdPlatform | null => createPlatform(env);
@@ -74,11 +76,30 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
       tx`select api.ad_performance_record(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${b.campaign as string}, ${b.day as string}::date, ${perf.impressions as number}::int, ${perf.clicks as number}::int, ${perf.costKrw as number}::int, ${source}) as r`);
     const r = (rows as readonly { r?: unknown }[])[0]?.r;
     if (!isObj(r) || typeof r.recorded !== 'boolean') return adFail('INVALID_DATA', 502);
-    return adJson({ ok: true, recorded: r.recorded, overLedger: r.over_ledger ?? null, source }, 200);
+    const over = r.recorded === true && r.over_ledger === true;
+    const autoStop = over ? await autoStopCampaign(deps, g, platform, b.campaign as string) : undefined;
+    return adJson({ ok: true, recorded: r.recorded, overLedger: r.over_ledger ?? null, source, ...(autoStop ? { autoStop } : {}) }, 200);
   } catch (e) { return adDbError(e); }
 }
 
-type Row = { campaign_key: string; impressions: string | number; clicks: string | number; cost_krw: string | number; ledger_krw: string | number; leads: string | number; overspend_days: string | number };
+/** 초과 감지 자동 중지: 승인 철회(DB) → 플랫폼 중지. 각 단계 결과를 숨기지 않는다 */
+async function autoStopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdPlatform, campaign: string) {
+  let revoked = false;
+  let revokeNote: string | null = null;
+  try {
+    await deps.runInTransaction(async (tx) =>
+      tx`select api.ad_budget_revoke(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${'광고비 초과 감지 자동 중지'})`);
+    revoked = true;
+  } catch (e) {
+    // 승인이 이미 없으면(NO_ACTIVE_APPROVAL) 지출은 이미 막혀 있다
+    revokeNote = (e as { code?: string })?.code === '22023' ? 'NO_ACTIVE_APPROVAL' : 'REVOKE_FAILED';
+  }
+  let paused = false;
+  try { paused = (await platform.pause(campaign))?.paused === true; } catch { paused = false; }
+  return { revoked, revokeNote, paused, simulated: !platform.live };
+}
+
+type Row = { campaign_key: string; impressions: string | number; clicks: string | number; cost_krw: string | number; ledger_krw: string | number; consults: string | number; leads: string | number; overspend_days: string | number };
 const n = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN);
 const ratio = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 10000) / 10000 : null);
 
@@ -96,14 +117,14 @@ export async function adFunnel(deps: AdBudgetDeps, req: Request): Promise<Respon
   if (!realDay(from) || !realDay(to) || to < from || to > today) return adFail('INVALID_RANGE', 400);
   try {
     const rows = await deps.runInTransaction(async (tx) =>
-      tx`select campaign_key, impressions, clicks, cost_krw, ledger_krw, leads, overspend_days from api.ad_funnel(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${from}::date, ${to}::date)`);
+      tx`select campaign_key, impressions, clicks, cost_krw, ledger_krw, consults, leads, overspend_days from api.ad_funnel_full(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${from}::date, ${to}::date)`);
     if (!Array.isArray(rows) || rows.length > 200) return adFail('INVALID_DATA', 502);
     const items = (rows as Row[]).map((r) => {
-      const v = { impressions: n(r.impressions), clicks: n(r.clicks), costKrw: n(r.cost_krw), ledgerKrw: n(r.ledger_krw), leads: n(r.leads), overspendDays: n(r.overspend_days) };
+      const v = { impressions: n(r.impressions), clicks: n(r.clicks), costKrw: n(r.cost_krw), ledgerKrw: n(r.ledger_krw), consults: n(r.consults), leads: n(r.leads), overspendDays: n(r.overspend_days) };
       if (typeof r.campaign_key !== 'string' || Object.values(v).some(Number.isNaN)) throw new Error('INVALID_DATA');
-      return { campaign: r.campaign_key, ...v, clickRate: ratio(v.clicks, v.impressions), leadRate: ratio(v.leads, v.clicks), costPerLeadKrw: v.leads > 0 ? Math.round(v.costKrw / v.leads) : null, overBudget: v.overspendDays > 0 };
+      return { campaign: r.campaign_key, ...v, clickRate: ratio(v.clicks, v.impressions), consultRate: ratio(v.consults, v.clicks), leadRate: ratio(v.leads, v.consults), costPerLeadKrw: v.leads > 0 ? Math.round(v.costKrw / v.leads) : null, overBudget: v.overspendDays > 0 };
     });
-    return adJson({ ok: true, role: g.role, from, to, consultTracked: false, items }, 200);
+    return adJson({ ok: true, role: g.role, from, to, consultTracked: true, items }, 200);
   } catch (e) {
     if ((e as Error)?.message === 'INVALID_DATA') return adFail('INVALID_DATA', 502);
     return adDbError(e);

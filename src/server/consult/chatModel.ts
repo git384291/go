@@ -25,8 +25,13 @@ export function createModel(env: Record<string, string | undefined>): ChatModel 
   return env.CONSULT_AI_MODEL === 'mock' ? mockModel : null;
 }
 
-/** 사용료 예약: 호출 '전에' 비용을 올리고, 한도 초과·오류는 false(= 호출하지 않음). 비용 0원(모의)은 예약 없이 통과한다. */
-export type AiBudget = { reserve(costKrw: number): Promise<boolean> };
+/** 모델 어댑터가 '요청을 보내기 전에' 실패했을 때 던진다(설정 누락 등). 이때만 예약을 취소(0원)하고, 그 밖의 실패는 예약 비용을 확정한다(보수적). */
+export class ModelNotCalledError extends Error {}
+
+/** 사용료 예약 → 호출 → 확정(실제 비용)/취소(호출 안 함). 정산이 오지 않은 예약은 DB가 예약 비용 전액으로 센다. */
+export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void> };
+export type AiBudget = { reserve(costKrw: number): Promise<Reservation | null> };
+const NOOP: Reservation = Object.freeze({ async confirm() {}, async cancel() {} });
 
 /** 시험·로컬용 메모리 집계(프로세스 재시작 시 0). 운영 경로는 createDbAiBudget을 쓴다. */
 export function createAiBudget(env: Record<string, string | undefined>): AiBudget {
@@ -35,26 +40,38 @@ export function createAiBudget(env: Record<string, string | undefined>): AiBudge
   let used = 0;
   return {
     async reserve(cost) {
-      if (!Number.isSafeInteger(cost) || cost < 0) return false;
-      if (cost === 0) return true;
-      if (used + cost > limit) return false;
+      if (!Number.isSafeInteger(cost) || cost < 0) return null;
+      if (cost === 0) return NOOP;
+      if (used + cost > limit) return null;
       used += cost;
-      return true;
+      let done = false;
+      const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
+      return { async confirm(a) { settle(Math.max(0, Math.min(1000, Math.trunc(a)))); }, async cancel() { settle(0); } };
     },
   };
 }
 
-/** DB 집계: api.ai_budget_reserve가 월 한도(core.ai_budget_config, 기본 0원)와 추가 전용 원장으로 판정한다. 어떤 오류든 false. */
+/** DB 집계: api.ai_budget_hold/confirm/release가 월 한도(core.ai_budget_config, 기본 0원)와 추가 전용 원장으로 판정한다. 어떤 오류든 예약 거부, 정산 오류는 삼킨다(미정산 = 예약 비용 전액). */
 export type RunAi = <T>(fn: (tx: (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>) => Promise<T>) => Promise<T>;
 export function createDbAiBudget(run: RunAi): AiBudget {
   return {
     async reserve(cost) {
-      if (!Number.isSafeInteger(cost) || cost < 0) return false;
-      if (cost === 0) return true;
+      if (!Number.isSafeInteger(cost) || cost < 0) return null;
+      if (cost === 0) return NOOP;
+      let id: unknown;
       try {
-        const rows = (await run(async (tx) => tx`select api.ai_budget_reserve(${cost}::int) as ok`)) as readonly { ok?: unknown }[];
-        return rows[0]?.ok === true;
-      } catch { return false; }
+        const rows = (await run(async (tx) => tx`select api.ai_budget_hold(${cost}::int)::text as id`)) as readonly { id?: unknown }[];
+        id = rows[0]?.id;
+      } catch { return null; }
+      if (typeof id !== 'string' || !/^\d{1,18}$/.test(id)) return null;
+      return {
+        async confirm(actual) {
+          try { await run(async (tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(0, Math.min(1000, Math.trunc(actual)))}::int)`); } catch { /* 미정산 = 예약 비용 전액 */ }
+        },
+        async cancel() {
+          try { await run(async (tx) => tx`select api.ai_budget_release(${id as string}::bigint)`); } catch { /* 미정산 = 예약 비용 전액 */ }
+        },
+      };
     },
   };
 }

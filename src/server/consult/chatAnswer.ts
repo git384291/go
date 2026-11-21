@@ -3,6 +3,7 @@ import { answerQuote, guardAiReply } from './quoteAnswer';
 import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
 import { maskPii } from './piiMask';
 import { SYSTEM_PROMPT } from './chatModel';
+import { ModelNotCalledError } from './chatModel';
 import type { AiBudget, ChatModel } from './chatModel';
 
 /**
@@ -32,7 +33,9 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   }, now);
   const fallback = (): ChatReply => ({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' });
   const model = deps.model;
-  if (!model || !(await deps.budget.reserve(model.costPerCallKrw))) return fallback();
+  if (!model) return fallback();
+  const hold = await deps.budget.reserve(model.costPerCallKrw);
+  if (!hold) return fallback();
   const ctl = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -40,11 +43,14 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
       model.generate({ system: SYSTEM_PROMPT, user: maskPii(m), approved: approved.text }, ctl.signal),
       new Promise<never>((_, rej) => { timer = setTimeout(() => { rej(new Error('TIMEOUT')); ctl.abort(); }, deps.timeoutMs ?? 8000); }),
     ]);
+    await hold.confirm(model.costPerCallKrw);
     const guarded = guardAiReply(reply, approved);
     if (guarded.text !== reply) return fallback();
     if (approved.kind !== 'quote' && BENEFIT_WORDS.test(reply)) return fallback();
     return { ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' };
-  } catch {
+  } catch (e) {
+    // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
+    if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(model.costPerCallKrw);
     return fallback();
   } finally {
     if (timer) clearTimeout(timer);

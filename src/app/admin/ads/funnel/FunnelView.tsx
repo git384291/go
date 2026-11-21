@@ -1,8 +1,8 @@
 import { FunnelConsole } from './FunnelConsole';
 
 export type FunnelItem = {
-  campaign: string; impressions: number; clicks: number; costKrw: number; ledgerKrw: number; leads: number; overspendDays: number;
-  clickRate: number | null; leadRate: number | null; costPerLeadKrw: number | null; overBudget: boolean;
+  campaign: string; impressions: number; clicks: number; costKrw: number; ledgerKrw: number; consults: number; leads: number; overspendDays: number;
+  clickRate: number | null; consultRate: number | null; leadRate: number | null; costPerLeadKrw: number | null; overBudget: boolean;
 };
 const won = (n: number | null) => (n === null ? '-' : `${n.toLocaleString('ko-KR')}원`);
 const pct = (n: number | null) => (n === null ? '-' : `${(n * 100).toFixed(1)}%`);
@@ -16,20 +16,20 @@ export function FunnelView({ items, role, from, to }: { items: readonly FunnelIt
         <span className="admin-bar-end"><span className="test-badge">로컬 시험 데이터</span><span className="admin-role">{ROLE[role] ?? role}</span></span>
       </header>
       <p className="muted">
-        {from} ~ {to}. 노출 → 클릭 → 접수(상담 신청 건수, 개인정보 없음)와 광고비를 캠페인별로 봅니다. 성과는 <b>모의 광고 플랫폼의 가상 값</b>이며 실제 광고 집행·과금은 연결되어 있지 않습니다.
-        상담 시작 단계는 아직 집계하지 않습니다.
+        {from} ~ {to}. 노출 → 클릭 → 상담 시작 → 접수(건수만, 개인정보 없음)와 광고비를 캠페인별로 봅니다. 성과는 <b>모의 광고 플랫폼의 가상 값</b>이며 실제 광고 집행·과금은 연결되어 있지 않습니다.
+        상담 시작은 AI 상담창을 연 횟수(세션당 1회)입니다.
       </p>
       {role === 'owner' ? <FunnelConsole /> : <p className="muted">이 역할은 조회만 가능합니다.</p>}
       <section aria-label="전환 분석">
         <h2>전환·광고비 분석</h2>
         <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
           <table className="admin-table">
-            <thead><tr><th>캠페인</th><th>노출</th><th>클릭</th><th>클릭률</th><th>접수</th><th>접수율(클릭 대비)</th><th>보고 광고비</th><th>승인 원장</th><th>접수당 비용</th><th>점검</th></tr></thead>
+            <thead><tr><th>캠페인</th><th>노출</th><th>클릭</th><th>클릭률</th><th>상담 시작</th><th>상담률(클릭 대비)</th><th>접수</th><th>접수율(상담 대비)</th><th>보고 광고비</th><th>승인 원장</th><th>접수당 비용</th><th>점검</th></tr></thead>
             <tbody>
-              {items.length === 0 ? <tr><td colSpan={10}>이 기간의 성과·접수가 없습니다.</td></tr> : items.map((r) => (
+              {items.length === 0 ? <tr><td colSpan={12}>이 기간의 성과·접수가 없습니다.</td></tr> : items.map((r) => (
                 <tr key={r.campaign}>
                   <td>{r.campaign}</td><td>{r.impressions.toLocaleString('ko-KR')}</td><td>{r.clicks.toLocaleString('ko-KR')}</td><td>{pct(r.clickRate)}</td>
-                  <td>{r.leads.toLocaleString('ko-KR')}</td><td>{pct(r.leadRate)}</td><td>{won(r.costKrw)}</td><td>{won(r.ledgerKrw)}</td><td>{won(r.costPerLeadKrw)}</td>
+                  <td>{r.consults.toLocaleString('ko-KR')}</td><td>{pct(r.consultRate)}</td><td>{r.leads.toLocaleString('ko-KR')}</td><td>{pct(r.leadRate)}</td><td>{won(r.costKrw)}</td><td>{won(r.ledgerKrw)}</td><td>{won(r.costPerLeadKrw)}</td>
                   <td>{r.overBudget ? `승인 밖 지출 의심 ${r.overspendDays}일` : '정상'}</td>
                 </tr>
               ))}

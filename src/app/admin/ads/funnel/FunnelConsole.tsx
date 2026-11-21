@@ -27,7 +27,8 @@ export function FunnelConsole() {
   }
   async function collect() {
     const r = await post({ action: 'collect', campaign: camp, day });
-    if (r.ok === true) setCollectMsg(r.recorded === true ? `수집됨${r.overLedger === true ? '(승인 원장보다 큼: 점검 필요)' : ''}` : '이미 수집된 날짜입니다');
+    const stop = (r.autoStop ?? null) as { revoked?: boolean; paused?: boolean } | null;
+    if (r.ok === true) setCollectMsg(r.recorded === true ? `수집됨${r.overLedger === true ? `(승인 원장보다 큼: 점검 필요 — 자동 중지: 승인 철회 ${stop?.revoked ? '완료' : '확인 필요'}, 플랫폼 중지 ${stop?.paused ? '완료(모의)' : '실패'})` : ''}` : '이미 수집된 날짜입니다');
     else setCollectMsg(`거부됨: ${String(r.code)}`);
   }
   return (

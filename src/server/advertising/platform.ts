@@ -9,6 +9,8 @@ export type AdPlatform = {
   readonly name: string;
   readonly live: boolean;
   launch(req: LaunchRequest): Promise<{ readonly externalId: string }>;
+  /** 캠페인 노출 중지. 초과 감지 때 서버가 부른다(이미 중지돼 있어도 안전해야 한다) */
+  pause(campaign: string): Promise<{ readonly paused: boolean }>;
   /** 하루치 성과. 형식 검증은 호출측(서버)이 한다 — 어댑터 값은 믿지 않는다 */
   fetchPerformance(campaign: string, day: string): Promise<unknown>;
 };
@@ -19,6 +21,7 @@ export const mockPlatform: AdPlatform = Object.freeze({
   name: 'mock',
   live: false,
   async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}` }; },
+  async pause() { return { paused: true }; },
   async fetchPerformance(campaign, day) {
     const h = hash(`${campaign}:${day}`);
     const impressions = 500 + (h % 2000);
