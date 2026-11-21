@@ -10,6 +10,8 @@ import type { IntakeContext } from '../../src/server/leads/intake';
 import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 import { signToken } from '../../src/server/security/token';
 import { adminLeadsList } from '../../src/server/admin/leadsRoute';
+import { answerQuote } from '../../src/server/consult/quoteAnswer';
+import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
 import { createPolicyDraft, listPolicies, policyAction, type PolicyAdminDeps } from '../../src/server/admin/policyAdmin';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
 
@@ -66,7 +68,7 @@ test('E2 접수 → DB 저장: 암호화 저장·동의·고지 노출 기록·�
   assert.equal(await count(LEADS), l0 + 1);
   assert.ok((await count(AUDITS)) > a0, '감사 기록 증가');
   const [row] = await admin`
-    select c.name_enc, c.phone_enc, c.id::text as cid, l.name_masked, l.phone_last4, l.interest
+    select c.name_enc, c.phone_enc, c.id::text as cid, l.name_masked, l.phone_last4, l.interest, l.utm_source, l.utm_medium, l.utm_campaign
     from core.leads l join pii.customers c on c.id = l.customer_id
     where l.idempotency_key = 'e2e-intake-0000000000001'`;
   assert.ok(row, '저장된 리드');
@@ -74,6 +76,8 @@ test('E2 접수 → DB 저장: 암호화 저장·동의·고지 노출 기록·�
   assert.ok(!String(row.name_enc).includes('김이투이'));
   assert.ok(!String(row.phone_enc).includes('7777') && !String(row.phone_enc).includes('1234'));
   assert.equal(row.phone_last4, '1234');
+  // 유입 추적: 광고 UTM이 리드에 그대로 저장된다
+  assert.deepEqual({ s: row.utm_source, m: row.utm_medium, c: row.utm_campaign }, { s: 'naver', m: 'cpc', c: 'e2e' });
   assert.ok(!String(row.name_masked).includes('김이투이'));
   const [exp] = await admin`select count(*)::int as n, count(distinct notice_key)::int as k from pii.notice_exposures where customer_id = ${row.cid}::uuid and doc_version = 'privacy-test-v1'`;
   assert.deepEqual({ n: exp.n, k: exp.k }, { n: 3, k: 3 });
@@ -204,6 +208,35 @@ test('E7 관리자 정책: 초안 → 제출 → 승인, 승인 권한 우회 �
     const on = await published();
     assert.ok(mentions(on) && on.includes('11111'), '스위치 켜짐: 승인된 정책의 고객용 값만 고객 경로에 나감');
     assert.ok(!/commission|source_ref|created_by|checks/i.test(on), '고객 경로에는 내부 값 없음');
+  } finally {
+    await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;
+  }
+});
+
+// 승인 정책 → 상담 금액 안내: 실제 DB의 게시 함수 → 서버 제공자 → 견적 판정 → 안내 문구까지. 승인·게시된 정책만 금액이 나간다
+test('E8 상담 안내: 스위치 꺼짐·미승인·모르는 상품은 담당자 확인 안내, 승인·게시된 정책은 승인 금액만 안내', async () => {
+  const provider = dbPolicyProvider(async () => {
+    const rows = (await withRoleOn(app, 'public', (tx) => tx`select api.policy_published() as p`)) as unknown as { p: unknown }[];
+    return rows.map((r) => r.p);
+  });
+  const req = (productId: string) => ({
+    supplierId: 'supplier-a', segment: 'household' as const, carrier: 'carrier-x', productId, regionCode: 'region-1',
+    confirmedBundles: { known: true as const, value: [] as string[] },
+  });
+  const [flag] = await admin`select enabled from core.feature_flags where key = 'policy_publish'`;
+  const original = flag?.enabled ?? false;
+  try {
+    await admin`update core.feature_flags set enabled = false where key = 'policy_publish'`;
+    const off = await answerQuote(provider, req('e2e-p1'), new Date());
+    assert.equal(off.kind, 'needs_review');
+    assert.ok(!off.text.includes('11,111') && !off.text.includes('11111'));
+    await admin`update core.feature_flags set enabled = true where key = 'policy_publish'`;
+    const on = await answerQuote(provider, req('e2e-p1'), new Date());
+    assert.equal(on.kind, 'quote', on.text);
+    assert.ok(on.text.includes('11,111') || on.text.includes('11111'), on.text);
+    const unknown = await answerQuote(provider, req('no-such-product'), new Date());
+    assert.equal(unknown.kind, 'needs_review');
+    assert.ok(!unknown.text.includes('11,111'));
   } finally {
     await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;
   }
