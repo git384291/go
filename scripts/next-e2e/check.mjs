@@ -114,6 +114,65 @@ try {
   const lt = await ll.text();
   check('N13 관리자 접수 목록(Next→DB): 200, 마스킹된 전화번호 표시, 원문 전화·이름 없음', ll.status === 200 && lt.includes('010-****-1234') && !lt.includes('7777') && !lt.includes('김이투이'), `status=${ll.status} ${ll.status === 200 ? '' : lt.slice(0, 120)}`);
   check('N13b 무인증·검토자 외 역할 규칙: 무인증 목록 401', (await adm('/api/admin/leads')).status === 401);
+  // /admin/* 전체 화면: 로그인·MFA·역할 제한과 우회 시도. 허용된 역할만 화면 표지가 보이고, 나머지는 표지·데이터가 응답에 없다
+  await sql.unsafe(`insert into core.staff (user_id, role, active) values ('${U(6)}', 'policy_editor', true) on conflict do nothing`);
+  await sql.unsafe(`insert into security.staff_sessions (id, user_id, created_at, revoked_at) values ('${S(8)}', '${U(6)}', now(), null) on conflict do nothing`);
+  const editorC = cookieFor({ sub: U(6), session_id: S(8), aal: 'aal2' });
+  const counselorC = cookieFor({ sub: U(2), session_id: S(2), aal: 'aal2' });
+  const aal1C = cookieFor({ sub: U(1), session_id: S(1), aal: 'aal1' });
+  const forgedC = cookieFor({ sub: U(1), session_id: S(1), aal: 'aal2' }, evil);
+  const revokedC = cookieFor({ sub: U(1), session_id: S(7), aal: 'aal2' });
+  const PAGES = [
+    ['/admin/progress', 'FIDEON 진행 상황', new Set(['owner'])],
+    ['/admin/policies', 'FIDEON 관리 · 정책', new Set(['owner', 'editor', 'reviewer'])],
+    ['/admin/ads', 'FIDEON 관리 · 광고 예산', new Set(['owner', 'reviewer'])],
+    ['/admin/ads/funnel', 'FIDEON 관리 · 광고 성과', new Set(['owner', 'reviewer'])],
+    ['/admin/ai-budget', 'FIDEON 관리 · AI 월 비용 한도', new Set(['owner', 'reviewer'])],
+  ];
+  const get = (p, cookie, headers = {}) => fetch(BASE + p, { redirect: 'manual', headers: { ...(cookie ? { cookie } : {}), ...headers } });
+  const who = { owner: ownerC, reviewer: reviewerC, editor: editorC, counselor: counselorC };
+  let pageFail = [];
+  for (const [path, mark, allowed] of PAGES) {
+    for (const [role, c] of Object.entries(who)) {
+      const r = await get(path, c); const t = await r.text();
+      const shown = r.status === 200 && t.includes(mark);
+      if (shown !== allowed.has(role)) pageFail.push(`${path}:${role}:${r.status}:${shown}`);
+    }
+  }
+  check('P1 역할별 화면 접근: 허용 역할만 표지가 보이고 나머지(상담원 포함)는 보이지 않음', pageFail.length === 0, pageFail.slice(0, 4).join(' '));
+  let bypass = [];
+  const attempts = [
+    ['무인증', null, {}], ['MFA 없음(aal1)', aal1C, {}], ['위조 서명', forgedC, {}], ['폐기 세션', revokedC, {}],
+    ['RSC 요청', null, { RSC: '1' }], ['미들웨어 우회 헤더', null, { 'x-middleware-subrequest': 'middleware:middleware:middleware:middleware:middleware' }],
+    ['역할 헤더 주입', null, { 'x-role': 'owner', 'x-staff-role': 'owner', 'x-user-id': U(1) }], ['쿠키 없이 Authorization', null, { authorization: `Bearer ${jwt({ sub: U(1), session_id: S(1), aal: 'aal2' })}` }],
+  ];
+  for (const [path, mark] of PAGES) {
+    for (const [name, c, h] of attempts) {
+      for (const variant of [path, path + '/', path + '?role=owner&actor=' + U(1), path.replace('/admin', '/admin/.')]) {
+        const r = await get(variant, c, h); const t = await r.text();
+        if (r.status === 200 && t.includes(mark)) bypass.push(`${name}:${variant}`);
+      }
+    }
+  }
+  check('P2 우회 시도(무인증·aal1·위조·폐기 세션·RSC·미들웨어 우회 헤더·역할 헤더·Authorization·경로 변형)는 모든 관리자 화면에서 표지·데이터 0', bypass.length === 0, bypass.slice(0, 4).join(' '));
+  const un = await get('/admin/ai-budget');
+  check('P3 무인증 화면은 로그인으로 이동', [302, 303, 307, 308].includes(un.status) && (un.headers.get('location') ?? '').includes('/admin/login'), `status=${un.status} loc=${un.headers.get('location')}`);
+  const lead0 = await get('/admin'); const lt0 = await lead0.text();
+  check('P4 무인증 /admin(접수 목록): 로그인으로 이동, 접수 데이터 없음', [302, 303, 307, 308].includes(lead0.status) && !lt0.includes('010-'), `status=${lead0.status}`);
+  const lead1 = await get('/admin', ownerC);
+  check('P5 로그인한 직원은 /admin 화면이 열림(이동 없음)', lead1.status === 200, `status=${lead1.status}`);
+  const login = await get('/admin/login');
+  check('P6 /admin/login은 무인증으로 열림, 관리자 화면 응답은 no-store·검색 제외', login.status === 200 && /no-store/.test(login.headers.get('cache-control') ?? '') && /noindex/.test(login.headers.get('x-robots-tag') ?? ''), `status=${login.status}`);
+  // /api/admin/* 전 라우트(파일 목록에서 자동 생성): 무인증 GET·POST는 어떤 것도 200이 아님
+  const { readdirSync, statSync } = await import('node:fs');
+  const walk = (d) => readdirSync(d).flatMap((n) => { const f = `${d}/${n}`; return statSync(f).isDirectory() ? walk(f) : [f]; });
+  const apiPaths = walk('src/app/api/admin').filter((f) => f.endsWith('/route.ts')).map((f) => '/' + f.slice('src/app/'.length, -'/route.ts'.length).replace('[id]', '10000000-0000-4000-8000-000000000001'));
+  let apiBad = [];
+  for (const ap of apiPaths) for (const [name, c] of [['무인증', null], ['aal1', aal1C], ['위조', forgedC], ['폐기', revokedC]]) for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) {
+    const r = await fetch(BASE + ap, { method, headers: { 'content-type': 'application/json', ...(c ? { cookie: c } : {}) }, body: method === 'GET' ? undefined : '{}' });
+    if (r.status === 200 || r.status >= 500 && r.status !== 503) apiBad.push(`${name}:${method}:${ap}:${r.status}`);
+  }
+  check(`P7 /api/admin 전 라우트 ${apiPaths.length}개 × 무인증·aal1·위조·폐기 × 4개 메서드: 200·서버 오류 없음`, apiBad.length === 0 && apiPaths.length >= 8, apiBad.slice(0, 4).join(' '));
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);

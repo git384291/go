@@ -89,6 +89,34 @@ export function runChecks(env: Env, files: { layoutSource: string }): Check[] {
   add({ id: 'A5', area: '인증', name: 'Auth 대시보드 설정(가입 차단·TOTP·세션 time-box·비밀번호·redirect·JWT 키)', status: 'UNVERIFIABLE',
     note: '체크리스트 D3~D8. 이 점검으로 확인 불가', where: SUPABASE_AUTH_SCREEN + MENU_NOTE });
 
+  // 4-1. 봇 확인(Turnstile) 연결 준비 — 존재·형식만(값 미표시, 네트워크 호출 없음)
+  const CF_SCREEN = 'Cloudflare 대시보드 → Turnstile → 사이트 설정(사이트 키·비밀 키·허용 호스트명). 필요 권한: 그 계정의 Turnstile 편집 권한';
+  add({ id: 'T1', area: '봇 확인', name: '비밀 키 TURNSTILE_SECRET_KEY(서버 전용)', status: has(env, 'TURNSTILE_SECRET_KEY') ? 'OK' : 'MISSING', note: has(env, 'TURNSTILE_SECRET_KEY') ? '있음(값 미표시)' : '없음 — 없으면 서버가 모든 접수를 거부', where: CF_SCREEN + MENU_NOTE });
+  add({ id: 'T2', area: '봇 확인', name: '사이트 키 NEXT_PUBLIC_TURNSTILE_SITE_KEY(화면용 공개 키)', status: has(env, 'NEXT_PUBLIC_TURNSTILE_SITE_KEY') ? 'OK' : 'MISSING', note: has(env, 'NEXT_PUBLIC_TURNSTILE_SITE_KEY') ? '있음(값 미표시)' : '없음 — 없으면 접수 양식이 꺼진 채로 남음', where: CF_SCREEN + MENU_NOTE });
+  if (!has(env, 'PUBLIC_HOSTNAME')) add({ id: 'T3', area: '봇 확인', name: '기대 호스트명 PUBLIC_HOSTNAME', status: 'MISSING', note: '없음 — 없으면 확인 결과가 항상 거부됨', where: VERCEL_ENV_SCREEN + MENU_NOTE });
+  else {
+    const h = env.PUBLIC_HOSTNAME!.trim();
+    const okHost = !/[/:@?#\s]/.test(h) && isPublicDnsHost(h.toLowerCase());
+    add({ id: 'T3', area: '봇 확인', name: '기대 호스트명 PUBLIC_HOSTNAME', status: okHost ? 'OK' : 'INVALID', note: okHost ? '호스트명 형식(스킴·경로·포트 없음). Cloudflare가 돌려주는 hostname과 같아야 함' : '호스트명만 적어야 함(스킴·경로·포트·로컬 주소 불가)' });
+  }
+  add({ id: 'T4', area: '봇 확인', name: '시험 전용 TURNSTILE_VERIFY_URL_TEST', status: has(env, 'TURNSTILE_VERIFY_URL_TEST') ? 'INVALID' : 'OK', note: has(env, 'TURNSTILE_VERIFY_URL_TEST') ? '시험 전용 값이 설정됨 — 배포 환경에 두지 않음(운영 빌드는 무시하지만 제거해야 함)' : '설정 없음' });
+  add({ id: 'T5', area: '봇 확인', name: 'Cloudflare 위젯 설정(허용 호스트명·action lead_form·모드)', status: 'UNVERIFIABLE', note: '이 점검으로 확인 불가(연동 없음)', where: CF_SCREEN + MENU_NOTE });
+
+  // 4-2. AI·광고 실제 연결 전 보안 점검 — 키가 이미 들어 있거나 스위치가 켜져 있으면 알린다(값 미표시)
+  const pubSecret = Object.keys(env).filter((k) => /^NEXT_PUBLIC_.*(SERVICE_ROLE|SECRET|PRIVATE|API_KEY|TOKEN|PASSWORD)/i.test(k) && has(env, k));
+  add({ id: 'S1', area: '보안', name: '브라우저 공개 변수(NEXT_PUBLIC_*)에 비밀 이름이 없음', status: pubSecret.length ? 'INVALID' : 'OK', note: pubSecret.length ? `비밀로 보이는 공개 변수 ${pubSecret.length}개(이름: ${pubSecret.join(', ')}) — 즉시 서버 전용 이름으로 옮김` : '없음' });
+  const keysSet = ['CONSULT_AI_API_KEY', 'AD_API_KEY', 'OPENAI_API_KEY', 'AD_PLATFORM_API_KEY'].filter((k) => has(env, k));
+  add({ id: 'S2', area: '보안', name: 'AI·광고 API 키 설정 여부(서버 전용)', status: keysSet.length ? 'POLICY' : 'OFF', note: keysSet.length ? `키 ${keysSet.length}개 설정됨(이름: ${keysSet.join(', ')}) — 실제 연결 승인 없음. 어댑터가 없어 사용되지 않음` : '없음(정책대로)' });
+  add({ id: 'S3', area: '보안', name: '광고 실제 집행 스위치 AD_EXECUTION_ENABLED', status: env.AD_EXECUTION_ENABLED === 'true' ? 'POLICY' : 'OFF', note: env.AD_EXECUTION_ENABLED === 'true' ? '켜짐 — 집행 승인 없음' : '꺼짐(정책대로)' });
+  const model = (env.CONSULT_AI_MODEL ?? '').trim();
+  add({ id: 'S4', area: '보안', name: '상담 AI 모델 CONSULT_AI_MODEL', status: model === '' ? 'OFF' : model === 'mock' ? 'INFO' : 'INVALID', note: model === '' ? '없음(담당자 확인 안내문만)' : model === 'mock' ? '무료 모의 모델' : '지원하는 어댑터가 없는 값(모델 없음으로 처리됨)' });
+  const b64len = (v: string | undefined) => (v && /^[A-Za-z0-9+/=]+$/.test(v) ? Buffer.from(v, 'base64').length : 0);
+  let piiOk = false;
+  try { const m = JSON.parse(env.PII_ENC_KEYS ?? '{}') as Record<string, string>; piiOk = Object.keys(m).length > 0 && (env.PII_ENC_CURRENT ?? '') in m && Object.values(m).every((k) => b64len(k) === 32) && b64len(env.PII_HMAC_KEY) >= 32 && b64len(env.PII_IP_HASH_KEY) >= 32; } catch { piiOk = false; }
+  const piiAny = has(env, 'PII_ENC_KEYS') || has(env, 'PII_HMAC_KEY') || has(env, 'PII_IP_HASH_KEY');
+  add({ id: 'S5', area: '보안', name: '개인정보 암호화 키(PII_ENC_KEYS·PII_ENC_CURRENT·PII_HMAC_KEY·PII_IP_HASH_KEY)', status: !piiAny ? 'MISSING' : piiOk ? 'OK' : 'INVALID', note: !piiAny ? '없음 — 없으면 접수 저장이 실패' : piiOk ? '형식 OK(암호화 키 32바이트, 해시 키 32바이트 이상, 현재 버전 존재). 값 미표시' : '형식 오류' });
+  add({ id: 'S6', area: '보안', name: '상담 세션 서명 키 CONSULT_SESSION_KEY', status: !has(env, 'CONSULT_SESSION_KEY') ? 'MISSING' : b64len(env.CONSULT_SESSION_KEY) >= 32 ? 'OK' : 'INVALID', note: !has(env, 'CONSULT_SESSION_KEY') ? '없음 — 없으면 AI 상담 경로가 닫힘' : b64len(env.CONSULT_SESSION_KEY) >= 32 ? 'base64 32바이트 이상(값 미표시)' : '형식 오류' });
+
   // 5. DB 연결 설정
   if (!has(env, 'DATABASE_URL')) {
     add({ id: 'D1', area: 'DB', name: 'DATABASE_URL', status: 'MISSING', note: '없음', where: SUPABASE_DB_SCREEN + MENU_NOTE });

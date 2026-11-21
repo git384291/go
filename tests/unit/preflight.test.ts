@@ -67,3 +67,19 @@ test('F6 목적지: https 공개 도메인·쿼리 없음만, FIDEON 비활성 �
   assert.equal(destinationStatus({ PUBLIC_SITE_ORIGIN: 'https://fideon-real.kr', LAUNCH_INTAKE_DESTINATION: 'https://fideon-real.kr/api/admin/leads' }).status, 'POLICY');
   assert.equal(destinationStatus({ LAUNCH_INTAKE_DESTINATION: 'https://partner.kr/apply' }).status, 'INFO');
 });
+
+test('F9 Turnstile·보안 점검: 완비 환경 OK, 누락·형식 오류·시험 값·공개 변수 비밀 이름은 표시, 값은 출력에 없음', () => {
+  const FULL = { ...SECRET, TURNSTILE_SECRET_KEY: '0xSECRETTURN', NEXT_PUBLIC_TURNSTILE_SITE_KEY: '0xSITEKEY', PUBLIC_HOSTNAME: 'www.fideon-secret-domain.kr',
+    PII_ENC_KEYS: JSON.stringify({ '1': Buffer.alloc(32, 1).toString('base64') }), PII_ENC_CURRENT: '1', PII_HMAC_KEY: Buffer.alloc(32, 3).toString('base64'), PII_IP_HASH_KEY: Buffer.alloc(32, 4).toString('base64'), CONSULT_SESSION_KEY: Buffer.alloc(32, 5).toString('base64') };
+  const cs = runChecks(FULL, { layoutSource });
+  for (const id of ['T1', 'T2', 'T3', 'T4', 'S1', 'S5', 'S6']) assert.equal(byId(cs, id).status, 'OK', id);
+  assert.equal(byId(cs, 'T5').status, 'UNVERIFIABLE');
+  assert.equal(byId(cs, 'S2').status, 'OFF');
+  const out = renderChecks(cs);
+  for (const v of ['0xSECRETTURN', '0xSITEKEY', Buffer.alloc(32, 1).toString('base64'), Buffer.alloc(32, 5).toString('base64')]) assert.ok(!out.includes(v), v);
+  const bad = runChecks({ ...FULL, TURNSTILE_SECRET_KEY: '', PUBLIC_HOSTNAME: 'https://x.kr/a', TURNSTILE_VERIFY_URL_TEST: 'http://127.0.0.1:1/t', NEXT_PUBLIC_OPENAI_API_KEY: 'x', PII_ENC_CURRENT: '9', CONSULT_SESSION_KEY: 'c2hvcnQ=', CONSULT_AI_API_KEY: 'sk-x', AD_EXECUTION_ENABLED: 'true', CONSULT_AI_MODEL: 'openai' }, { layoutSource });
+  assert.deepEqual(['T1', 'T3', 'T4', 'S1', 'S5', 'S6', 'S4'].map((id) => byId(bad, id).status), ['MISSING', 'INVALID', 'INVALID', 'INVALID', 'INVALID', 'INVALID', 'INVALID']);
+  assert.deepEqual(['S2', 'S3'].map((id) => byId(bad, id).status), ['POLICY', 'POLICY']);
+  const out2 = renderChecks(bad);
+  for (const v of ['sk-x', 'x.kr', '127.0.0.1']) assert.ok(!out2.includes(v), v);
+});
