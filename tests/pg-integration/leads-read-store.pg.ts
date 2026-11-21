@@ -136,11 +136,20 @@ test('P5 DB 재검증: 만료·폐기 세션, 비활성 직원, 잘못된 서명
   assert.deepEqual(await listMaskedLeads(deps(), { ...t, token: t.token.slice(0, -1) + (t.token.endsWith('0') ? '1' : '0') }), { ok: false, code: 'FORBIDDEN' });
 });
 
-test('P6 잘못된 행(비활성 상품·원문 이름 모양)이 섞이면 전체 실패, 시험 행은 폐기 DB에서만 추가·제거', async () => {
+test('P6 잘못된 행(원문 이름 모양)이 섞이면 전체 실패, 예약 상품 행은 목록에서 제외(전체 실패 아님), 시험 행은 폐기 DB에서만 추가·제거', async () => {
   const bad: [string, string, string][] = [
-    ['비활성 상품', 'cctv_security', '이*순'],
     ['원문+별표 이름', 'internet_tv', 'FixtureName*'],
   ];
+  // 예약(비활성) 상품 접수 행: 목록은 열리고 그 행만 빠진다
+  await admin`insert into core.leads (id, name_masked, phone_last4, interest, idempotency_key)
+              values ('d0000000-0000-4000-8000-000000000008', '이*순', '1008', 'cctv_security', 'lrs-idempotency-rsv1')`;
+  try {
+    const r = await listMaskedLeads(deps(), who(OWNER, S(1), 'owner'));
+    assert.equal(r.ok, true);
+    assert.ok(r.ok && !r.items.some((i) => i.id === 'd0000000-0000-4000-8000-000000000008'));
+  } finally {
+    await admin`delete from core.leads where id = 'd0000000-0000-4000-8000-000000000008'`;
+  }
   for (const [label, interest, name] of bad) {
     await admin`insert into core.leads (id, name_masked, phone_last4, interest, idempotency_key)
                 values ('d0000000-0000-4000-8000-000000000009', ${name}, '1009', ${interest}, 'lrs-idempotency-bad1')`;
