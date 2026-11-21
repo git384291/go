@@ -1,4 +1,4 @@
-import { NoticeAddPanel } from './NoticesConsole';
+import { NoticeAddPanel, SourceCheckPanel } from './NoticesConsole';
 
 // 필수 고지 문구 입력·버전 관리 화면(서버 컴포넌트). 임의 문구를 넣어 두지 않는다 — 실제 문구는 대표·PM이 확정해 입력한다.
 // 문구를 DB에 넣어도 접수는 열리지 않는다: 접수는 코드 상수 REQUIRED_NOTICES가 '확정'으로 바뀔 때만(별도 승인·배포) 열린다.
@@ -25,6 +25,7 @@ export function NoticesView({ rows, role, status }: { rows: readonly NoticeRow[]
         <p className="muted" data-field="match">{status.codeVersion === '' ? '코드 상수 버전: 없음' : `코드 상수 버전 ${status.codeVersion} · DB 대조: ${status.mismatches.length === 0 ? '일치' : status.mismatches.map((m) => REASON[m] ?? m).join(', ')}`}</p>
       </section>
       {role === 'owner' ? <NoticeAddPanel /> : <p className="muted">문구 입력은 대표만 할 수 있습니다(조회만 가능).</p>}
+      <SourceCheckPanel rows={rows.map((r) => ({ version: r.version, notice_key: r.notice_key, body: r.body }))} />
       <section aria-label="고지 문구 버전">
         <h2>저장된 고지 문구</h2>
         {versions.length === 0 ? <p>저장된 문구가 없습니다. 실제 문구가 확정되면 대표가 버전과 함께 입력합니다.</p> : versions.map((v) => (

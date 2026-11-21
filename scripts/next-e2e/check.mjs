@@ -272,6 +272,10 @@ try {
   const lc0 = await n(`select count(*)::int as n from core.leads`);
   const blk = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], idempotencyKey: 'next-e2e-lead-000000002', turnstileToken: 'ok' });
   check('NA6 고지 문구를 DB에 입력해도 접수 차단 유지(NOTICE_NOT_CONFIRMED 503), 접수 0건 증가', blk.status === 503 && blk.j?.code === 'NOTICE_NOT_CONFIRMED' && (await n(`select count(*)::int as n from core.leads`)) === lc0, `status=${blk.status} code=${blk.j?.code}`);
+  // 총판 원문 ↔ 실제 DB 저장 문구 대조(읽기 전용)
+  const ns = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/notice-source.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+  let sj = null; try { sj = JSON.parse(ns.stdout.trim().split('\n').pop()); } catch { /* 아래에서 실패 처리 */ }
+  check('NA7 총판 원문 대조(실제 DB 문구): 같으면 일치, 공백만 다르면 구분, 내용 다르면 차이, 없는 항목 감지', sj && sj.saved && sj.same.join() === 'collection_purpose:MATCH' && sj.crlf.join() === 'collection_purpose:MATCH' && sj.ws.join() === 'collection_purpose:WHITESPACE_ONLY' && sj.diff.join() === 'collection_purpose:DIFF' && sj.missing.join() === 'other_key:KEY_MISSING_IN_DB,collection_purpose:SOURCE_MISSING', (ns.stdout + ns.stderr).slice(0, 160).replace(/\n/g, ' '));
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);

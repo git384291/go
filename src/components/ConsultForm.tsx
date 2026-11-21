@@ -327,7 +327,7 @@ export function ConsultForm({ options, kakaoUrl }: { options: readonly ConsultOp
               <div key={n.key}>
                 <details>
                   <summary>{n.title}</summary>
-                  <p>{n.body}</p>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{n.body}</p>
                 </details>
                 <label className="check">
                   <input

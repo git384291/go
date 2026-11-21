@@ -67,7 +67,23 @@ try {
   await ctx.close();
   const rJs = await bundle(`<NoticesView rows={[]} role="reviewer" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} />`, "import { NoticesView } from './src/app/admin/notices/NoticesView';");
   ({ page, ctx } = await open(browser, rJs, '[data-field=intake]'));
-  check('N6 검토자 화면: 입력란·저장 버튼 없음(조회만)', (await page.locator('textarea').count()) === 0 && (await page.getByRole('button', { name: '저장' }).count()) === 0);
+  check('N6 검토자 화면: 입력란·저장 버튼 없음(조회만)', (await page.locator('textarea[aria-label="고지 문구"]').count()) === 0 && (await page.getByRole('button', { name: '저장' }).count()) === 0);
+  await ctx.close();
+  // 원문 대조(브라우저 안 비교, 서버 요청 없음)
+  const sJs = await bundle(`<NoticesView rows={[{ version: 'sample-v1', notice_key: 'collection_purpose', body: '[검수용 가상 문구]\\n보유 1년', body_sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12', created_at: '2026-11-21T09:00:00Z' }]} role="reviewer" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} />`, "import { NoticesView } from './src/app/admin/notices/NoticesView';");
+  ({ page, ctx, seen } = await open(browser, sJs, '[data-field=intake]'));
+  const cmp = page.getByRole('button', { name: '대조', exact: true });
+  check('S1 원문 대조: 입력 전 버튼 잠김', await cmp.isDisabled());
+  await page.fill('input[aria-label="대조 버전"]', 'sample-v1'); await page.fill('input[aria-label="대조 항목 키"]', 'collection_purpose');
+  await page.fill('textarea[aria-label="총판 원문"]', '[검수용 가상 문구]\n보유 1년');
+  await cmp.click();
+  check('S2 같은 원문이면 "일치"', (await page.textContent('[data-field=source-result]')) === '일치');
+  await page.fill('textarea[aria-label="총판 원문"]', '[검수용 가상 문구]\n보유 2년');
+  await cmp.click();
+  const dr = await page.textContent('[data-field=source-result]');
+  check('S3 다른 원문이면 "내용이 다름"과 첫 차이 위치 표시', dr.includes('내용이 다름') && dr.includes('첫 차이'), dr);
+  await page.fill('input[aria-label="대조 항목 키"]', 'nope'); await cmp.click();
+  check('S4 없는 항목은 "DB에 이 항목이 없음", 서버 요청 0·외부 요청 0(검토자도 사용 가능)', (await page.textContent('[data-field=source-result]')).includes('DB에 이 항목이 없음') && seen.api.length === 0 && seen.external.length === 0);
   await ctx.close();
 } finally { await browser.close(); }
 const bad = results.filter((x) => !x).length;

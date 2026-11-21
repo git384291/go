@@ -40,3 +40,16 @@ test('RN-C 화면 고지와 DB 문구 대조: 같으면 빈 배열, 누락·초�
   assert.deepEqual(compareNoticeTexts({ ...cfg, version: '' }, rows), ['NO_DB_TEXTS']);
   assert.ok(!JSON.stringify(compareNoticeTexts(cfg, [rows[0], { ...rows[1], body: '비밀 문구' }])).includes('비밀'));
 });
+
+import { verifyNoticeSource } from '../../src/content/requiredNotices';
+test('RN9 총판 원문 대조: 일치·공백만 다름·내용 다름(차이 위치)·누락을 구분하고 문구는 결과에 없다', () => {
+  const rows = [{ version: 'v1', notice_key: 'a', body: '개인정보를 수집합니다.\n보유 1년' }, { version: 'v1', notice_key: 'b', body: '두번째' }, { version: 'v0', notice_key: 'z', body: '옛 버전' }];
+  const r = verifyNoticeSource('v1', rows, { a: '개인정보를 수집합니다.\r\n보유 1년 ', b: '두번째 ', c: '없는 항목' });
+  assert.deepEqual(r.map((x) => [x.key, x.result]), [['a', 'MATCH'], ['b', 'MATCH'], ['c', 'KEY_MISSING_IN_DB']]);
+  assert.equal(verifyNoticeSource('v1', rows, { a: '개인정보를  수집합니다. 보유 1년' })[0].result, 'WHITESPACE_ONLY');
+  const d = verifyNoticeSource('v1', rows, { a: '개인정보를 수집합니다.\n보유 2년' })[0];
+  assert.deepEqual([d.result, d.diffAt], ['DIFF', 16]);
+  assert.deepEqual(verifyNoticeSource('v1', rows, { a: rows[0].body }).map((x) => x.result), ['MATCH', 'SOURCE_MISSING']);
+  assert.ok(!JSON.stringify(r).includes('개인정보'));
+  assert.deepEqual(verifyNoticeSource('v9', rows, { a: 'x' }).map((x) => x.result), ['KEY_MISSING_IN_DB']);
+});

@@ -61,3 +61,29 @@ export function compareNoticeTexts(cfg: NoticeConfig, rows: readonly NoticeTextR
   for (const k of dbKeys.keys()) if (!cfg.items.some((n) => n.key === k)) out.push(`KEY_EXTRA_IN_DB:${k}`);
   return out;
 }
+
+export type SourceCheck = { readonly key: string; readonly result: 'MATCH' | 'WHITESPACE_ONLY' | 'DIFF' | 'KEY_MISSING_IN_DB' | 'SOURCE_MISSING'; readonly diffAt: number | null };
+
+const eol = (s: string) => s.replace(/\r\n?/g, '\n').trim();
+const squash = (s: string) => eol(s).replace(/\s+/g, ' ');
+
+/**
+ * 총판 고지 원문(sources: 항목 키 → 원문)과 DB에 저장된 해당 버전 문구의 대조. 읽기 전용·순수 함수(문구는 결과에 담지 않고 차이 위치만 돌려준다).
+ * MATCH: 줄바꿈 표기 외 완전 일치 / WHITESPACE_ONLY: 공백·줄바꿈만 다름(승인 전 정리 필요) / DIFF: 내용이 다름(diffAt = 첫 차이 글자 위치)
+ * KEY_MISSING_IN_DB: 원문은 있는데 DB에 없음 / SOURCE_MISSING: DB에는 있는데 대조할 원문이 없음. 접수 가능 여부는 바꾸지 않는다.
+ */
+export function verifyNoticeSource(version: string, rows: readonly NoticeTextRow[], sources: Readonly<Record<string, string>>): readonly SourceCheck[] {
+  const mine = new Map(rows.filter((r) => r.version === version).map((r) => [r.notice_key, r.body]));
+  const out: SourceCheck[] = [];
+  for (const [key, src] of Object.entries(sources)) {
+    const saved = mine.get(key);
+    if (saved === undefined) { out.push({ key, result: 'KEY_MISSING_IN_DB', diffAt: null }); continue; }
+    const a = eol(src), b = eol(saved);
+    if (a === b) { out.push({ key, result: 'MATCH', diffAt: null }); continue; }
+    if (squash(src) === squash(saved)) { out.push({ key, result: 'WHITESPACE_ONLY', diffAt: null }); continue; }
+    let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    out.push({ key, result: 'DIFF', diffAt: i });
+  }
+  for (const key of mine.keys()) if (!(key in sources)) out.push({ key, result: 'SOURCE_MISSING', diffAt: null });
+  return out;
+}
