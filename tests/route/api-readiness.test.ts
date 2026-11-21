@@ -22,8 +22,8 @@ test('RD2 정적: 실제 AI·광고 서비스 주소·SDK·fetch 호출 코드�
   for (const f of walk('src').filter((p) => /\.(ts|tsx)$/.test(p))) {
     const s = readFileSync(f, 'utf8');
     // 광고 문구 생성기(주입형 전송, 호출 코드 미연결)만 예외. 아래에서 어디서도 불러 쓰지 않음을 확인한다
-    if (!f.endsWith('advertising/openAiAdGenerator.ts')) assert.ok(!hosts.test(s), `${f}: 실제 AI·광고 서비스 연동 코드`);
-    if (!f.includes(`${path.sep}advertising${path.sep}`)) assert.ok(!/openAiAdGenerator/.test(s), `${f}: 광고 문구 생성기를 앱 경로에서 사용`);
+    if (!f.endsWith('advertising/openAiAdGenerator.ts') && !f.endsWith('advertising/googleAdsPlatform.ts')) assert.ok(!hosts.test(s), `${f}: 실제 AI·광고 서비스 연동 코드`);
+    if (!f.includes(`${path.sep}advertising${path.sep}`)) assert.ok(!/openAiAdGenerator|googleAdsPlatform/.test(s), `${f}: 광고 문구 생성기를 앱 경로에서 사용`);
     if (!f.endsWith('advertising/openAiAdGenerator.ts') && /\bfetch\(/.test(s) && !/^['"]use client['"]/.test(s.trimStart())) assert.ok(/leads\/turnstile\.ts$|supabase/i.test(f), `${f}: 서버 외부 호출은 봇 확인뿐`);
   }
 });

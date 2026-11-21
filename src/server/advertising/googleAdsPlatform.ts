@@ -1,0 +1,159 @@
+import 'server-only';
+import { boundedRequest, parseJsonSafe, type BodyTransport, type BoundedResult } from './boundedHttp';
+import { PlatformError, type AdPlatform, type CallOpts, type LaunchRequest, type LaunchResult, type PlatformRef } from './platform';
+
+// Google Ads 어댑터 (PM 11/22 지시). **비활성 준비 코드: 실계정 연결·실접속·실집행이 아니다.**
+// - 기존 AdPlatform 계약(platform.ts 1~4항)과 0018 launch 상태 구조를 그대로 쓴다. 서버(adRun.ts)는 이 파일을 모른다 — createPlatform에 연결하지 않았다.
+// - transport(boundedHttp 주입형)·credential·API 버전은 **모두 필수 주입**이다. 기본 fetch·process.env·SDK·재시도·키 저장 없음.
+//   credential은 호출자가 환경변수에서 읽어 넘긴다(GOOGLE_ADS_ENV_NAMES). 이 파일·DB·로그·오류에 값이 남지 않는다.
+//   설정이 하나라도 비면 createGoogleAdsPlatform은 null(= 닫힘). 기본 transport 연결·AD_PLATFORM 선택은 제이님 승인 뒤 별도 단계다.
+// - API 버전(apiVersion)은 코드에 박지 않는다. 실계정 연결 때 공식 문서(sunset 일정)로 확정해 주입한다(미검증).
+// - 범위: 예산(CampaignBudget)+캠페인(Campaign) 생성·중지·성과 조회뿐. 광고 그룹·광고 소재·키워드·이미지·영상은 만들지 않는다(소재 생성·게시는 제이님 승인 전 금지).
+//   캠페인은 기본 PAUSED로 만든다(initialStatus='ENABLED'를 명시해야 활성). 소재가 없으면 노출·과금도 없다.
+// - 예산 보호: 일 예산은 원화를 micros로 바꿔 req.platformDailyBudgetKrw 이하로만 설정하고, 만든 뒤 다시 읽어(read-back) 실제 값을 돌려준다.
+//   읽기에 실패하거나 값이 다르면 dailyBudgetKrw=0(미확인)을 돌려 서버가 즉시 중지·경고하게 한다(fail-closed). 계정 통화는 KRW여야 한다(아니면 예산 단위가 어긋난다 — 실계정에서 확인 필요).
+// - 오류 구분(응답 본문은 읽지 않는다 — 반사 금지): 요청 거부(400·401·403·404·429)는 집행 안 됨이 확실 → failed(코드 BAD_REQUEST·AUTH_ERROR·NOT_FOUND·RATE_LIMITED),
+//   마감·전송 오류·5xx·2xx 판독 실패는 집행 여부 불명 → unknown. 예산 값 오류는 전송 전 BUDGET_INVALID(failed), 읽기 값 불일치는 BUDGET_MISMATCH.
+// - 캠페인 이름에 requestKey를 넣어 사람이 구글 광고 화면에서 unknown 건을 찾아 대조할 수 있게 한다(자동 재시도 없음).
+// - validateOnly=true면 구글에 검증만 요청하고(아무것도 만들지 않음) PlatformError('failed','VALIDATE_ONLY')로 끝낸다.
+
+export const GOOGLE_ADS_ENV_NAMES = Object.freeze([
+  'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID',
+] as const);
+export const GOOGLE_ADS_OPTIONAL_ENV_NAMES = Object.freeze(['GOOGLE_ADS_LOGIN_CUSTOMER_ID', 'GOOGLE_ADS_API_VERSION'] as const);
+
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const API_BASE = 'https://googleads.googleapis.com';
+const MAX_BYTES = 64 * 1024;
+const MICROS = 1_000_000;
+const ID = /^\d{1,20}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const VERSION = /^v\d{2}$/;
+
+export type GoogleAdsConfig = {
+  readonly transport: BodyTransport | null;
+  readonly apiVersion: string | null;
+  readonly developerToken: string | null;
+  readonly clientId: string | null;
+  readonly clientSecret: string | null;
+  readonly refreshToken: string | null;
+  /** 하이픈 없는 10자리 고객 ID */
+  readonly customerId: string | null;
+  readonly loginCustomerId?: string | null;
+  readonly initialStatus?: 'PAUSED' | 'ENABLED';
+  readonly validateOnly?: boolean;
+};
+
+/** 환경변수 객체에서 설정을 만든다(값은 읽기만, 저장·출력 없음). transport는 호출자가 넣는다 */
+export function googleAdsConfigFromEnv(env: Readonly<Record<string, string | undefined>>, transport: BodyTransport | null): GoogleAdsConfig {
+  const v = (k: string) => (typeof env[k] === 'string' && env[k]!.trim() !== '' ? env[k]!.trim() : null);
+  return {
+    transport, apiVersion: v('GOOGLE_ADS_API_VERSION'), developerToken: v('GOOGLE_ADS_DEVELOPER_TOKEN'), clientId: v('GOOGLE_ADS_CLIENT_ID'),
+    clientSecret: v('GOOGLE_ADS_CLIENT_SECRET'), refreshToken: v('GOOGLE_ADS_REFRESH_TOKEN'), customerId: (v('GOOGLE_ADS_CUSTOMER_ID') ?? '').replace(/-/g, '') || null,
+    loginCustomerId: (v('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '').replace(/-/g, '') || null,
+  };
+}
+
+const enc = new TextEncoder();
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+
+/** 요청 거부(집행 안 됨이 확실)와 집행 여부 불명을 나눈다 */
+function classify(r: BoundedResult): PlatformError {
+  if (r.kind === 'http') {
+    if (r.status === 401 || r.status === 403) return new PlatformError('failed', 'AUTH_ERROR');
+    if (r.status === 400) return new PlatformError('failed', 'BAD_REQUEST');
+    if (r.status === 404) return new PlatformError('failed', 'NOT_FOUND');
+    if (r.status === 429) return new PlatformError('failed', 'RATE_LIMITED');
+    return new PlatformError('unknown', 'HTTP_ERROR');
+  }
+  if (r.kind === 'error') return r.sent ? new PlatformError('unknown', r.code === 'TIMEOUT' ? 'TIMEOUT' : 'TRANSPORT_ERROR') : new PlatformError('failed', r.code === 'TIMEOUT' ? 'TIMEOUT' : 'NOT_SENT');
+  return new PlatformError('unknown', 'BAD_RESPONSE');
+}
+
+export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null {
+  const { transport, apiVersion, developerToken, clientId, clientSecret, refreshToken, customerId } = cfg;
+  if (!transport || !apiVersion || !VERSION.test(apiVersion) || !developerToken || !clientId || !clientSecret || !refreshToken || !customerId || !ID.test(customerId)) return null;
+  if (cfg.loginCustomerId != null && cfg.loginCustomerId !== '' && !ID.test(cfg.loginCustomerId)) return null;
+  const status = cfg.initialStatus === 'ENABLED' ? 'ENABLED' : 'PAUSED';
+  const base = `${API_BASE}/${apiVersion}/customers/${customerId}`;
+
+  const accessToken = async (deadlineAt: number): Promise<string> => {
+    const body = `grant_type=refresh_token&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&refresh_token=${encodeURIComponent(refreshToken)}`;
+    const r = await boundedRequest(transport, TOKEN_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: enc.encode(body) }, { deadlineAt, maxResponseBytes: MAX_BYTES });
+    // 토큰 발급은 아무것도 바꾸지 않으므로 실패·불명 모두 '집행 안 됨'(failed)
+    if (r.kind !== 'ok') throw new PlatformError('failed', r.kind === 'http' && (r.status === 400 || r.status === 401) ? 'AUTH_ERROR' : 'TOKEN_ERROR');
+    const j = parseJsonSafe(r.text);
+    const t = isObj(j) ? j.access_token : undefined;
+    if (typeof t !== 'string' || t.length < 10 || t.length > 4096) throw new PlatformError('failed', 'TOKEN_ERROR');
+    return t;
+  };
+  const headers = (token: string): Record<string, string> => ({
+    'content-type': 'application/json', authorization: `Bearer ${token}`, 'developer-token': developerToken,
+    ...(cfg.loginCustomerId ? { 'login-customer-id': cfg.loginCustomerId } : {}),
+  });
+  /** 요청 1회(변경·조회 공통). 응답 판독 실패는 mutating이면 unknown, 조회면 failed */
+  const call = async (path: string, payload: unknown, token: string, deadlineAt: number, mutating: boolean): Promise<unknown> => {
+    const r = await boundedRequest(transport, `${base}/${path}`, { method: 'POST', headers: headers(token), body: enc.encode(JSON.stringify(payload)) }, { deadlineAt, maxResponseBytes: MAX_BYTES });
+    if (r.kind !== 'ok') throw classify(r);
+    const j = parseJsonSafe(r.text);
+    if (!isObj(j)) throw new PlatformError(mutating ? 'unknown' : 'failed', 'BAD_RESPONSE');
+    return j;
+  };
+  const resourceOf = (j: unknown): string | null => {
+    const res = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0].resourceName : null;
+    return typeof res === 'string' ? res : null;
+  };
+
+  return Object.freeze({
+    name: 'google_ads',
+    live: true,
+    async launch(req: LaunchRequest): Promise<LaunchResult> {
+      const krw = req.platformDailyBudgetKrw;
+      if (!Number.isInteger(krw) || krw < 1 || krw > req.amountKrw || !/^[a-z0-9_.-]{1,64}$/.test(req.campaign) || !/^[A-Za-z0-9-]{16,64}$/.test(req.requestKey)) throw new PlatformError('failed', 'BUDGET_INVALID');
+      const token = await accessToken(req.deadlineAt);
+      const name = `fideon-${req.campaign}-${req.requestKey}`.slice(0, 128);
+      const validateOnly = cfg.validateOnly === true;
+      // 1) 일 예산(승인 금액 이하). 아직 캠페인이 없으므로 여기서의 거부·불명은 집행 영향 없음(예산만 있으면 지출 없음)
+      let budgetRes: string | null;
+      try {
+        budgetRes = resourceOf(await call('campaignBudgets:mutate', { operations: [{ create: { name, amountMicros: String(krw * MICROS), deliveryMethod: 'STANDARD', explicitlyShared: false } }], validateOnly }, token, req.deadlineAt, false));
+      } catch (e) {
+        if (e instanceof PlatformError) throw new PlatformError('failed', e.code === 'TIMEOUT' || e.code === 'BAD_RESPONSE' ? 'BUDGET_CREATE_FAILED' : e.code);
+        throw e;
+      }
+      if (validateOnly) throw new PlatformError('failed', 'VALIDATE_ONLY');
+      if (!budgetRes) throw new PlatformError('failed', 'BAD_RESPONSE');
+      // 2) 캠페인(광고 그룹·소재 없음). 여기서 불명이면 캠페인이 생겼는지 모른다 → unknown(자동 재시도 금지)
+      const campRes = resourceOf(await call('campaigns:mutate', { operations: [{ create: { name, status, campaignBudget: budgetRes, advertisingChannelType: 'SEARCH', manualCpc: {}, containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING' } }] }, token, req.deadlineAt, true));
+      const m = campRes?.match(/\/campaigns\/(\d{1,20})$/);
+      if (!m) throw new PlatformError('unknown', 'BAD_RESPONSE');
+      const externalId = m[1]!;
+      // 3) 읽어서 확인(read-back). 실패·불일치는 0(미확인)으로 알려 서버가 즉시 중지·경고하게 한다(캠페인 ID는 이미 돌려준다)
+      let verified = 0;
+      try {
+        const j = await call('googleAds:search', { query: `SELECT campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${externalId}`, pageSize: 1 }, token, req.deadlineAt, false);
+        const row = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0] : null;
+        const micros = isObj(row?.campaignBudget) ? Number((row!.campaignBudget as Record<string, unknown>).amountMicros) : NaN;
+        if (Number.isSafeInteger(micros) && micros >= MICROS && micros % MICROS === 0 && micros / MICROS <= krw) verified = micros / MICROS;
+      } catch { verified = 0; }
+      return { externalId, dailyBudgetKrw: verified };
+    },
+    async pause(ref: PlatformRef, opts: CallOpts) {
+      if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');
+      const token = await accessToken(opts.deadlineAt);
+      const j = await call('campaigns:mutate', { operations: [{ update: { resourceName: `customers/${customerId}/campaigns/${ref.externalId}`, status: 'PAUSED' }, updateMask: 'status' }] }, token, opts.deadlineAt, true);
+      return { paused: resourceOf(j) === `customers/${customerId}/campaigns/${ref.externalId}` };
+    },
+    async fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts) {
+      if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');
+      if (!DAY.test(day)) throw new PlatformError('failed', 'BAD_REQUEST');
+      const token = await accessToken(opts.deadlineAt);
+      const j = await call('googleAds:search', { query: `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros FROM campaign WHERE campaign.id = ${ref.externalId} AND segments.date = '${day}'`, pageSize: 1 }, token, opts.deadlineAt, false);
+      const row = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0] : null;
+      const mt = row && isObj(row.metrics) ? row.metrics : {};
+      const num = (v: unknown) => (v === undefined ? 0 : Number(v));
+      // 행이 없으면 그날 성과 0. 값은 서버가 다시 검증한다(믿지 않음)
+      return { impressions: num(mt.impressions), clicks: num(mt.clicks), costKrw: Math.round(num(mt.costMicros) / MICROS) };
+    },
+  });
+}

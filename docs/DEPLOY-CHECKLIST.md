@@ -141,3 +141,10 @@
 - 어댑터 계약: 플랫폼 일 예산 상한 ≤ 승인 amountKrw를 반드시 설정(응답값 검증, 초과면 즉시 철회·중지·경고). pause·성과 조회는 저장된 externalId 기준. DB 승인 철회만 믿지 않는다.
 - 수동 중지(`pause`, 대표 전용): DB 승인 철회 → 플랫폼 pause → 실패 시 관리자 경고.
 - 실제 매체 어댑터·실제 집행은 제이님 승인 전까지 없음(`AD_PLATFORM=mock`만, `AD_EXECUTION_ENABLED=false`).
+
+**R. Google Ads 어댑터(준비 코드, 실집행 아님)**
+- 파일: `src/server/advertising/googleAdsPlatform.ts`. 전송(transport)·credential·API 버전을 모두 주입받으며 기본 fetch·env 직접 읽기·재시도가 없다. **서버(createPlatform·route)에 연결하지 않았다** — 연결·`AD_PLATFORM` 선택은 제이님 승인 뒤 별도 단계.
+- 필요 credential(이름만): `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`. 선택: `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`. 값은 코드·DB·로그에 남기지 않는다.
+- 범위: 일 예산(≤ 승인 amountKrw)+캠페인(기본 PAUSED) 생성, 중지, 성과 조회. 광고 그룹·소재·이미지·영상은 만들지 않는다(승인 전 금지).
+- 실계정 연결 전 확인할 미검증 항목: API 버전·sunset, 계정 통화 KRW 여부, 캠페인 필수 필드(입찰 전략·네트워크 설정)가 계정 정책에 맞는지, 테스트 계정 `validateOnly` 결과.
+

@@ -234,11 +234,14 @@ async function scenarioMain(browser) {
 }
 
 async function scenarioDoubleSubmit(browser) {
+  // 응답을 고정 시간(400ms)만 지연하면 느린 CI에서 점검 전에 응답이 도착해 aria-busy가 풀린다(F16 간헐 실패 원인). 시험이 풀어 줄 때까지 응답을 붙잡는 문(gate)으로 대체
+  let release;
+  const gate = new Promise((r) => { release = r; });
   const { page, ctx, seen } = await openForm(browser, {
     enabled: true,
     siteKey: 'test-only-site-key',
     api: async (route) => {
-      await new Promise((r) => setTimeout(r, 400));
+      await gate;
       return reply(202, { ok: true })(route);
     },
   });
@@ -249,7 +252,9 @@ async function scenarioDoubleSubmit(browser) {
   await page.evaluate(() => { const f = document.querySelector('form'); f.requestSubmit(); f.requestSubmit(); f.requestSubmit(); });
   await page.dblclick('button[type=submit]', { force: true }).catch(() => {});
   await page.keyboard.press('Enter');
-  check('F16 전송 중 표시·잠금(aria-busy, fieldset disabled)', (await page.getAttribute('form', 'aria-busy')) === 'true' && (await page.evaluate(() => document.querySelector('fieldset').disabled)));
+  const busy = (await page.getAttribute('form', 'aria-busy')) === 'true' && (await page.evaluate(() => document.querySelector('fieldset').disabled));
+  release();
+  check('F16 전송 중 표시·잠금(aria-busy, fieldset disabled)', busy);
   await page.waitForFunction(() => document.querySelector('.form-result.done'));
   await page.waitForTimeout(200);
   check('F17 빠른 이중 제출·더블클릭·Enter → 요청 1회', seen.api.length === 1, `api=${seen.api.length}`);

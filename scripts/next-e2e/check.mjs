@@ -437,9 +437,10 @@ try {
   try {
     const fr = await adm('/api/admin/ads/funnel', ownerC); const fj = await pj(fr);
     const row = (fj?.items ?? []).filter((x) => x.campaign === CAMP);
+    const dbConsults = await n(`select count(*)::int as n from core.consult_events where campaign_key = '${CAMP}' and day between (now() at time zone 'Asia/Seoul')::date - 6 and (now() at time zone 'Asia/Seoul')::date`);
     const dbLeads = await n(`select count(*)::int as n from core.leads where utm_campaign = '${CAMP}'`);
-    check('CV1 광고 전환 연결: 같은 캠페인 키의 상담·접수가 ad_funnel_full 한 줄에 함께 집계(상담≥1·접수≥1, 접수 수=DB와 일치)',
-      fr.status === 200 && row.length === 1 && row[0].consults >= 1 && row[0].leads >= 1 && row[0].leads === dbLeads, `status=${fr.status} rows=${row.length} c=${row[0]?.consults} l=${row[0]?.leads} db=${dbLeads}`);
+    check('CV1 광고 전환 연결: 같은 캠페인 키의 상담·접수가 ad_funnel_full 한 줄에 함께 집계(상담≥1·접수≥1, 상담·접수 수 모두 DB 실제 값과 일치)',
+      fr.status === 200 && row.length === 1 && row[0].consults >= 1 && row[0].leads >= 1 && row[0].leads === dbLeads && row[0].consults === dbConsults, `status=${fr.status} rows=${row.length} c=${row[0]?.consults}/${dbConsults} l=${row[0]?.leads}/${dbLeads}`);
   } catch (e) { check('CV1 광고 전환 연결', false, String(e.message).split('\n')[0]); }
   // PM 11/22: 실제 브라우저 단일 흐름(상담 → 수집 → 고지·동의 → 접수 → 관리자 → 총판 신청서). 고지 확정은 시험 전용 앱 사본에서만
   try {
