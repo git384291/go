@@ -345,11 +345,16 @@ try {
     await ctx.addCookies([{ name: cn, value: cv.join('='), url: BASE }]);
     await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin }).catch(() => {});
     const pg = await ctx.newPage();
+    const diag = [];
+    pg.on('console', (m) => { if (['error', 'warning'].includes(m.type())) diag.push(`c:${m.text().slice(0, 120)}`); });
+    pg.on('pageerror', (e) => diag.push(`e:${e.message.slice(0, 120)}`));
+    pg.on('requestfailed', (r) => diag.push(`rf:${r.url().slice(-60)}`));
+    pg.on('response', (r) => { if (r.status() >= 400) diag.push(`r${r.status()}:${r.url().slice(-50)}`); });
     await pg.goto(`${BASE}/admin/leads/${lid}/packet`, { waitUntil: 'networkidle' });
     await pg.waitForTimeout(1500); // 클라이언트 코드 연결(hydration) 대기
     await pg.selectOption('select[aria-label="열람 사유"]', 'dealer_handoff');
     await pg.click('button:has-text("신청서 열기")');
-    await pg.waitForSelector('pre[data-field=packet]', { timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} url=${pg.url()} msg=${await pg.locator('[data-field=msg]').textContent().catch(() => 'n/a')} body=${(await pg.locator('body').textContent().catch(() => '')).slice(0, 160)}`); });
+    await pg.waitForSelector('pre[data-field=packet]', { timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} url=${pg.url()} msg=${await pg.locator('[data-field=msg]').textContent().catch(() => 'n/a')} diag=${diag.slice(0, 6).join(' | ')}`); });
     const shown = await pg.locator('pre[data-field=packet]').textContent();
     const st = await pg.locator('[data-field=status]').textContent();
     const sentDisabled = await pg.locator('button:has-text("총판 전달 완료 기록")').isDisabled();
