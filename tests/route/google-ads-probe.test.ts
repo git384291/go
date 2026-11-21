@@ -75,3 +75,11 @@ test('GP5 정적: 변경 요청은 validateOnly 묶음 한 곳뿐, 캠페인·�
   assert.match(core, /validateOnly: true/);
   for (const f of ['package.json', '.github/workflows/ci.yml']) { try { assert.ok(!/google-ads-probe\/run/.test(readFileSync(f, 'utf8')), f); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; } }
 });
+test('GP6 인증정보·네트워크 없음: 전송 실패(status 0)면 조회·변경 0회로 안전 종료(3), 출력에 비밀 없음', async () => {
+  const f = fake({ token: { status: 0, text: '' } });
+  const r = await go(ENV, f);
+  assert.deepEqual([r.code, f.calls.length, mutates(f).length], [3, 1, 0]);
+  for (const s of ['SECRET', '1234567890']) assert.ok(!r.out.includes(s));
+  const n = fake({});
+  assert.deepEqual([(await go({}, n)).code, n.calls.length], [2, 0]);
+});
