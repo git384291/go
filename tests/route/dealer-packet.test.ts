@@ -40,7 +40,7 @@ test('DP1 닫힘: 환경 미충족·잘못된 id → 인증·DB 0회', async () 
 });
 
 test('DP2 권한: 미인증 401·권한 밖 역할 403(DB 0회), 검토자는 이력 조회만', async () => {
-  const a = mk({ staff: new StaffAuthError(401) });
+  const a = mk({ staff: new StaffAuthError(401, 'UNAUTHENTICATED') });
   assert.equal((await dealerPacketGet(a.d, ID, { reason: '전달 준비' })).status, 401);
   for (const role of ['reviewer', 'policy_editor']) {
     const { d, c } = mk({ staff: who(role) });
