@@ -371,6 +371,7 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   for (const w of [editor, reviewer]) assert.equal((await launch(w, 'e11-key-0000000000002')).status, 403);
   const live: AdPlatform = { ...mockPlatform, name: 'live-fake', live: true };
   const before = await count(`select count(*)::int as n from core.audit_logs where action like 'ad.spend%'`);
+  const over0 = await count(`select count(*)::int as n from core.audit_logs where action = 'ad.performance_overspend'`); // DB 시험(80)이 남긴 기록 제외
   const sw = await launch(owner, 'e11-key-0000000000003', 400, live);
   assert.deepEqual([sw.status, (await body0(sw)).reason], [403, 'EXECUTION_DISABLED']);
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action like 'ad.spend%'`), before);
@@ -390,7 +391,7 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
   assert.equal((await body0(await col(kst(1), 100))).overLedger, true);
   assert.equal((await col(kst(0), 400, reviewer)).status, 403);
   assert.equal((await col(kst(-1), 100)).status, 422); // 미래 날짜
-  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.performance_overspend'`), 1);
+  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ad.performance_overspend'`), over0 + 1);
   await assert.rejects(admin`update core.ad_performance set cost_krw = 0`, (e: { code?: string }) => e.code === '42501');
   // 5) 유입 → 접수: utm_campaign이 같은 접수가 분석에 접수로 잡히고 개인정보는 응답에 없다
   assert.deepEqual(await submitLead(body({ idempotencyKey: 'e2e-ad-signup-000000001', phone: '010-4444-9876', name: '김사사', utmCampaign: camp }), ctx(), run), { ok: true });
@@ -419,13 +420,13 @@ test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 한도 안에
   const chat = await answerChat({ provider, supplierId: 'supplier-a', model: paid, budget }, { message: '요금?', carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1' }, new Date());
   assert.ok(chat.ok && chat.source === 'fallback' && calls === 0);
   try {
-    await admin`update core.ai_budget_config set monthly_limit_krw = 5 where singleton`;
+    await admin`update core.ai_budget_config set monthly_limit_krw = ${r0 + 5} where singleton`;
     assert.equal(await budget.reserve(3), true);
     assert.equal(await budget.reserve(3), false);
     assert.equal(await budget.reserve(2), true);
     assert.equal(await reserved(), r0 + 5);
     // 동시 예약: 한도 안에서만 성공
-    await admin`update core.ai_budget_config set monthly_limit_krw = 5 + 10 where singleton`;
+    await admin`update core.ai_budget_config set monthly_limit_krw = ${r0 + 15} where singleton`;
     const got = await Promise.all(Array.from({ length: 6 }, () => budget.reserve(3)));
     assert.equal(got.filter(Boolean).length, 3); // 남은 10원 → 3원씩 3번
     assert.equal(await reserved(), r0 + 14);
