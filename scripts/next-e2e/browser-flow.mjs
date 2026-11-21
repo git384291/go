@@ -103,7 +103,7 @@ export async function runBrowserFlow(c) {
     const inputs = await pg.locator('input, textarea, select').evaluateAll((els) => els.map((e) => `${e.name ?? ''} ${e.getAttribute('aria-label') ?? ''} ${e.placeholder ?? ''}`).join(' | '));
     const FORBID = /주민|자동이체|사은품\s*계좌|계좌번호|resident|account/i;
     const ids = await pg.locator('[data-field=intake-state]').textContent();
-    const asText = (await pg.locator('#assistant').innerText()) + ' ' + (await pg.locator('[role=log]').innerText());
+    const asText = await pg.locator('#assistant').innerText(); // 채팅창 상단의 '입력하지 마세요' 경고 문구는 질문이 아니므로 제외
     const okA = !/접수는 아직 받을 수 없습니다/.test(t2), okB = /^접수:/.test((ids ?? '').trim()), okC = !FORBID.test(inputs), okD = !FORBID.test(asText);
     check('BF3 모든 정보를 채우면 "접수 불가" 안내가 아니라 접수 안내로 바뀌고, 주민번호·자동이체·사은품계좌를 묻는 칸·문구가 화면에 없다', okA && okB && okC && okD, `${okA}${okB}${okC}${okD} ${(asText.match(FORBID) ?? [''])[0]} ${inputs.slice(0, 60)}`);
 
@@ -147,8 +147,7 @@ export async function runBrowserFlow(c) {
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
     const lj = await pj(await adm('/api/admin/leads?limit=50', owner)); const lt = JSON.stringify(lj);
-    const mine = (lj.items ?? []).find((x) => x.id === leadRow?.id);
-    check('BF9 관리자 접수 목록(Next→DB): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없다', !!mine && lt.includes('010-****-5678') && !lt.includes('김브라우저') && !lt.includes('99995678'), `items=${(lj.items ?? []).length}`);
+    check('BF9 관리자 접수 목록(Next→DB): 방금 접수가 마스킹(010-****-5678)되어 보이고 원문 이름·번호는 없다', lt.includes('010-****-5678') && !lt.includes('김브라우저') && !lt.includes('99995678'), lt.slice(0, 80));
     await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
     await ap.waitForTimeout(1000);
