@@ -65,6 +65,7 @@ run db/tests/96_policy_publish_notice_texts.sql >/dev/null   # 정책 게시 ON/
 run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(0015)
 run db/tests/98_notice_intake_gate.sql >/dev/null   # 접수 직전 고지 승인 게이트(0016)
 run db/tests/99_dealer_application.sql >/dev/null   # 총판 전달용 신청서(0017)
+run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -601,6 +602,17 @@ D -f db/migrations/0017_dealer_application.sql >/dev/null
 back17=$(D -At -c "select (to_regprocedure('api.application_save(text,text,text,text)') is not null and to_regprocedure('api.handoff_list(uuid,uuid,text,uuid)') is not null)")
 [ "$gone17" = t ] && [ "$keep17" = t ] && [ "$back17" = t ] || { echo "FAIL | M17 0017 롤백 gone=$gone17 테이블보존=$keep17 재적용=$back17" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M17 총판 전달용 신청서 0017 롤백: 함수 5개 제거, 저장된 신청서·전달 이력 테이블 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0018 광고 launch 상태: 적용 → 기록 1건 → 롤백(함수 5개·테이블 제거, 보관 1건) → 재적용 → 복구(1건)
+D -f db/migrations/0018_ad_launches.sql >/dev/null
+D -q -c "insert into core.ad_launches (campaign_key, request_key, amount_krw, state, external_id, created_by) values ('camp-m18', 'req-m18-0123456789', 1000, 'active', 'ext-m18', gen_random_uuid())" >/dev/null
+D -f db/rollback/0018_down.sql >/dev/null
+gone18=$(D -At -c "select (to_regprocedure('api.ad_launch_begin(uuid,uuid,text,text,text,int)') is null and to_regprocedure('api.ad_launch_finish(uuid,uuid,text,text,text,text,text)') is null and to_regprocedure('api.ad_launch_active(uuid,uuid,text,text)') is null and to_regprocedure('api.ad_launch_paused(uuid,uuid,text,text)') is null and to_regprocedure('api.ad_launch_resolve(uuid,uuid,text,text,text,text,text)') is null and to_regclass('core.ad_launches') is null)")
+arch18=$(D -At -c "select count(*) from core.ad_launches_rollback_archive")
+D -f db/migrations/0018_ad_launches.sql >/dev/null
+D -f db/rollback/0018_restore.sql >/dev/null
+back18=$(D -At -c "select count(*) from core.ad_launches where request_key = 'req-m18-0123456789'")
+[ "$gone18" = t ] && [ "$arch18" = 1 ] && [ "$back18" = 1 ] || { echo "FAIL | M18 0018 롤백 gone=$gone18 보관=$arch18 복구=$back18" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M18 광고 launch 상태 0018 롤백: 함수 5개·테이블 제거, 기록 보관, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)

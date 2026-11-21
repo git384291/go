@@ -120,6 +120,7 @@
 | `CONSULT_PREVIEW_ENABLED` | 선택 | 404 | 정확히 `true`일 때만 |
 | `ADMIN_AD_SOURCE`·`ADMIN_POLICY_SOURCE` | 선택 | 닫힘(503) | `db`는 개발·시험 폐기 DB에서만 열림 |
 | `AD_PLATFORM` | 선택 | 매체 없음 | `mock`만 허용(실제 광고 API 금지) |
+| `AD_EXECUTION_ENABLED` | 선택 | 꺼짐(`EXECUTION_DISABLED` 403) | 정확히 `true`일 때만 live 어댑터 집행 허용. 현재 live 어댑터 없음, 승인 전 `true` 금지 |
 | `TURNSTILE_VERIFY_URL_TEST`·`DIAG_IP_ENABLED` | **시험 전용** | 무시 | 운영·미리보기에서 설정하지 않음(코드가 무시하지만 설정 자체 금지) |
 | `NODE_ENV`·`VERCEL`·`VERCEL_ENV` | 플랫폼 제공 | — | 직접 설정 금지 |
 
@@ -132,3 +133,11 @@
 - 0017을 포함한 커밋은 `phase1-product-scope`(PR #1) 브랜치에만 있다. 원격에 다른 브랜치가 없고 병합 이력이 없다.
 - 적용은 CI·로컬의 폐기 DB(`db-test.sh`, `next-e2e/run.sh`)뿐이다. 마이그레이션 이력 테이블·배포 워크플로가 없고, 운영 반영은 사용자 PC의 `promote-production.sh` 수동 실행이다(실행 기록은 저장소에 없음).
 - 결론: **저장소 증거상 적용 환경 없음 → 0017 현재본 유지.** 단 사용자가 수동으로 어떤 DB에 0017을 적용했다면 저장소로는 알 수 없으므로, 그 경우 0017은 더 고치지 않고 0018 보정 마이그레이션으로 처리한다.
+
+**Q. 광고 집행 P1 안전장치(0018 `core.ad_launches`)**
+- 마이그레이션: `0018_ad_launches.sql`. 롤백: `db/rollback/0018_down.sql`(보관 테이블 `ad_launches_rollback_archive`에 복사 후 삭제) → 필요 시 `0018_restore.sql`. db-test.sh M18이 훈련.
+- launch 상태 저장: campaignKey·requestKey·externalId·state(requested/active/paused/failed/unknown). 캠페인당 열린 launch 1건(중복 active 차단), 요청 키 1회.
+- 플랫폼 호출은 모두 시간 제한(기본 10초). 결과는 success / failed / unknown. **unknown은 자동 재launch 금지**, 사람이 확인 후 `launch_resolve`(대표 전용·사유 필수)로 정리해야 다시 가능.
+- 어댑터 계약: 플랫폼 일 예산 상한 ≤ 승인 amountKrw를 반드시 설정(응답값 검증, 초과면 즉시 철회·중지·경고). pause·성과 조회는 저장된 externalId 기준. DB 승인 철회만 믿지 않는다.
+- 수동 중지(`pause`, 대표 전용): DB 승인 철회 → 플랫폼 pause → 실패 시 관리자 경고.
+- 실제 매체 어댑터·실제 집행은 제이님 승인 전까지 없음(`AD_PLATFORM=mock`만, `AD_EXECUTION_ENABLED=false`).

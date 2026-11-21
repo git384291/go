@@ -433,6 +433,14 @@ try {
     await br.close();
     check('UI1 실제 Next 화면(고지 미확정): 상담 후 신청서 도우미가 이어 묻고, 모두 채워도 "접수 불가" 안내, 가짜 고지 체크박스 없음, 제출해도 접수 요청 0건·DB 저장 0건', /설치하실 곳의 주소/.test(t1) && /필수 고지 문구가 확정되기 전이라 접수는 아직 받을 수 없습니다/.test(t2) && boxes === 0 && /확정되기 전에는 상담 신청을 받지 않습니다/.test(gate) && leadPosts === 0 && (await lc()) === leads0, `t2=${t2.slice(0, 40)} boxes=${boxes} posts=${leadPosts}`);
   } catch (e) { check('UI1 실제 Next 화면 검증', false, String(e.message).split('\n')[0]); }
+  // PM 11/22 P1-6: 같은 캠페인 키의 상담(consult_events)과 접수(leads.utm_campaign)가 ad_funnel_full에서 한 줄로 함께 집계된다(대표 API)
+  try {
+    const fr = await adm('/api/admin/ads/funnel', ownerC); const fj = await pj(fr);
+    const row = (fj?.items ?? []).filter((x) => x.campaign === CAMP);
+    const dbLeads = await n(`select count(*)::int as n from core.leads where utm_campaign = '${CAMP}'`);
+    check('CV1 광고 전환 연결: 같은 캠페인 키의 상담·접수가 ad_funnel_full 한 줄에 함께 집계(상담≥1·접수≥1, 접수 수=DB와 일치)',
+      fr.status === 200 && row.length === 1 && row[0].consults >= 1 && row[0].leads >= 1 && row[0].leads === dbLeads, `status=${fr.status} rows=${row.length} c=${row[0]?.consults} l=${row[0]?.leads} db=${dbLeads}`);
+  } catch (e) { check('CV1 광고 전환 연결', false, String(e.message).split('\n')[0]); }
   // PM 11/22: 실제 브라우저 단일 흐름(상담 → 수집 → 고지·동의 → 접수 → 관리자 → 총판 신청서). 고지 확정은 시험 전용 앱 사본에서만
   try {
     await runBrowserFlow({ sql, n, check, adm, pj, post, BASE, pubUrl, owner: ownerC, reviewer: reviewerC, editor: editorC, counselor: counselorC });

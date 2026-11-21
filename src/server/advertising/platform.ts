@@ -1,29 +1,81 @@
 /**
- * 광고 플랫폼 교체형 인터페이스(PM 11/21). 실제 광고 API 어댑터는 만들지 않았다 — 지금은 무료 모의 어댑터만 있다.
+ * 광고 플랫폼 교체형 인터페이스(PM 11/21, 11/22 P1 보강). 실제 광고 API 어댑터는 만들지 않았다 — 지금은 무료 모의 어댑터만 있다.
  * - live=false(모의): 아무 곳에도 과금·집행하지 않는다. 집행·성과는 가상 값이다.
  * - live=true인 어댑터가 생기면 서버가 AD_EXECUTION_ENABLED=true(기본 꺼짐)와 DB 예산 승인 둘 다 통과해야만 launch를 부른다.
  * - 키·토큰은 서버 환경변수에서만 읽는 자리이며 이 인터페이스의 입출력에 나오지 않는다.
+ *
+ * 실제 어댑터가 반드시 지켜야 할 계약(어댑터 시험 규약):
+ *  1) 예산 보호: launch는 플랫폼 쪽 일 예산을 req.platformDailyBudgetKrw(= 승인된 amountKrw) 이하로 설정하고, 실제 설정값을 dailyBudgetKrw로 돌려준다.
+ *     설정할 수 없으면 집행하지 말고 PlatformError('failed')를 던진다. 서버는 돌려받은 값이 상한을 넘으면 즉시 중지·경고한다(pause가 실패해도 플랫폼 상한이 추가 피해를 제한한다).
+ *  2) 시간 제한: 모든 호출은 opts.deadlineAt(절대 시각 ms)까지 끝내야 하며 HTTP는 boundedHttp.boundedRequest로 보낸다. 서버도 같은 시간 뒤에 결과를 버린다(callPlatform).
+ *  3) 오류 구분: 요청이 플랫폼에 닿지 않았거나 집행이 일어나지 않았음이 확실하면 PlatformError('failed'), 그 밖(시간 초과·응답 유실·5xx 등 집행 여부 불명)은
+ *     PlatformError('unknown') 또는 일반 예외(= unknown). launch가 unknown이면 서버는 자동 재launch를 하지 않고 사람이 확인(ad_launch_resolve)할 때까지 막는다.
+ *  4) pause·fetchPerformance는 서버가 저장한 externalId(ref.externalId)로 호출된다. 키·토큰·URL은 오류에 담지 않는다.
  */
-export type LaunchRequest = { readonly campaign: string; readonly amountKrw: number; readonly requestKey: string };
+export const AD_CALL_TIMEOUT_MS = 10_000;
+
+export type LaunchRequest = {
+  readonly campaign: string;
+  readonly amountKrw: number;
+  readonly requestKey: string;
+  /** 플랫폼 쪽 일 예산 상한(원). 어댑터는 이 값 이하로 설정해야 한다 */
+  readonly platformDailyBudgetKrw: number;
+  readonly deadlineAt: number;
+};
+export type LaunchResult = { readonly externalId: string; readonly dailyBudgetKrw: number };
+export type PlatformRef = { readonly campaign: string; readonly externalId: string | null };
+export type CallOpts = { readonly deadlineAt: number };
 export type AdPlatform = {
   readonly name: string;
   readonly live: boolean;
-  launch(req: LaunchRequest): Promise<{ readonly externalId: string }>;
-  /** 캠페인 노출 중지. 초과 감지 때 서버가 부른다(이미 중지돼 있어도 안전해야 한다) */
-  pause(campaign: string): Promise<{ readonly paused: boolean }>;
+  launch(req: LaunchRequest): Promise<LaunchResult>;
+  /** 캠페인 노출 중지. 초과 감지·수동 중지 때 서버가 부른다(이미 중지돼 있어도 안전해야 한다) */
+  pause(ref: PlatformRef, opts: CallOpts): Promise<{ readonly paused: boolean }>;
   /** 하루치 성과. 형식 검증은 호출측(서버)이 한다 — 어댑터 값은 믿지 않는다 */
-  fetchPerformance(campaign: string, day: string): Promise<unknown>;
+  fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts): Promise<unknown>;
 };
+
+/** 어댑터가 결과를 분명히 알릴 때 쓰는 오류. outcome이 failed면 '집행·변경이 일어나지 않았음이 확실'하다는 뜻이다 */
+export class PlatformError extends Error {
+  constructor(readonly outcome: 'failed' | 'unknown', readonly code: string = 'PLATFORM_ERROR') {
+    super(code);
+    this.name = 'PlatformError';
+  }
+}
+
+export type CallOutcome<T> =
+  | { readonly status: 'success'; readonly value: T }
+  | { readonly status: 'failed'; readonly code: string }
+  | { readonly status: 'unknown'; readonly code: string };
+
+const SAFE_CODE = /^[A-Z_]{2,40}$/;
+
+/** 플랫폼 호출을 시간 제한으로 감싸 success / failed / unknown으로 나눈다. 예외 원문은 돌려주지 않는다(고정 코드만) */
+export async function callPlatform<T>(fn: (deadlineAt: number) => Promise<T>, ms: number = AD_CALL_TIMEOUT_MS): Promise<CallOutcome<T>> {
+  const deadlineAt = Date.now() + ms;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), ms); });
+  try {
+    const r = await Promise.race([Promise.resolve().then(() => fn(deadlineAt)), timeout]);
+    if (r === 'timeout') return { status: 'unknown', code: 'TIMEOUT' };
+    return { status: 'success', value: r as T };
+  } catch (e) {
+    if (e instanceof PlatformError) return { status: e.outcome, code: SAFE_CODE.test(e.code) ? e.code : 'PLATFORM_ERROR' };
+    return { status: 'unknown', code: 'PLATFORM_ERROR' };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 const hash = (s: string) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; };
 
 export const mockPlatform: AdPlatform = Object.freeze({
   name: 'mock',
   live: false,
-  async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}` }; },
+  async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}`, dailyBudgetKrw: req.platformDailyBudgetKrw }; },
   async pause() { return { paused: true }; },
-  async fetchPerformance(campaign, day) {
-    const h = hash(`${campaign}:${day}`);
+  async fetchPerformance(ref, day) {
+    const h = hash(`${ref.campaign}:${day}`);
     const impressions = 500 + (h % 2000);
     const clicks = Math.floor(impressions * (0.01 + ((h >>> 8) % 40) / 1000));
     return { impressions, clicks, costKrw: clicks * 10 };

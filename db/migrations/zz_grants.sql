@@ -126,7 +126,12 @@ grant execute on function
   api.dealer_packet_get(uuid, uuid, text, uuid, text),
   api.dealer_packet_status(uuid, uuid, text, uuid),
   api.handoff_record(uuid, uuid, text, uuid, text, text),
-  api.handoff_list(uuid, uuid, text, uuid)
+  api.handoff_list(uuid, uuid, text, uuid),
+  api.ad_launch_begin(uuid, uuid, text, text, text, int),
+  api.ad_launch_finish(uuid, uuid, text, text, text, text, text),
+  api.ad_launch_active(uuid, uuid, text, text),
+  api.ad_launch_paused(uuid, uuid, text, text),
+  api.ad_launch_resolve(uuid, uuid, text, text, text, text, text)
   to app_staff;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)

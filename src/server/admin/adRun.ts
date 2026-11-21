@@ -1,6 +1,6 @@
 import 'server-only';
 import { AD_DAILY_CAP_KRW } from '../advertising/budgetGuard';
-import { createPlatform } from '../advertising/platform';
+import { callPlatform, createPlatform } from '../advertising/platform';
 import type { AdPlatform } from '../advertising/platform';
 import { adBlock, adDbError, adFail, adGate, adJson } from './adBudget';
 import type { AdBudgetDeps, SqlTag } from './adBudget';
@@ -31,7 +31,7 @@ const kstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().
 
 export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Response> {
   const action = isObj(body) ? body.action : undefined;
-  if (action !== 'launch' && action !== 'collect' && action !== 'alert_resolve') return adFail('INVALID_ACTION', 400);
+  if (action !== 'launch' && action !== 'collect' && action !== 'alert_resolve' && action !== 'pause' && action !== 'launch_resolve') return adFail('INVALID_ACTION', 400);
   const g = await adGate(deps, action);
   if (g instanceof Response) return action === 'launch' ? adBlock(await g.clone().json().then((j: { code?: string }) => j.code ?? 'ERROR').catch(() => 'ERROR'), g.status) : g;
   const b = body as Record<string, unknown>;
@@ -43,6 +43,22 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
     } catch (e) { return adDbError(e); }
   }
   const platform = deps.platform;
+  if (action === 'launch_resolve') {
+    // 집행 여부 불명(unknown)·미완료(requested) launch를 사람이 확인한 뒤 정리한다(대표 전용). 자동 재launch는 없다
+    if (!exact(b, ['action', 'requestKey', 'outcome', 'externalId', 'reason']) || typeof b.requestKey !== 'string' || !REQ_KEY.test(b.requestKey)
+        || (b.outcome !== 'not_executed' && b.outcome !== 'executed') || (b.externalId !== null && (typeof b.externalId !== 'string' || b.externalId.length < 1 || b.externalId.length > 100))
+        || (b.outcome === 'executed' && b.externalId === null) || typeof b.reason !== 'string' || b.reason.trim().length < 2 || b.reason.trim().length > 500) return adFail('INVALID_INPUT', 422);
+    try {
+      await deps.runInTransaction(async (tx) => tx`select api.ad_launch_resolve(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${b.requestKey as string}, ${b.outcome as string}, ${b.externalId as string | null}, ${(b.reason as string).trim()})`);
+      return adJson({ ok: true }, 200);
+    } catch (e) { return adDbError(e); }
+  }
+  if (action === 'pause') {
+    // 수동 중지(대표 전용): DB 승인 철회 → 플랫폼 pause(externalId) → 실패 시 경고. 플랫폼은 승인 amountKrw 이하의 일 예산 상한을 이미 갖고 있다(어댑터 계약)
+    if (!exact(b, ['action', 'campaign', 'reason']) || typeof b.campaign !== 'string' || !CAMPAIGN.test(b.campaign) || typeof b.reason !== 'string' || b.reason.trim().length < 2 || b.reason.trim().length > 500) return adFail('INVALID_INPUT', 422);
+    if (!platform) return adFail('PLATFORM_UNAVAILABLE', 503);
+    return adJson({ ok: true, ...(await stopCampaign(deps, g, platform, b.campaign, `수동 중지: ${b.reason.trim()}`.slice(0, 500), 'manual')) }, 200);
+  }
   if (action === 'launch') {
     if (!platform) return adBlock('PLATFORM_UNAVAILABLE', 503);
     let live = platform.live;
@@ -50,33 +66,76 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
     live = platform.live;
     if (!exact(b, ['action', 'campaign', 'amountKrw', 'requestKey'])
         || typeof b.campaign !== 'string' || !CAMPAIGN.test(b.campaign) || !isInt(b.amountKrw, 1, AD_DAILY_CAP_KRW) || typeof b.requestKey !== 'string' || !REQ_KEY.test(b.requestKey)) return adBlock('INVALID_INPUT', 422);
+    const campaign = b.campaign, amountKrw = b.amountKrw, requestKey = b.requestKey;
+    const dbErr = (e: unknown) => { const code = (e as { code?: string })?.code; return adBlock(code === '42501' ? 'FORBIDDEN' : 'ERROR', code === '42501' ? 403 : 503); };
+    // 1) launch 시작 기록: 캠페인당 열린 launch 1건·같은 요청 키 1회. 막히면 지출 판정·플랫폼 호출 0회
+    try {
+      const rows = await deps.runInTransaction(async (tx) =>
+        tx`select api.ad_launch_begin(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${requestKey}, ${amountKrw}::int) as r`);
+      const r = (rows as readonly { r?: unknown }[])[0]?.r;
+      if (!isObj(r) || typeof r.ok !== 'boolean') return adBlock('ERROR', 502);
+      if (r.ok !== true) return adJson({ ok: false, decision: 'BLOCK', reason: typeof r.reason === 'string' ? r.reason : 'ERROR' }, 200);
+    } catch (e) { return dbErr(e); }
+    const finish = (state: 'active' | 'failed' | 'unknown', externalId: string | null, note: string | null) =>
+      deps.runInTransaction(async (tx) => tx`select api.ad_launch_finish(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${requestKey}, ${state}, ${externalId}, ${note})`);
+    // 2) DB 예산 판정(승인·일/누적 한도·중복). 막히면 launch는 failed(집행 안 됨 확실)로 닫는다. 기록이 실패하면 requested로 남아 재launch를 막는다(보수적)
     let decision: Record<string, unknown>;
     try {
       const rows = await deps.runInTransaction(async (tx) =>
-        tx`select api.ad_spend_request(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${b.campaign as string}, ${b.amountKrw as number}::int, ${b.requestKey as string}) as r`);
+        tx`select api.ad_spend_request(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${amountKrw}::int, ${requestKey}) as r`);
       const r = (rows as readonly { r?: unknown }[])[0]?.r;
-      if (!isObj(r) || (r.decision !== 'ALLOW' && r.decision !== 'BLOCK')) return adBlock('ERROR', 502);
+      if (!isObj(r) || (r.decision !== 'ALLOW' && r.decision !== 'BLOCK')) { await finish('failed', null, 'SPEND_ERROR').catch(() => undefined); return adBlock('ERROR', 502); }
       decision = r;
     } catch (e) {
-      const code = (e as { code?: string })?.code;
-      return adBlock(code === '42501' ? 'FORBIDDEN' : 'ERROR', code === '42501' ? 403 : 503);
+      await finish('failed', null, 'SPEND_ERROR').catch(() => undefined);
+      return dbErr(e);
     }
-    if (decision.decision !== 'ALLOW') return adJson({ ok: false, decision: 'BLOCK', reason: decision.reason ?? 'ERROR' }, 200);
-    try {
-      const out = await platform.launch({ campaign: b.campaign, amountKrw: b.amountKrw, requestKey: b.requestKey });
-      if (typeof out?.externalId !== 'string' || out.externalId.length > 100) return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_ERROR', spendRecorded: true }, 502);
-      return adJson({ ok: true, decision: 'ALLOW', executed: live, simulated: !live, externalId: out.externalId }, 200);
-    } catch {
-      // 판정은 이미 원장에 기록됐다(보수적: 실제 집행 여부를 모르면 지출로 센다)
-      return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_ERROR', spendRecorded: true }, 502);
+    if (decision.decision !== 'ALLOW') {
+      await finish('failed', null, 'SPEND_BLOCKED').catch(() => undefined);
+      return adJson({ ok: false, decision: 'BLOCK', reason: decision.reason ?? 'ERROR' }, 200);
     }
+    // 3) 플랫폼 호출(시간 제한·플랫폼 일 예산 상한 = 승인 amountKrw). 결과는 success / failed / unknown
+    const res = await callPlatform((deadlineAt) => platform.launch({ campaign, amountKrw, requestKey, platformDailyBudgetKrw: amountKrw, deadlineAt }));
+    if (res.status === 'failed') {
+      await finish('failed', null, res.code).catch(() => undefined);
+      // 지출은 원장에 이미 기록됐다(보수적: 집행 안 됨이 확실해도 되돌리지 않는다)
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_ERROR', outcome: 'failed', spendRecorded: true }, 502);
+    }
+    if (res.status === 'unknown') {
+      // 집행 여부 불명: 자동 재launch 금지. unknown으로 저장하고 사람이 확인(launch_resolve)한 뒤에만 다시 시도한다
+      let saved = true;
+      try { await finish('unknown', null, res.code); } catch { saved = false; }
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_UNKNOWN', outcome: 'unknown', spendRecorded: true, needsReview: true, stateSaved: saved }, 502);
+    }
+    const out = res.value as { externalId?: unknown; dailyBudgetKrw?: unknown } | undefined;
+    if (typeof out?.externalId !== 'string' || out.externalId.length < 1 || out.externalId.length > 100) {
+      try { await finish('unknown', null, 'BAD_RESPONSE'); } catch { /* requested로 남아 재launch 차단 */ }
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_UNKNOWN', outcome: 'unknown', spendRecorded: true, needsReview: true }, 502);
+    }
+    const externalId = out.externalId;
+    try { await finish('active', externalId, null); } catch {
+      // 플랫폼은 집행됐는데 상태 저장이 실패: externalId를 응답에 돌려주고(비밀 아님) requested로 남겨 재launch를 막는다. 대표가 launch_resolve(executed)로 정리한다
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'LAUNCH_STATE_UNSAVED', outcome: 'success', spendRecorded: true, needsReview: true, externalId }, 502);
+    }
+    // 플랫폼 일 예산 상한이 승인 금액 이하가 아니면 계약 위반: 즉시 중지·경고(철회 → pause → 경고)
+    if (!isInt(out.dailyBudgetKrw, 1, amountKrw)) {
+      const stop = await stopCampaign(deps, g, platform, campaign, '플랫폼 일 예산 상한이 승인 금액 이하가 아님 — 자동 중지', 'budget_cap_violation');
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_BUDGET_NOT_PROTECTED', spendRecorded: true, externalId, autoStop: stop }, 502);
+    }
+    return adJson({ ok: true, decision: 'ALLOW', executed: live, simulated: !live, externalId, platformDailyBudgetKrw: out.dailyBudgetKrw }, 200);
   }
   // collect
   if (!exact(b, ['action', 'campaign', 'day']) || typeof b.campaign !== 'string' || !CAMPAIGN.test(b.campaign) || typeof b.day !== 'string' || !realDay(b.day)) return adFail('INVALID_INPUT', 422);
   if (!platform) return adFail('PLATFORM_UNAVAILABLE', 503);
   if (b.day > kstDay(deps.now())) return adFail('INVALID_INPUT', 422);
-  let perf: unknown;
-  try { perf = await platform.fetchPerformance(b.campaign, b.day); } catch { return adFail('PLATFORM_ERROR', 502); }
+  const cur = await currentLaunch(deps, g, b.campaign);
+  if (cur === 'ERROR') return adFail('DB_UNAVAILABLE', 503);
+  // 실제 플랫폼은 저장된 externalId가 있는 launch(active·paused)만 조회한다. 모의는 launch 없이도 가상 값을 돌려준다
+  if (platform.live && (cur === null || (cur.state !== 'active' && cur.state !== 'paused') || cur.externalId === null)) return adFail(cur?.state === 'unknown' || cur?.state === 'requested' ? 'LAUNCH_UNKNOWN' : 'NO_ACTIVE_LAUNCH', 409);
+  const ref = { campaign: b.campaign, externalId: cur === null ? null : cur.externalId };
+  const pr = await callPlatform((deadlineAt) => platform.fetchPerformance(ref, b.day as string, { deadlineAt }));
+  if (pr.status !== 'success') return adFail('PLATFORM_ERROR', 502);
+  const perf: unknown = pr.value;
   if (!isObj(perf) || !isInt(perf.impressions, 0, 100_000_000) || !isInt(perf.clicks, 0, 100_000_000) || !isInt(perf.costKrw, 0, 100_000) || (perf.clicks as number) > (perf.impressions as number)) return adFail('PLATFORM_DATA_INVALID', 502);
   const source = platform.live ? 'platform' : 'mock';
   try {
@@ -85,25 +144,51 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
     const r = (rows as readonly { r?: unknown }[])[0]?.r;
     if (!isObj(r) || typeof r.recorded !== 'boolean') return adFail('INVALID_DATA', 502);
     const over = r.recorded === true && r.over_ledger === true;
-    const autoStop = over ? await autoStopCampaign(deps, g, platform, b.campaign as string) : undefined;
+    const autoStop = over ? await stopCampaign(deps, g, platform, b.campaign as string, '광고비 초과 감지 자동 중지', 'overspend') : undefined;
     return adJson({ ok: true, recorded: r.recorded, overLedger: r.over_ledger ?? null, source, ...(autoStop ? { autoStop } : {}) }, 200);
   } catch (e) { return adDbError(e); }
 }
 
-/** 초과 감지 자동 중지: 승인 철회(DB) → 플랫폼 중지. 각 단계 결과를 숨기지 않는다 */
-async function autoStopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdPlatform, campaign: string) {
+type Cur = { state: string; externalId: string | null; amountKrw: number | null };
+/** 캠페인의 현재 launch(열린 것 우선, 없으면 최근 paused). 없으면 null, 조회 실패는 'ERROR' */
+async function currentLaunch(deps: AdRunDeps, g: StaffIdentity, campaign: string): Promise<Cur | null | 'ERROR'> {
+  try {
+    const rows = await deps.runInTransaction(async (tx) => tx`select api.ad_launch_active(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}) as r`);
+    const r = (rows as readonly { r?: unknown }[])[0]?.r;
+    if (r === null || r === undefined) return null;
+    if (!isObj(r) || typeof r.state !== 'string') return 'ERROR';
+    return { state: r.state, externalId: typeof r.external_id === 'string' ? r.external_id : null, amountKrw: typeof r.amount_krw === 'number' ? r.amount_krw : null };
+  } catch { return 'ERROR'; }
+}
+
+/**
+ * 중지(초과 감지 자동·수동 공통): ① DB 승인 철회(이후 모든 새 지출 차단) → ② 플랫폼 pause(externalId, 시간 제한) → ③ 하나라도 끝나지 않으면 경고.
+ * pause가 실패해도 플랫폼 쪽 일 예산 상한(어댑터 계약: 승인 amountKrw 이하)이 추가 피해를 제한한다. 각 단계 결과를 숨기지 않는다.
+ */
+async function stopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdPlatform, campaign: string, reason: string, trigger: 'overspend' | 'manual' | 'budget_cap_violation') {
   let revoked = false;
   let revokeNote: string | null = null;
   try {
     await deps.runInTransaction(async (tx) =>
-      tx`select api.ad_budget_revoke(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${'광고비 초과 감지 자동 중지'})`);
+      tx`select api.ad_budget_revoke(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${reason})`);
     revoked = true;
   } catch (e) {
     // 승인이 이미 없으면(NO_ACTIVE_APPROVAL) 지출은 이미 막혀 있다
     revokeNote = (e as { code?: string })?.code === '22023' ? 'NO_ACTIVE_APPROVAL' : 'REVOKE_FAILED';
   }
+  const cur = await currentLaunch(deps, g, campaign);
   let paused = false;
-  try { paused = (await platform.pause(campaign))?.paused === true; } catch { paused = false; }
+  let pauseNote: string | null = null;
+  if (cur === 'ERROR') pauseNote = 'LAUNCH_LOOKUP_FAILED';
+  else if (cur !== null && cur.state === 'paused') paused = true;
+  else if (cur === null) { if (platform.live) paused = true; /* 집행 기록이 없으면 멈출 것이 없다 */ else { const r = await callPlatform((deadlineAt) => platform.pause({ campaign, externalId: null }, { deadlineAt })); paused = r.status === 'success' && r.value?.paused === true; } }
+  else if (cur.externalId === null) pauseNote = 'EXTERNAL_ID_UNKNOWN'; // requested·unknown: 플랫폼 캠페인을 특정할 수 없다 → 사람이 확인
+  else {
+    const r = await callPlatform((deadlineAt) => platform.pause({ campaign, externalId: cur.externalId }, { deadlineAt }));
+    paused = r.status === 'success' && r.value?.paused === true;
+    if (!paused) pauseNote = r.status === 'success' ? 'NOT_PAUSED' : r.code;
+    if (paused && cur.state === 'active') { try { await deps.runInTransaction(async (tx) => tx`select api.ad_launch_paused(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign})`); } catch { /* 중지는 됐다. 기록만 남지 않음 */ } }
+  }
   // 끝까지 중지되지 않았으면(철회 실패 또는 플랫폼 중지 실패) 관리자 경고를 연다. 경고가 열려 있는 동안 DB가 지출·새 승인을 막는다
   const complete = (revoked || revokeNote === 'NO_ACTIVE_APPROVAL') && paused;
   let alert: { opened: boolean } | null = null;
@@ -111,12 +196,12 @@ async function autoStopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdP
     alert = { opened: false };
     try {
       const rows = await deps.runInTransaction(async (tx) =>
-        tx`select api.ad_alert_open(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${JSON.stringify({ revoked, revokeNote, paused, simulated: !platform.live, trigger: 'overspend' })}::text::jsonb) as id`);
+        tx`select api.ad_alert_open(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${JSON.stringify({ revoked, revokeNote, paused, pauseNote, simulated: !platform.live, trigger, platformCapKrw: cur !== 'ERROR' && cur !== null ? cur.amountKrw : null })}::text::jsonb) as id`);
       const id = (rows as readonly { id?: unknown }[])[0]?.id;
       alert = { opened: typeof id === 'string' && UUID.test(id) };
     } catch { alert = { opened: false }; }
   }
-  return { revoked, revokeNote, paused, simulated: !platform.live, alert };
+  return { revoked, revokeNote, paused, pauseNote, simulated: !platform.live, alert };
 }
 
 type Row = { campaign_key: string; impressions: string | number; clicks: string | number; cost_krw: string | number; ledger_krw: string | number; consults: string | number; leads: string | number; overspend_days: string | number };
