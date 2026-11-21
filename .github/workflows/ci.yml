@@ -41,6 +41,7 @@ jobs:
         run: npm run test:route
       - name: DB security tests (local virtual DB, PostgreSQL from runner image)
         run: npm run test:db
+      - run: npx playwright install --with-deps chromium   # 관리자 화면 E2E(AP7)·모바일 화면 검수 공용
       - name: Next server E2E (consult → DB, disposable local DB, mock model)
         run: npm run test:next-e2e
       - name: Restore drill (virtual data)
@@ -51,7 +52,6 @@ jobs:
           if grep -rEn "(sb_secret_|service_role|PII_ENC_KEYS|PII_HMAC_KEY|SIGNING_KEY|postgres(ql)?://)" .next/static; then
             echo "secret-like string found in client bundle"; exit 1
           fi
-      - run: npx playwright install --with-deps chromium
       - name: Mobile screens (no price text, no horizontal overflow)
         run: npm run test:preview
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

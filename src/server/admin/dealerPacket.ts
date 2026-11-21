@@ -113,6 +113,7 @@ export async function handoffRecord(deps: DealerPacketDeps, id: string, body: un
   if (Object.keys(body).some((k) => k !== 'event' && k !== 'note') || (body.note !== undefined && typeof body.note !== 'string')) return fail('INVALID_INPUT', 400);
   const note = typeof body.note === 'string' ? body.note.trim() : '';
   if (note !== '' && (!DEALER_NOTE.test(note) || /\d{4,}/.test(note))) return fail('INVALID_INPUT', 400); // 총판 이름 정도만(긴 숫자·이메일·기호 거부)
+  if (body.event === 'sent' && note === '') return fail('REASON_REQUIRED', 400); // 전달한 총판 이름 필수
   try {
     if (body.event === 'sent') {
       // 전달 완료는 '준비 완료'인 건만: 개인정보 없이 요약의 누락 목록과 고지 노출 기록을 다시 확인한다
