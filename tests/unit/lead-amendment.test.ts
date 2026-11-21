@@ -1,6 +1,7 @@
 // PM 11/22 P1: 같은 연락처 재접수 — 같은 내용은 저장 없음(already), 다른 내용은 변경 요청(amended). 원본 덮어쓰기 없음. 가짜 실행기만.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { submitLead, noticeHashes } from '../../src/server/leads/submitLead';
 import { applicationContentHmac, buildCreateLeadArgs } from '../../src/server/leads/intake';
 import { createPiiCrypto } from '../../src/server/security/piiCrypto';
@@ -18,15 +19,16 @@ const runner = (save: string, amend?: string) => {
   return { run, qs };
 };
 
-test('LA1 새 리드면 변경 요청 호출 없음(created), 같은 연락처 재접수(skipped)면 같은 트랜잭션에서 application_amend → already / amended', async () => {
-  const c = runner('saved');
-  assert.deepEqual(await submitLead(lead(APP), ctx, c.run), { ok: true, outcome: 'created' });
-  assert.ok(!c.qs.some((q) => /application_amend/.test(q)));
-  for (const [r, want] of [['same', 'already'], ['amended', 'amended'], ['skipped', 'created']] as const) {
-    const k = runner('skipped', r);
+test('LA1 새 접수(saved)·재접수(skipped) 모두 같은 트랜잭션에서 같은 순서로 application_amend까지 호출(응답 시간 차이 축소), 내부 결과만 created / already / amended', async () => {
+  const order = (qs: string[]) => qs.map((q) => (/notice_intake_gate/.test(q) ? 'gate' : /create_lead/.test(q) ? 'lead' : /application_save/.test(q) ? 'save' : /application_amend/.test(q) ? 'amend' : '?'));
+  for (const [save, r, want] of [['saved', 'same', 'created'], ['saved', 'amended', 'created'], ['skipped', 'same', 'already'], ['skipped', 'amended', 'amended'], ['skipped', 'skipped', 'created']] as const) {
+    const k = runner(save, r);
     assert.deepEqual(await submitLead(lead(APP), ctx, k.run), { ok: true, outcome: want });
-    assert.deepEqual(k.qs.map((q) => (/notice_intake_gate/.test(q) ? 'gate' : /create_lead/.test(q) ? 'lead' : /application_save/.test(q) ? 'save' : /application_amend/.test(q) ? 'amend' : '?')), ['gate', 'lead', 'save', 'amend']);
+    assert.deepEqual(order(k.qs), ['gate', 'lead', 'save', 'amend']);
   }
+  const e = runner('exists');
+  assert.deepEqual(await submitLead(lead(APP), ctx, e.run), { ok: true, outcome: 'created' });
+  assert.deepEqual(order(e.qs), ['gate', 'lead', 'save']);
 });
 test('LA2 내용 해시: 같은 내용·키 순서 무관 같음, 한 항목만 달라도 다름, 연락처(솔트)가 다르면 다름. 요약에 해시만(주소·이메일 원문 없음)', () => {
   const h = (app: Record<string, string>, salt = 'a'.repeat(64)) => applicationContentHmac(crypto, salt, app);
@@ -41,14 +43,14 @@ test('LA2 내용 해시: 같은 내용·키 순서 무관 같음, 한 항목만 
   assert.ok(!/가상구|example\.com/.test(a.summary));
   assert.match(a.payloadEnc, /^v1:/);
 });
-test('LA3 고객 문구: 202 + outcome으로 새 접수·이미 접수·변경 요청을 구분(단순 "신청이 접수되었습니다"는 새 접수만), 모두 접수 완료 상태', () => {
-  assert.equal(classifyResponse(202, { ok: true }).message, OUTCOME_MESSAGES.accepted);
-  const al = classifyResponse(202, { ok: true, outcome: 'already' });
-  const am = classifyResponse(202, { ok: true, outcome: 'amended' });
-  assert.deepEqual([al.kind, am.kind], ['already', 'amended']);
-  assert.match(al.message, /^이미 접수된 신청이 있습니다/);
-  assert.match(am.message, /^기존 신청의 변경 요청이 접수되었습니다/);
-  for (const m of [al.message, am.message]) assert.ok(!/신청이 접수되었습니다/.test(m));
-  assert.ok([al.kind, am.kind, 'accepted' as const].every(isAcceptedKind));
-  assert.equal(classifyResponse(202, { outcome: 'weird' }).kind, 'accepted');
+test('LA3 고객 문구: 202면 본문(outcome 등)과 무관하게 같은 접수 문구 하나(새 접수·같은 내용 재접수·변경 요청 구분 없음 — 연락처 존재 여부 추측 방지)', () => {
+  const kinds = [{ ok: true }, { ok: true, outcome: 'already' }, { ok: true, outcome: 'amended' }, { outcome: 'weird' }, null].map((b) => classifyResponse(202, b));
+  for (const k of kinds) assert.deepEqual(k, { kind: 'accepted', message: OUTCOME_MESSAGES.accepted, retryable: false });
+  assert.ok(isAcceptedKind('accepted'));
+  assert.ok(!('already' in OUTCOME_MESSAGES) && !('amended' in OUTCOME_MESSAGES));
+});
+test('LA4 접수 API 응답 본문: 성공은 항상 {ok:true} 202 하나(내부 결과 created/already/amended를 내보내지 않음)', () => {
+  const src = readFileSync('src/app/api/leads/route.ts', 'utf8');
+  assert.match(src, /const accepted = \(\) => NextResponse\.json\(\{ ok: true \}, \{ status: 202 \}\)/);
+  assert.ok(!/outcome/.test(src.replace(/^\s*\/\/.*$/gm, '')));
 });

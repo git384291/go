@@ -35,10 +35,12 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
       if (a.application) {
         const saved = firstValue(await tx`select api.application_save(${a.application.token}, ${a.application.idempotencyKey}, ${a.application.payloadEnc}, ${a.application.summary}) as r`);
         // 'skipped' = 리드가 새로 만들어지지 않음(같은 연락처 재접수). 원본은 그대로 두고 같은 내용인지 비교, 다르면 변경 요청으로 따로 저장한다
-        if (saved === 'skipped') {
+        // 'saved'(새 접수)도 같은 비교를 한 번 거친다: 방금 저장한 원본과 같으므로 항상 'same'(쓰기 없음). 새 접수와 재접수의 DB 호출 수를 같게 해
+        // 응답 시간 차이로 연락처 존재 여부를 추측하기 어렵게 한다(PM 11/22 P2). 'exists'(같은 요청 키 재전송)는 기존대로 비교하지 않는다
+        if (saved === 'skipped' || saved === 'saved') {
           const m = a.application.amendment;
           const r = firstValue(await tx`select api.application_amend(${m.token}, ${a.application.idempotencyKey}, ${m.phoneHmac}, ${a.application.payloadEnc}, ${a.application.summary}, ${m.contentHmac}) as r`);
-          outcome = r === 'amended' ? 'amended' : r === 'same' ? 'already' : 'created';
+          if (saved === 'skipped') outcome = r === 'amended' ? 'amended' : r === 'same' ? 'already' : 'created';
         }
       }
       return null;

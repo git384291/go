@@ -23,6 +23,7 @@ select set_config('t.ms', test.app_sql('amd-test-0000000001', 'v1:orig', format(
 -- 같은 연락처 재접수(create_lead는 재문의로 처리, 리드 없음) 뒤 변경 요청 판정
 select set_config('t.m1', test.lead_sql(repeat('a7', 32), 'amd-test-0000000002', p_ip => repeat('c', 64)), false);
 select set_config('t.a_same', test.amd_sql('amd-test-0000000002', repeat('a7', 32), 'v1:same', repeat('1', 64)), false);
+select set_config('t.a_new', test.amd_sql('amd-test-0000000001', repeat('a7', 32), 'v1:orig', repeat('1', 64)), false);
 select set_config('t.a_diff', test.amd_sql('amd-test-0000000003', repeat('a7', 32), 'v1:addr2', repeat('2', 64)), false);
 select set_config('t.a_diff_again', test.amd_sql('amd-test-0000000004', repeat('a7', 32), 'v1:addr2b', repeat('2', 64)), false);
 select set_config('t.a_resend', test.amd_sql('amd-test-0000000003', repeat('a7', 32), 'v1:addr2', repeat('2', 64)), false);
@@ -36,6 +37,7 @@ select test.expect_eq(current_setting('t.m0'), 'accepted', 'AM0 원본 접수');
 select test.expect_eq(current_setting('t.ms'), 'saved', 'AM0b 원본 신청서 저장');
 select test.expect_eq(current_setting('t.m1'), 'accepted', 'AM0c 같은 연락처 재접수: 응답은 접수(재문의 처리)');
 select test.expect_eq(current_setting('t.a_same'), 'same', 'AM1 원본과 같은 내용: same(저장 없음)');
+select test.expect_eq(current_setting('t.a_new'), 'same', 'AM1b 새 접수 직후 같은 비교 호출(응답 시간 균일화): 방금 저장한 원본과 같아 same(쓰기 없음)');
 select test.expect_eq(current_setting('t.a_diff'), 'amended', 'AM2 다른 내용: 변경 요청 1건 추가');
 select test.expect_eq(current_setting('t.a_diff_again'), 'same', 'AM3 이미 받은 변경 요청과 같은 내용: same(중복 저장 없음)');
 select test.expect_eq(current_setting('t.a_resend'), 'amended', 'AM4 같은 요청 키 재전송: 이미 처리됨(추가 저장 없음)');

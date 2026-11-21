@@ -11,8 +11,8 @@ import { isActiveInterest } from '@/content/catalog';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// 고객에게는 신규·중복·내부 오류를 구분하지 않고 같은 형태로 응답한다
-const accepted = (outcome: string) => NextResponse.json({ ok: true, outcome }, { status: 202 });
+// 고객에게는 신규·중복·내부 오류를 구분하지 않고 같은 형태로 응답한다(PM 11/22 P2: 새 접수·같은 연락처 재접수·변경 요청도 같은 202 {ok:true}. 내부 구분은 DB 기록으로만)
+const accepted = () => NextResponse.json({ ok: true }, { status: 202 });
 const rejected = (code: string, status = 400) => NextResponse.json({ ok: false, code }, { status });
 
 export async function POST(req: Request) {
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       },
       (fn) => withRole('public', (tx) => fn(tx as never) as Promise<unknown>),
     );
-    return r.ok ? accepted(r.outcome) : rejected(r.code, r.status);
+    return r.ok ? accepted() : rejected(r.code, r.status);
   } catch {
     // 키 환경값 누락 등 설정 오류: 내용은 남기지 않는다
     return rejected('INTERNAL', 500);

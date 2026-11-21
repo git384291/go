@@ -153,6 +153,9 @@
 - 테스트 계정 진단(로컬 전용, CI 미실행): `node --conditions=react-server --import tsx scripts/google-ads-probe/run.mts` (credential은 로컬 환경변수로만). 순서: 환경변수 이름 확인 → OAuth → 계정 읽기(통화·test_account·manager) → **test_account=true·관리자 아님일 때만** `googleAds:mutate` validateOnly 1회(예산+캠페인 묶음, 실행 안 됨). 출력은 단계·HTTP·Google 오류코드·통화·불리언뿐. 종료 코드: 0 통과, 2 설정 없음, 3 인증·조회 실패, 4 테스트 계정 아님(변경 호출 0), 5 validateOnly 거부.
 
 **S. 같은 연락처 재접수 변경 요청(0019 `pii.lead_amendments`)**
-- 7일 안 같은 연락처 재접수: 같은 내용이면 저장 없이 재문의 기록만(고객 문구 "이미 접수된 신청이 있습니다"), 다른 내용이면 원본은 그대로 두고 변경 요청을 암호화 본문으로 추가(고객 문구 "기존 신청의 변경 요청이 접수되었습니다"). 자동 덮어쓰기 없음.
+- 7일 안 같은 연락처 재접수: 같은 내용이면 저장 없이 재문의 기록만, 다른 내용이면 원본은 그대로 두고 변경 요청을 암호화 본문으로 추가. 자동 덮어쓰기 없음.
+- 고객 응답(PM 11/22 P2): 새 접수·같은 내용 재접수·변경 요청 모두 같은 202 `{"ok":true}`와 같은 문구("신청이 접수되었습니다…"). 연락처 존재 여부를 응답으로 구별할 수 없게 함(BF29). 새 접수도 같은 비교 호출(`application_amend` → 항상 same, 쓰기 없음)을 거쳐 DB 호출 수를 맞춘다. 구분은 DB 기록(재문의 이력·변경 요청)과 대표 화면에서만.
 - 내용 비교는 서버 HMAC 키 + 연락처 HMAC 솔트의 키 해시(원문 복원 불가). 변경 요청 열람은 대표만, 신청서 열람(감사·viewed) 직후에만. 감사에는 개수·누락 수만.
+- 0019 이전 원본(요약에 contentHmac 없음) — 조사 결과: 저장소 증거상 **없음**. 0017·0019는 PR #1 브랜치에만 있고 main에는 마이그레이션 0001~0004뿐. 접수는 4중 차단(고지 `confirmed:false` → 서버 거부, `LEAD_INTAKE_MODE=local`+localhost DB만, Vercel production/preview 차단, `lead_form` 기본 꺼짐)이라 실제 고객 신청서가 생길 경로가 없다. 적용은 CI·로컬 폐기 DB뿐.
+  - 만약 사용자가 수동으로 0017만 적용하고 실제 접수를 받았다면(저장소로는 확인 불가): 현재 동작은 해시 없음 → 다른 내용으로 보고 변경 요청 1건 추가(원본 불변, 정보 손실 없음, 이후 같은 내용은 그 변경 요청 해시로 중복 제거). **보정은 설계만, PM 승인 전 실행 금지**: 원본 행을 고치지 않는 별도 표(`pii.lead_application_hashes(lead_id, content_hmac)`)를 만들고, 서버 키가 있는 일회성 스크립트가 원본 암호문을 메모리에서만 복호화해 해시를 계산·추가(원문·키 출력 없음, 대상 건수만 보고). `application_amend`는 요약 해시가 없을 때만 이 표를 본다. 사전 확인: `select count(*) from pii.lead_applications where summary->>'contentHmac' is null`.
 - 롤백: `db/rollback/0019_down.sql`(보관 테이블로 이동 후 삭제) → 필요 시 0019 재적용 + `0019_restore.sql`. db-test.sh M19가 훈련. 롤백 시 접수 코드(submitLead·dealerPacket)도 이전 커밋으로 함께 되돌린다.

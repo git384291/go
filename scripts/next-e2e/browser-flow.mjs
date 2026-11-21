@@ -66,10 +66,16 @@ export async function runBrowserFlow(c) {
     const openCustomer = async (ctx) => {
       const pg = await ctx.newPage();
       const posts = [];
-      pg.on('request', (r) => { if (r.url().endsWith('/api/leads') && r.method() === 'POST') posts.push(r.postData() ?? ''); });
+      const resps = []; const sent = new Map(); // PM 11/22 P2: 접수 응답(상태·헤더·본문·소요 시간) 비교용
+      pg.on('request', (r) => { if (r.url().endsWith('/api/leads') && r.method() === 'POST') { posts.push(r.postData() ?? ''); sent.set(r, Date.now()); } });
+      pg.on('response', (r) => {
+        if (!(r.url().endsWith('/api/leads') && r.request().method() === 'POST')) return;
+        const ms = Date.now() - (sent.get(r.request()) ?? Date.now());
+        resps.push((async () => { const h = r.headers(); const names = Object.keys(h).sort(); const vals = names.filter((k) => !/^(date|content-security-policy.*|x-request-id|report-to|reporting-endpoints)$/.test(k)).map((k) => `${k}=${h[k]}`); return { status: r.status(), body: await r.text().catch(() => '?'), names: names.join(','), vals: vals.join(';'), ms }; })());
+      });
       await pg.goto(`${FX}/consult/ai`, { waitUntil: 'networkidle' });
       await pg.waitForTimeout(1500);
-      return { pg, posts };
+      return { pg, posts, resps };
     };
     const ask = async (pg, msg) => { const k = await pg.locator('[role=log] p').count(); await pg.fill('textarea[aria-label="상담 내용"]', msg); await pg.click('button:has-text("보내기")'); await pg.waitForFunction((x) => document.querySelectorAll('[role=log] p').length >= x + 3, k, { timeout: 25000 }); return (await pg.locator('[role=log] p').last().textContent()) ?? ''; };
     const assist = async (pg) => {
@@ -285,6 +291,7 @@ export async function runBrowserFlow(c) {
     await d1.pg.dblclick('form button[type=submit]').catch(() => {});
     const dtext = await resultText(d1.pg);
     await d1.pg.waitForTimeout(500);
+    const rNew = await Promise.all(d1.resps);
     check('BF21 접수 버튼 더블클릭: 접수 요청 1건, 화면 "신청이 접수되었습니다", 리드·고객·동의·신청서 각 +1', d1.posts.length === 1 && /신청이 접수되었습니다/.test(dtext) && (await snap()) === sD0.split(',').map((v, i) => Number(v) + [1, 1, 1, items.length, 1, 1][i]).join(','), `${sD0} -> ${await snap()} posts=${d1.posts.length}`);
     await dc.close();
 
@@ -295,10 +302,11 @@ export async function runBrowserFlow(c) {
     const s1c = await openCustomer(sc);
     await ask(s1c.pg, '요금이 궁금해요'); await assist(s1c.pg); await fillForm(s1c.pg, { phone: '010-9999-3333' }); await submit(s1c.pg);
     const stext = await resultText(s1c.pg);
+    const rSame = await Promise.all(s1c.resps);
     const rep1 = await n(`select count(*)::int as n from core.lead_status_history where reason = 'repeat_inquiry'`);
     const sS1 = await snap();
     const phoneLeads = await n(`select count(*)::int as n from core.leads l join pii.customers c on c.id = l.customer_id join pii.lead_applications a on a.lead_id = l.id where c.phone_hmac = (select phone_hmac from pii.customers order by created_at desc limit 1)`);
-    check('BF22 같은 연락처·같은 내용 재접수(7일 내): 화면은 "이미 접수된 신청이 있습니다"(단순 접수 문구 아님), 리드·고객·동의·신청서·고지 노출·변경 요청 증가 0건, 재문의 기록 +1, 그 연락처의 리드·신청서는 1건씩', s1c.posts.length === 1 && /^이미 접수된 신청이 있습니다/.test(stext.trim()) && !/신청이 접수되었습니다/.test(stext) && (await n(`select count(*)::int as n from pii.lead_amendments`)) === 0 && !TECH.test(stext) && sS1 === sS0 && rep1 === rep0 + 1 && phoneLeads === 1, `${sS0} -> ${sS1} rep=${rep0}->${rep1} leads=${phoneLeads} | ${stext.slice(0, 40)}`);
+    check('BF22 같은 연락처·같은 내용 재접수(7일 내): 화면은 새 접수와 같은 "신청이 접수되었습니다"(존재 여부 비노출), 리드·고객·동의·신청서·고지 노출·변경 요청 증가 0건, 재문의 기록 +1, 그 연락처의 리드·신청서는 1건씩', s1c.posts.length === 1 && stext.trim() === dtext.trim() && /^신청이 접수되었습니다/.test(stext.trim()) && (await n(`select count(*)::int as n from pii.lead_amendments`)) === 0 && !TECH.test(stext) && sS1 === sS0 && rep1 === rep0 + 1 && phoneLeads === 1, `${sS0} -> ${sS1} rep=${rep0}->${rep1} leads=${phoneLeads} | ${stext.slice(0, 40)}`);
     await sc.close();
 
     // ── PM 11/22 P1: 같은 연락처의 '다른 내용' 재접수 → 원본은 그대로, 변경 요청(amendment)으로만 저장. 대표만 변경 항목 확인
@@ -314,7 +322,7 @@ export async function runBrowserFlow(c) {
     const reapply = async (opts) => {
       const ctx = await newCtx(); const o = await openCustomer(ctx);
       await ask(o.pg, '요금이 궁금해요'); await assist2(o.pg, opts); await fillForm(o.pg, { phone: '010-9999-3333' }); await submit(o.pg);
-      const t = await resultText(o.pg); const posts = o.posts.length; await ctx.close(); return { t: t.trim(), posts };
+      const t = await resultText(o.pg); const posts = o.posts.length; const rs = await Promise.all(o.resps); await ctx.close(); return { t: t.trim(), posts, rs };
     };
     const lid3 = (await sql.unsafe(`select l.id::text as id, l.customer_id::text as cid from core.leads l join pii.customers c on c.id = l.customer_id order by c.created_at desc limit 1`))[0];
     const origOf = async () => JSON.stringify(await sql.unsafe(`select a.payload_enc, a.summary::text as s, a.created_at::text as t, (select string_agg(doc_version || granted::text, ',') from pii.consents where customer_id = a.customer_id) as cons, (select string_agg(notice_key || body_sha256, ',' order by notice_key) from pii.notice_exposures where customer_id = a.customer_id) as expo from pii.lead_applications a where a.lead_id = '${lid3?.id}'`));
@@ -323,13 +331,13 @@ export async function runBrowserFlow(c) {
     const amd = () => n(`select count(*)::int as n from pii.lead_amendments where lead_id = '${lid3?.id}'`);
     const a1 = await reapply({ addr: '서울시 가상구 변경로 77 1001호', carrier: 'KT' });
     const amd1 = await amd();
-    check('BF23 주소만 바꾼 재접수: 화면 "기존 신청의 변경 요청이 접수되었습니다"(단순 접수 문구 아님), 변경 요청 1건, 리드·고객·동의·고지 노출·신청서 증가 0건', a1.posts === 1 && /^기존 신청의 변경 요청이 접수되었습니다/.test(a1.t) && !/신청이 접수되었습니다/.test(a1.t) && amd1 === 1 && (await snap()) === sA0, `${a1.t.slice(0, 30)} amd=${amd1}`);
+    check('BF23 주소만 바꾼 재접수: 화면은 새 접수와 같은 문구(존재 여부 비노출), 내부에는 변경 요청 1건, 리드·고객·동의·고지 노출·신청서 증가 0건', a1.posts === 1 && a1.t === dtext.trim() && amd1 === 1 && (await snap()) === sA0, `${a1.t.slice(0, 15)} amd=${amd1}`);
     const a1b = await reapply({ addr: '서울시 가상구 변경로 77 1001호', carrier: 'KT' });
-    check('BF24 같은 변경 내용을 다시 보내면 "이미 접수된 신청이 있습니다", 변경 요청 추가 0건', /^이미 접수된 신청이 있습니다/.test(a1b.t) && (await amd()) === 1, `${a1b.t.slice(0, 20)} amd=${await amd()}`);
+    check('BF24 같은 변경 내용을 다시 보내면 화면은 같은 접수 문구, 내부 변경 요청 추가 0건', a1b.t === dtext.trim() && (await amd()) === 1, `${a1b.t.slice(0, 15)} amd=${await amd()}`);
     const a2 = await reapply({ addr: '서울시 가상구 브라우저로 9 301호', carrier: 'SKT', date: '2026-12-05' });
     const amd2 = await amd();
     const orig1 = await origOf();
-    check('BF25 통신사·설치희망일 변경 재접수: 변경 요청 2건째 저장, 원본 신청서(암호문·요약·해시)·동의·고지 노출 기록은 그대로(덮어쓰기 없음)', /^기존 신청의 변경 요청이 접수되었습니다/.test(a2.t) && amd2 === 2 && orig1 === orig0 && orig0 !== '[]' && (await snap()) === sA0, `amd=${amd2} same=${orig1 === orig0}`);
+    check('BF25 통신사·설치희망일 변경 재접수: 화면은 같은 접수 문구, 변경 요청 2건째 저장, 원본 신청서(암호문·요약·해시)·동의·고지 노출 기록은 그대로(덮어쓰기 없음)', a2.t === dtext.trim() && amd2 === 2 && orig1 === orig0 && orig0 !== '[]' && (await snap()) === sA0, `amd=${amd2} same=${orig1 === orig0}`);
     // 대표: 실제 API로 원본 + 변경 항목(이전 → 변경 값) 확인
     const pr3 = await adm(`/api/admin/leads/${lid3?.id}/packet`, owner, { method: 'POST', body: JSON.stringify({ reason: 'content_check' }) }); const pj3 = await pj(pr3);
     const ch = (pj3.amendments ?? []).map((m) => (m.changes ?? []).map((c) => `${c.key}:${c.before}>${c.after}`).join('|'));
@@ -350,6 +358,10 @@ export async function runBrowserFlow(c) {
     check('BF27 대표 외(검토자·편집자·상담원·무인증)는 변경 요청 내용에 접근 불가(401/403, 본문에 변경 주소 없음)', deny.every(([, st, leak]) => (st === 401 || st === 403) && !leak), JSON.stringify(deny));
     const auditLeak = await n(`select count(*)::int as n from core.audit_logs where (coalesce(detail::text, '') || coalesce(reason, '')) ~ '변경로|브라우저로|가상구|example\\.com|010-?9999|김브라우저'`);
     const amAudit = await n(`select count(*)::int as n from core.audit_logs where action = 'application.amend' and target_id = '${lid3?.id}'`);
+    // BF29 비로그인 고객이 응답으로 연락처 존재 여부를 구별할 수 없다: 새 접수·같은 내용 재접수·변경 요청·같은 변경 재전송의 상태 코드·헤더 이름·헤더 값(날짜·CSP 제외)·본문이 모두 같다
+    const allR = [['new', rNew], ['same', rSame], ['amend', a1.rs], ['amendSame', a1b.rs], ['amend2', a2.rs]].map(([k, rs]) => [k, rs.length === 1 ? rs[0] : null]);
+    const base = allR[0][1];
+    check('BF29 존재 여부 추론 방지: 새 접수·재접수(같은 내용)·변경 요청·같은 변경 재전송 응답이 상태 202·헤더·본문 {"ok":true}까지 동일(화면 문구도 동일)', !!base && base.status === 202 && JSON.stringify(JSON.parse(base.body)) === '{"ok":true}' && allR.every(([, r]) => r && r.status === base.status && r.body === base.body && r.names === base.names && r.vals === base.vals) && [stext.trim(), a1.t, a1b.t, a2.t].every((t) => t === dtext.trim()), `${base?.status} ${base?.body} ms=${allR.map(([k, r]) => `${k}:${r?.ms}`).join(',')}`);
     check('BF28 감사 로그: 변경 요청 2건이 기록되고(개수·누락 수만), 이름·주소·이메일·전화·암호문 원문 0건', amAudit === 2 && auditLeak === 0, `amend=${amAudit} leak=${auditLeak}`);
   } finally {
     try { await sql.unsafe(`drop trigger if exists e2e_fail_app on pii.lead_applications`); await sql.unsafe(`drop function if exists public.e2e_fail_app()`); } catch { /* 정리 */ }

@@ -83,14 +83,11 @@ export class IdempotencyKeeper {
   }
 }
 
-export type OutcomeKind = 'accepted' | 'already' | 'amended' | 'field' | 'input' | 'consent_version' | 'stale' | 'secure_context' | 'rate' | 'bot' | 'not_ready' | 'temporary' | 'unknown';
+export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'stale' | 'secure_context' | 'rate' | 'bot' | 'not_ready' | 'temporary' | 'unknown';
 export type SubmitOutcome = { kind: OutcomeKind; message: string; field?: ConsultField; retryable: boolean };
 
 export const OUTCOME_MESSAGES = {
   accepted: '신청이 접수되었습니다. 상담 가능 시간에 순서대로 연락드립니다.',
-  // 같은 연락처 재접수(PM 11/22): 같은 내용은 새로 저장하지 않고, 다른 내용은 기존 신청을 바꾸지 않은 채 변경 요청으로만 받는다
-  already: '이미 접수된 신청이 있습니다. 같은 내용이라 새로 접수하지 않았으며, 상담 가능 시간에 순서대로 연락드립니다.',
-  amended: '기존 신청의 변경 요청이 접수되었습니다. 기존 신청은 그대로 두고, 담당자가 바뀐 내용을 확인한 뒤 연락드립니다.',
   input: '입력 내용을 확인해 주세요.',
   consent_version: '개인정보 안내가 바뀌었습니다. 페이지를 새로 고친 뒤 다시 동의해 주세요.',
   stale: '화면이 오래되었거나 고지 문구가 바뀌었습니다. 입력하신 내용은 저장되지 않았습니다. 페이지를 새로 고친 뒤 고지를 다시 확인해 주세요.',
@@ -132,8 +129,6 @@ const CODE_KIND: Readonly<Record<string, { kind: OutcomeKind; field?: ConsultFie
 function outcome(kind: OutcomeKind, field?: ConsultField): SubmitOutcome {
   switch (kind) {
     case 'accepted':
-    case 'already':
-    case 'amended':
       return { kind, message: OUTCOME_MESSAGES[kind], retryable: false };
     case 'field': {
       const f = field ?? 'phone';
@@ -168,14 +163,11 @@ export const SECURE_CONTEXT_REQUIRED: SubmitOutcome = outcome('secure_context');
 export const NETWORK_FAILURE: SubmitOutcome = outcome('unknown');
 
 /**
- * 응답을 고정 분류로 바꾼다. 202만 접수 성공이며, 서버가 알려 준 결과(같은 연락처의 같은 내용·변경 요청)만 따로 안내한다.
+ * 응답을 고정 분류로 바꾼다. 202만 접수 성공이다. 새 접수·같은 연락처 재접수·변경 요청은 밖에서 구분하지 않는다(PM 11/22 P2: 연락처 존재 여부 추측 방지 — 본문이 무엇이든 같은 문구).
  * 본문은 JSON의 `code` 문자열 하나만 보고, 허용 목록에 없으면 버린다.
  */
 export function classifyResponse(status: number, body: unknown): SubmitOutcome {
-  if (status === 202) {
-    const o = body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as { outcome?: unknown }).outcome : undefined;
-    return outcome(o === 'already' ? 'already' : o === 'amended' ? 'amended' : 'accepted');
-  }
+  if (status === 202) return outcome('accepted');
   const code = body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as { code?: unknown }).code : undefined;
   const known = typeof code === 'string' && Object.prototype.hasOwnProperty.call(CODE_KIND, code) ? CODE_KIND[code] : undefined;
   if (known) return outcome(known.kind, known.field);
@@ -199,5 +191,5 @@ export async function readResponseBody(res: Response): Promise<unknown> {
 
 export const SUBMIT_TIMEOUT_MS = 15000;
 
-/** 접수가 끝난 결과(새 접수·이미 접수됨·변경 요청 접수). 이 경우 폼을 잠그고 다시 보내지 않는다 */
-export const isAcceptedKind = (k: OutcomeKind): boolean => k === 'accepted' || k === 'already' || k === 'amended';
+/** 접수가 끝난 결과. 이 경우 폼을 잠그고 다시 보내지 않는다 */
+export const isAcceptedKind = (k: OutcomeKind): boolean => k === 'accepted';
