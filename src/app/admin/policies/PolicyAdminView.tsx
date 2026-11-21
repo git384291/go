@@ -1,4 +1,4 @@
-import { RowActions, UploadPanel } from './PolicyConsole';
+import { PublishPanel, RowActions, UploadPanel } from './PolicyConsole';
 
 // 관리자 정책 화면(서버 컴포넌트). 고객 금액·수수료·원문 값은 목록에 싣지 않는다(상태·출처·유효기간·해시만).
 export type PolicyRow = {
@@ -26,6 +26,7 @@ export function PolicyAdminView({ items, role, publishOn }: { items: readonly Po
         업로드 → 검증 → 검수 요청 → 대표 승인 순서입니다. 승인된 정책만 고객 상담 금액 안내에 쓰이며, 상담 연결 스위치는 현재 {publishOn ? '켜짐' : '꺼짐'}입니다.
         작성자와 승인자가 같으면 기록에 표시됩니다. 승인 권한은 서버와 DB가 판정합니다.
       </p>
+      <PublishPanel enabled={publishOn} canChange={role === 'owner'} />
       {canUpload ? <UploadPanel /> : <p className="muted">이 역할은 조회만 가능합니다.</p>}
       <section aria-label="정책 목록">
         <h2>정책 목록</h2>

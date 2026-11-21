@@ -76,3 +76,26 @@ export function RowActions({ id, state, role }: { id: string; state: string; rol
   }
   return <span className="muted">{state === 'submitted' ? '대표 승인 대기' : '—'}</span>;
 }
+
+// 정책 게시(고객 상담 금액 안내 연결) 스위치. 대표만 조작(서버·DB가 매번 다시 판정), 사유 필수, 변경은 감사에 기록된다. 기본 OFF.
+export function PublishPanel({ enabled, canChange }: { enabled: boolean; canChange: boolean }) {
+  const [reason, setReason] = useState('');
+  const [msg, setMsg] = useState('');
+  async function change(next: boolean) {
+    const res = await call('/api/admin/policies/publish', 'POST', { enabled: next, reason });
+    if (res.ok === true) location.reload(); else setMsg(`거부됨: ${String(res.code)}`);
+  }
+  return (
+    <section className="admin-card" aria-label="정책 게시 스위치">
+      <h2>정책 게시 스위치</h2>
+      <p data-field="publish">현재: <strong>{enabled ? '켜짐(승인된 정책이 상담 답변에 반영됨)' : '꺼짐(승인돼도 상담은 금액을 안내하지 않음)'}</strong></p>
+      {canChange ? (
+        <div className="row">
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="변경 사유(필수)" aria-label="게시 변경 사유" maxLength={500} />{' '}
+          <button type="button" disabled={reason.trim().length < 2} onClick={() => change(!enabled)}>{enabled ? '게시 끄기' : '게시 켜기'}</button>
+        </div>
+      ) : <p className="muted">변경은 대표만 할 수 있습니다.</p>}
+      <p role="status">{msg}</p>
+    </section>
+  );
+}

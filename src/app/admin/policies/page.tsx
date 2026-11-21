@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { adminAuthMode } from '@/server/auth/adminAuthMode';
 import { requireStaff } from '@/server/auth/requireStaff';
-import { listPolicies, type PolicyAdminDeps, type SqlTag } from '@/server/admin/policyAdmin';
+import { listPolicies, policyPublishGet, type PolicyAdminDeps, type SqlTag } from '@/server/admin/policyAdmin';
 import { withRole } from '@/server/db/client';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from './PolicyAdminView';
 
@@ -23,5 +23,7 @@ export default async function PoliciesPage() {
   if (res.status === 503) return <PolicyLocked kind="disabled" />;
   if (res.status !== 200) return <PolicyLocked kind="failed" />;
   const body = (await res.json()) as { role: string; items: PolicyRow[] };
-  return <PolicyAdminView items={body.items} role={body.role} publishOn={false} />;
+  const pub = await policyPublishGet(deps);
+  const publishOn = pub.status === 200 ? ((await pub.json()) as { enabled?: unknown }).enabled === true : false;
+  return <PolicyAdminView items={body.items} role={body.role} publishOn={publishOn} />;
 }

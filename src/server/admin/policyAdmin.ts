@@ -12,7 +12,8 @@ import { dbReadReady } from './leadsSource';
  * - 기본 닫힘: ADMIN_POLICY_SOURCE=db + 개발·시험의 지정된 로컬 폐기 DB(leadsSource.dbReadReady)일 때만 열린다. 그 밖은 503(인증·DB 0회).
  * - 검증(dryRun)은 DB를 쓰지 않는다. 견적 판정(quotePolicy)과 같은 규칙으로 업로드 내용을 다시 검사해 사유 코드를 돌려준다.
  * - DB 오류는 허용 목록 코드로만 바꿔 응답한다(SQL 메시지·접속 정보 비노출).
- * - '게시'는 승인과 별개다: DB 스위치 policy_publish를 켜는 것은 이 화면의 범위가 아니다(기존 set_feature_flag 경로).
+ * - '게시'는 승인과 별개다: DB 스위치 policy_publish(기본 OFF). 켜고 끄기는 대표만(api.policy_publish_set, 사유 필수·감사 기록), 조회는 조회 권한 역할.
+ * - 필수 고지 문구 입력·버전 관리(api.notice_text_*)도 같은 게이트를 쓴다. 문구를 DB에 넣어도 접수는 열리지 않는다(코드 상수 확정 필요).
  */
 /** DB 실행기 모양(구조적 타입). 리드 어댑터 모듈과 분리해 둔다 */
 export type SqlTag = (strings: TemplateStringsArray, ...values: unknown[]) => PromiseLike<readonly unknown[]>;
@@ -40,13 +41,17 @@ export function policyAdminReady(env: Env): boolean {
   return dbReadReady({ ...env, ADMIN_LEADS_SOURCE: 'db' });
 }
 
-type Op = 'list' | 'create' | 'submit' | 'approve' | 'reject';
+type Op = 'list' | 'create' | 'submit' | 'approve' | 'reject' | 'publish_get' | 'publish_set' | 'notice_list' | 'notice_add';
 const ROLES: Record<Op, readonly string[]> = {
   list: ['owner', 'policy_editor', 'reviewer'],
   create: ['owner', 'policy_editor'],
   submit: ['owner', 'policy_editor'],
   approve: ['owner'],
   reject: ['owner'],
+  publish_get: ['owner', 'policy_editor', 'reviewer'],
+  publish_set: ['owner'],
+  notice_list: ['owner', 'reviewer'],
+  notice_add: ['owner'],
 };
 
 async function gate(deps: PolicyAdminDeps, op: Op): Promise<StaffIdentity | Response> {
@@ -65,7 +70,7 @@ async function gate(deps: PolicyAdminDeps, op: Op): Promise<StaffIdentity | Resp
   return who;
 }
 
-const DB_MESSAGES = new Set(['REASON_REQUIRED', 'CHECKS_REQUIRED', 'SOURCE_NOT_QUOTABLE', 'CONFIRMED_AT_INVALID', 'VALIDITY_INVALID', 'INVALID_TRANSITION', 'INVALID_PAGE', 'POLICY_IMMUTABLE']);
+const DB_MESSAGES = new Set(['REASON_REQUIRED', 'CHECKS_REQUIRED', 'SOURCE_NOT_QUOTABLE', 'CONFIRMED_AT_INVALID', 'VALIDITY_INVALID', 'INVALID_TRANSITION', 'INVALID_PAGE', 'POLICY_IMMUTABLE', 'INVALID_NOTICE', 'NOTICE_EXISTS']);
 function dbError(e: unknown): Response {
   const err = (e ?? {}) as { code?: unknown; message?: unknown };
   if (err.code === '42501') return fail('FORBIDDEN', 403);
@@ -197,5 +202,65 @@ export async function policyAction(deps: PolicyAdminDeps, id: string, body: unkn
     await deps.runInTransaction(async (tx) =>
       tx`select api.policy_approve(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${id}::uuid, ${reason}, ${JSON.stringify(b.checks)}::text::jsonb)`);
     return json({ ok: true }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+
+/** 게시 스위치 상태 조회 */
+export async function policyPublishGet(deps: PolicyAdminDeps): Promise<Response> {
+  const g = await gate(deps, 'publish_get');
+  if (g instanceof Response) return g;
+  try {
+    const rows = (await deps.runInTransaction(async (tx) =>
+      tx`select enabled, updated_at from api.policy_publish_get(${g.actor}::uuid, ${g.session}::uuid, ${g.token})`)) as readonly { enabled?: unknown; updated_at?: unknown }[];
+    if (rows.length !== 1 || typeof rows[0].enabled !== 'boolean') return fail('INVALID_DATA', 502);
+    return json({ ok: true, role: g.role, enabled: rows[0].enabled, updatedAt: rows[0].updated_at instanceof Date ? rows[0].updated_at.toISOString() : null }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+/** 게시 ON/OFF — 대표만. 본문은 정확히 {enabled:boolean, reason:string} */
+export async function policyPublishSet(deps: PolicyAdminDeps, body: unknown): Promise<Response> {
+  const g = await gate(deps, 'publish_set');
+  if (g instanceof Response) return g;
+  if (!isObj(body) || !exactKeys(body, ['enabled', 'reason']) || Object.keys(body).length !== 2 || typeof body.enabled !== 'boolean') return fail('INVALID_INPUT', 422);
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 2 || reason.length > 500) return fail('REASON_REQUIRED', 422);
+  try {
+    await deps.runInTransaction(async (tx) =>
+      tx`select api.policy_publish_set(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${body.enabled as boolean}, ${reason})`);
+    return json({ ok: true, enabled: body.enabled }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+/** 필수 고지 문구 목록(버전·키·문구·해시). 실제 문구가 아직 없으면 빈 목록 */
+export async function noticeList(deps: PolicyAdminDeps): Promise<Response> {
+  const g = await gate(deps, 'notice_list');
+  if (g instanceof Response) return g;
+  try {
+    const rows = await deps.runInTransaction(async (tx) =>
+      tx`select version, notice_key, body, body_sha256, created_at from api.notice_text_list(${g.actor}::uuid, ${g.session}::uuid, ${g.token})`);
+    if (!Array.isArray(rows) || rows.length > 200) return fail('INVALID_DATA', 502);
+    return json({ ok: true, role: g.role, items: rows }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+const VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const NOTICE_KEY = /^[a-z][a-z0-9_]{0,39}$/;
+/** 필수 고지 문구 추가(버전·키별 1회, 수정·삭제 불가) — 대표만. 본문은 {version,key,body,reason} */
+export async function noticeAdd(deps: PolicyAdminDeps, body: unknown): Promise<Response> {
+  const g = await gate(deps, 'notice_add');
+  if (g instanceof Response) return g;
+  if (!isObj(body) || !exactKeys(body, ['version', 'key', 'body', 'reason']) || Object.keys(body).length !== 4) return fail('INVALID_INPUT', 422);
+  const { version, key } = body;
+  const text = typeof body.body === 'string' ? body.body.trim() : '';
+  if (typeof version !== 'string' || !VERSION.test(version) || typeof key !== 'string' || !NOTICE_KEY.test(key) || text.length < 1 || text.length > 2000) return fail('INVALID_NOTICE', 422);
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 2 || reason.length > 500) return fail('REASON_REQUIRED', 422);
+  try {
+    const rows = (await deps.runInTransaction(async (tx) =>
+      tx`select api.notice_text_add(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${version}, ${key}, ${text}, ${reason}) as sha`)) as readonly { sha?: unknown }[];
+    const sha = rows[0]?.sha;
+    if (typeof sha !== 'string' || !/^[0-9a-f]{64}$/.test(sha)) return fail('INVALID_DATA', 502);
+    return json({ ok: true, sha256: sha }, 201);
   } catch (e) { return dbError(e); }
 }

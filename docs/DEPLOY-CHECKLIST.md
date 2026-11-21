@@ -38,3 +38,11 @@
 ## G. 정책 게시 스위치·필수 고지 (기준 b54a27c 이후)
 - 정책 **게시**는 DB 스위치 `policy_publish`(기본 OFF, 대표만 `api.set_feature_flag`로 변경·감사 기록)다. 승인만으로는 상담에 금액이 나가지 않는다. 운영은 OFF 유지, 켜는 것은 검수용 환경에서만(자동 검증: next-e2e Q11~Q16).
 - 필수 고지: 코드 상수 `REQUIRED_NOTICES`(현재 미확정 → 접수 차단)와 DB `core.notice_texts`에 **같은 버전·같은 문구**를 넣어야 한다. 대조는 `compareNoticeTexts`(preflight N1~N3, next-e2e N15). 문구는 임의로 만들지 않는다.
+
+## H. 정책 게시 ON/OFF · 필수 고지 입력 화면 (기준 9c29a74 이후)
+- **게시 스위치**: `/admin/policies`의 "정책 게시 스위치" 패널 → `POST /api/admin/policies/publish` `{enabled, reason}`. **대표(owner)만 변경**, 편집자·검토자는 현재 상태만 조회. 사유 2~500자 필수. 변경마다 감사 기록(`policy.publish_on` / `policy.publish_off`, 이전·이후 값). 운영 기본값은 **OFF** 유지 — 켜는 것은 별도 승인 뒤 대표가 직접.
+- **반영 시점**: 상담 답변은 요청마다 DB 게시 상태를 읽으므로 ON/OFF가 즉시 반영된다(Next E2E PB4·PB5).
+- **필수 고지 입력**: `/admin/notices`(대표 입력, 검토자 조회). `POST /api/admin/notices` `{version,key,body,reason}`. 같은 버전·항목은 다시 입력 불가(덮어쓰기·삭제 없음, 새 버전으로 입력), 감사 기록에는 본문 대신 해시만 남는다.
+- **접수 차단은 그대로**: DB에 문구를 넣어도 접수는 열리지 않는다. 열리려면 `src/content/requiredNotices.ts`의 상수가 확정(버전·항목 문구)으로 바뀌고 DB와 일치해야 하며, 이는 별도 검수·승인·배포 사항이다(Next E2E NA6, `/admin/notices`의 "접수 차단 유지" 표시).
+- **실제 문구는 이 저장소에 없다**: 대표·PM이 확정한 문구를 화면에서 입력한다. 시험 문구는 "[검수용 … 실제 고지 아님]"으로 표시된다.
+- **복구**: `db/rollback/0014_down.sql`은 함수 4개만 제거하고 게시 값·고지 문구·감사 기록은 보존(M14 복구 시험).

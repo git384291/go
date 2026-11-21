@@ -61,6 +61,7 @@ run db/tests/70_ad_budget.sql >/dev/null    # 광고 예산 통제(0010)
 run db/tests/80_ad_performance.sql >/dev/null   # 광고 성과·AI 사용료(0011)
 run db/tests/90_consult_ai_confirm.sql >/dev/null   # 상담 집계·AI 정산(0012)
 run db/tests/95_ad_alerts_ai_limit.sql >/dev/null   # 광고 중지 경고·AI 한도(0013)
+run db/tests/96_policy_publish_notice_texts.sql >/dev/null   # 정책 게시 ON/OFF·고지 문구 관리(0014)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -560,6 +561,16 @@ D -q -f db/rollback/0013_restore.sql >/dev/null
 r13=$(D -At -c "select count(*) from core.ad_alerts where state = 'open'")
 [ "$r13" = 1 ] || { echo "FAIL | M13c 0013 복구 건수 불일치 $r13" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M13 중지 경고·AI 한도 0013 롤백: 경고 1건 보관, 새 객체 제거·승인/지출 판정 0010으로 복귀, 보관본 RLS·접근 차단, 덮어쓰기 거부, 재적용·복구 일치" >> "$LOG_DIR/db-test.log"
+# 0014 정책 게시·고지 문구 관리: 적용 → 롤백(함수만 제거, 스위치·문구·감사는 남음) → 재적용
+D -f db/migrations/0014_policy_publish_notice_texts.sql >/dev/null
+D -q -c "insert into core.notice_texts (version, notice_key, body, body_sha256) values ('drill-v1', 'drill_key', '드릴 문구', repeat('0', 64))"
+D -f db/rollback/0014_down.sql >/dev/null
+gone14=$(D -At -c "select (to_regprocedure('api.policy_publish_set(uuid,uuid,text,boolean,text)') is null and to_regprocedure('api.policy_publish_get(uuid,uuid,text)') is null and to_regprocedure('api.notice_text_add(uuid,uuid,text,text,text,text,text)') is null and to_regprocedure('api.notice_text_list(uuid,uuid,text)') is null)")
+keep14=$(D -At -c "select count(*) from core.notice_texts where version = 'drill-v1'")
+D -f db/migrations/0014_policy_publish_notice_texts.sql >/dev/null
+back14=$(D -At -c "select (to_regprocedure('api.policy_publish_set(uuid,uuid,text,boolean,text)') is not null and to_regprocedure('api.notice_text_add(uuid,uuid,text,text,text,text,text)') is not null)")
+[ "$gone14" = t ] && [ "$keep14" = 1 ] && [ "$back14" = t ] || { echo "FAIL | M14 0014 롤백 gone=$gone14 문구보존=$keep14 재적용=$back14" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M14 정책 게시·고지 문구 0014 롤백: 함수 4개 제거, 이미 넣은 고지 문구(추가 전용)는 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"

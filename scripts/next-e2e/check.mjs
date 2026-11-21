@@ -128,6 +128,7 @@ try {
     ['/admin/ads', 'FIDEON 관리 · 광고 예산', new Set(['owner', 'reviewer'])],
     ['/admin/ads/funnel', 'FIDEON 관리 · 광고 성과', new Set(['owner', 'reviewer'])],
     ['/admin/ai-budget', 'FIDEON 관리 · AI 월 비용 한도', new Set(['owner', 'reviewer'])],
+    ['/admin/notices', 'FIDEON 관리 · 필수 고지', new Set(['owner', 'reviewer'])],
   ];
   const get = (p, cookie, headers = {}) => fetch(BASE + p, { redirect: 'manual', headers: { ...(cookie ? { cookie } : {}), ...headers } });
   const who = { owner: ownerC, reviewer: reviewerC, editor: editorC, counselor: counselorC };
@@ -232,6 +233,45 @@ try {
   const nw = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/notice-wiring.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
   let nj = null; try { nj = JSON.parse(nw.stdout.trim().split('\n').pop()); } catch { /* 아래에서 실패 처리 */ }
   check('N15 필수 고지 문구·버전 대조: 같으면 일치, 문구 수정·키 누락·버전 없음은 사유 코드로 감지', nj && nj.n === 3 && nj.same.length === 0 && nj.edited.join() === 'BODY_MISMATCH:collection_purpose' && nj.dropped.join() === 'KEY_EXTRA_IN_DB:collection_purpose' && nj.other.join() === 'NO_DB_TEXTS', (nw.stdout + nw.stderr).slice(0, 160).replace(/\n/g, ' '));
+  // 게시 ON/OFF API(대표 전용): 즉시 상담 반영, 권한·사유·감사 기록
+  const pubUrl = '/api/admin/policies/publish';
+  const pub = (c, body) => adm(pubUrl, c, { method: 'POST', body: JSON.stringify(body) });
+  const pcnt = (a) => n(`select count(*)::int as n from core.audit_logs where action = '${a}'`);
+  const pg0 = await adm(pubUrl, ownerC); const pgj = await pj(pg0);
+  check('PB1 대표 게시 상태 조회 200, 현재 OFF', pg0.status === 200 && pgj.enabled === false && pgj.role === 'owner', `status=${pg0.status}`);
+  const pd = []; for (const [nm, c] of [['편집자', editorC], ['검토자', reviewerC], ['상담원', counselorC], ['무인증', null]]) { const r = await pub(c, { enabled: true, reason: '권한 없는 게시 시도' }); if (![401, 403].includes(r.status)) pd.push(`${nm}:${r.status}`); }
+  check('PB2 게시 변경은 대표만: 편집자·검토자·상담원·무인증 거부, 스위치 OFF 유지', pd.length === 0 && (await flag()) === false, pd.join(' '));
+  const nr = await pub(ownerC, { enabled: true, reason: '' });
+  check('PB3 사유 없으면 422, 스위치 변화 없음', nr.status === 422 && (await flag()) === false, `status=${nr.status}`);
+  const on0 = await pcnt('policy.publish_on'), off0 = await pcnt('policy.publish_off');
+  try {
+    const onR = await pub(ownerC, { enabled: true, reason: 'Next E2E 게시 켜기' });
+    const a1 = await ask('next-e2e-p1', '198.51.100.31');
+    check('PB4 대표 게시 ON(API) → 즉시 AI 상담에 금액·사은품 반영, 감사 기록 1건', onR.status === 200 && (await flag()) === true && a1.text.includes('11,111') && a1.text.includes('3,333') && (await pcnt('policy.publish_on')) === on0 + 1, `status=${onR.status}`);
+    const offR = await pub(ownerC, { enabled: false, reason: 'Next E2E 게시 끄기' });
+    const a2 = await ask('next-e2e-p1', '198.51.100.32');
+    check('PB5 대표 게시 OFF(API) → 즉시 금액 안내 중단, 감사 기록 1건', offR.status === 200 && (await flag()) === false && !/11,111|3,333/.test(a2.text) && (await pcnt('policy.publish_off')) === off0 + 1, `status=${offR.status}`);
+  } finally { await sql.unsafe(`update core.feature_flags set enabled = false where key = 'policy_publish'`); }
+  const bk = await pub(ownerC, { enabled: 'yes', reason: '잘못된 값' });
+  check('PB6 enabled가 불리언이 아니면 422', bk.status === 422 && (await flag()) === false, `status=${bk.status}`);
+  // 필수 고지 입력·버전 관리(대표 입력, 검토자 조회). 입력해도 접수 차단은 코드 상수가 풀리기 전까지 유지
+  const nurl = '/api/admin/notices';
+  const nad = (c, body) => adm(nurl, c, { method: 'POST', body: JSON.stringify(body) });
+  const NB = { version: 'next-e2e-v1', key: 'collection_purpose', body: '[검수용 시험 문구 — 실제 고지 아님]', reason: 'Next E2E 시험 입력' };
+  const nc0 = await n(`select count(*)::int as n from core.notice_texts`);
+  const nd = []; for (const [nm, c] of [['편집자', editorC], ['검토자', reviewerC], ['상담원', counselorC], ['무인증', null]]) { const r = await nad(c, NB); if (![401, 403].includes(r.status)) nd.push(`${nm}:${r.status}`); }
+  check('NA1 고지 문구 입력은 대표만: 그 외 거부, DB 변화 없음', nd.length === 0 && (await n(`select count(*)::int as n from core.notice_texts`)) === nc0, nd.join(' '));
+  const na = await nad(ownerC, NB); const naj = await pj(na);
+  check('NA2 대표 입력 201, sha256 반환·DB 저장, 감사 기록에 본문 없음', na.status === 201 && /^[0-9a-f]{64}$/.test(naj.sha256 ?? '') && (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.text_add' and detail::text like '%시험 문구%'`)) === 0 && (await n(`select count(*)::int as n from core.audit_logs where action = 'notice.text_add'`)) >= 1, `status=${na.status}`);
+  const dup = await nad(ownerC, NB);
+  check('NA3 같은 버전·항목 재입력은 422(덮어쓰기 불가)', dup.status === 422 && (await n(`select count(*)::int as n from core.notice_texts where version = 'next-e2e-v1'`)) === 1, `status=${dup.status}`);
+  const nl = await adm(nurl, reviewerC); const nlj = await pj(nl);
+  check('NA4 검토자 목록 조회 200, 상담원·편집자·무인증 거부', nl.status === 200 && JSON.stringify(nlj).includes('next-e2e-v1') && [401, 403].includes((await adm(nurl, counselorC)).status) && [401, 403].includes((await adm(nurl, editorC)).status) && (await adm(nurl)).status === 401);
+  const ex = await nad(ownerC, { ...NB, key: 'x', extra: 1 });
+  check('NA5 알 수 없는 필드 거부(422)', ex.status === 422, `status=${ex.status}`);
+  const lc0 = await n(`select count(*)::int as n from core.leads`);
+  const blk = await post('/api/leads', { name: '홍길동', phone: '010-1234-5678', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'next-e2e-v1', noticeKeys: ['collection_purpose'], idempotencyKey: 'next-e2e-lead-000000002', turnstileToken: 'ok' });
+  check('NA6 고지 문구를 DB에 입력해도 접수 차단 유지(NOTICE_NOT_CONFIRMED 503), 접수 0건 증가', blk.status === 503 && blk.j?.code === 'NOTICE_NOT_CONFIRMED' && (await n(`select count(*)::int as n from core.leads`)) === lc0, `status=${blk.status} code=${blk.j?.code}`);
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);

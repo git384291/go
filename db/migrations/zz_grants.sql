@@ -114,7 +114,11 @@ grant execute on function
   api.ad_alert_resolve(uuid, uuid, text, uuid, text),
   api.ad_alert_list(uuid, uuid, text, int),
   api.ai_budget_limit_get(uuid, uuid, text),
-  api.ai_budget_limit_set(uuid, uuid, text, int, text)
+  api.ai_budget_limit_set(uuid, uuid, text, int, text),
+  api.policy_publish_get(uuid, uuid, text),
+  api.policy_publish_set(uuid, uuid, text, boolean, text),
+  api.notice_text_list(uuid, uuid, text),
+  api.notice_text_add(uuid, uuid, text, text, text, text, text)
   to app_staff;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)

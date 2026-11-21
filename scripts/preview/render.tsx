@@ -19,6 +19,7 @@ import { AdBudgetLocked, AdBudgetView, type BudgetRow } from '../../src/app/admi
 import { FunnelLocked, FunnelView, type FunnelItem } from '../../src/app/admin/ads/funnel/FunnelView';
 import { AiBudgetLocked, AiBudgetView } from '../../src/app/admin/ai-budget/AiBudgetView';
 import { PolicyAdminView, PolicyLocked, type PolicyRow } from '../../src/app/admin/policies/PolicyAdminView';
+import { NoticesLocked, NoticesView } from '../../src/app/admin/notices/NoticesView';
 import { PageShell } from '../../src/components/Site';
 import { OfficialIntakeCta } from '../../src/components/OfficialIntakeCta';
 import { resolveOfficialIntake, type OfficialIntakeResult } from '../../src/content/officialIntake';
@@ -195,6 +196,11 @@ async function main() {
     ['33-admin-ai-budget-owner', <AiBudgetView key="ai-owner" data={{ role: 'owner', month: '2026-11', limitKrw: 0, usedKrw: 0, unconfirmed: 0, maxLimitKrw: 100000 }} />],
     ['34-admin-ai-budget-reviewer', <AiBudgetView key="ai-rev" data={{ role: 'reviewer', month: '2026-11', limitKrw: 5000, usedKrw: 1200, unconfirmed: 2, maxLimitKrw: 100000 }} />],
     ['35-admin-ai-budget-locked', <AiBudgetLocked key="ai-locked" kind="disabled" />],
+    // 정책 게시 스위치(대표 ON 상태) / 필수 고지 입력·버전 관리(대표·검토자·잠금). 문구는 검수용 가상 문구뿐
+    ['38-admin-policies-publish-on-owner', <PolicyAdminView key="pol-on" items={POLICY_FIXTURE} role="owner" publishOn />],
+    ['39-admin-notices-owner-empty', <NoticesView key="nt-empty" rows={[]} role="owner" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} />],
+    ['40-admin-notices-reviewer-rows', <NoticesView key="nt-rows" role="reviewer" status={{ ready: false, reason: 'NOTICE_NOT_CONFIRMED', codeVersion: '', mismatches: [] }} rows={[{ version: 'sample-v1', notice_key: 'collection_purpose', body: '[검수용 가상 문구 — 실제 고지 아님]', body_sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12', created_at: '2026-11-21T09:00:00Z' }]} />],
+    ['41-admin-notices-locked', <NoticesLocked key="nt-locked" kind="disabled" />],
     // AI 상담창 + 접수 양식(필수 고지 미확정 실제 설정 → 양식이 접수를 막는 상태)
     ['30-consult-ai-with-form', <PageShell key="consult-ai"><section className="section"><ConsultAiChat choice={{ carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }} /></section><section className="section" id="apply" aria-label="가입 상담 신청"><ConsultForm options={[{ value: 'internet_tv', label: '인터넷+TV' }]} kakaoUrl={null} /></section></PageShell>],
     // 가상 등록부를 켠 표시(정상 경로 모양·모바일 넘침·개인정보 미전달 속성 확인용). 공개 화면 아님

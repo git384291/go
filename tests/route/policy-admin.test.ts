@@ -177,7 +177,7 @@ test('PA10 policyAdmin 데이터 접근: 견적 규칙만 import, SQL은 api.pol
   assert.ok(sqls.length >= 5);
   for (const q of sqls) {
     const fns = [...q.matchAll(/\bapi\.([a-z_]+)/g)].map((m) => m[1]);
-    assert.ok(fns.length >= 1 && fns.every((f) => /^policy_(list|create_draft|submit|approve|reject)$/.test(f)), q.slice(0, 60));
+    assert.ok(fns.length >= 1 && fns.every((f) => /^(policy_(list|create_draft|submit|approve|reject|publish_get|publish_set)|notice_text_(list|add))$/.test(f)), q.slice(0, 60));
     assert.doesNotMatch(q, /\b(core|pii|security)\.[a-z_]+/);
     assert.doesNotMatch(q, /commission|settlement|source_ref|reveal_contact/i);
   }
@@ -194,7 +194,7 @@ test('PA10 policyAdmin 데이터 접근: 견적 규칙만 import, SQL은 api.pol
   walk(root);
   const rel = (f: string) => path.relative(root, f).split(path.sep).join('/');
   const adminUsers = files.filter((f) => /server\/admin\/policyAdmin'/.test(readFileSync(f, 'utf8'))).map(rel).sort();
-  assert.deepEqual(adminUsers, ['app/admin/policies/page.tsx', 'app/api/admin/policies/[id]/route.ts', 'app/api/admin/policies/route.ts']);
+  assert.deepEqual(adminUsers, ['app/admin/notices/page.tsx', 'app/admin/policies/page.tsx', 'app/api/admin/notices/route.ts', 'app/api/admin/policies/[id]/route.ts', 'app/api/admin/policies/publish/route.ts', 'app/api/admin/policies/route.ts']);
 });
 
 // ---- PM 11/21 지시 2: JSON 이중 직렬화 회귀 ----
@@ -226,4 +226,41 @@ test('PA12 src 전체: 문자열화한 JSON을 ::jsonb로 직접 캐스트하는
   walk(root);
   const bad = files.filter((f) => /JSON\.stringify\([^`]*\)\}::jsonb/.test(readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
   assert.deepEqual(bad, []);
+});
+
+import { noticeAdd, noticeList, policyPublishGet, policyPublishSet } from '../../src/server/admin/policyAdmin';
+const jj = async (r: Response) => (await r.json()) as Record<string, unknown>;
+const SHA = 'a'.repeat(64);
+
+test('PB1 게시 스위치 닫힘·권한: 환경 미충족 503(DB 0회), 조회는 대표·정책 담당·검토자, 변경은 대표만(DB 호출 전 거부)', async () => {
+  for (const env of [{}, { ...READY_ENV, NODE_ENV: 'production' }]) { const { d, c } = mk({ env }); assert.equal((await policyPublishGet(d)).status, 503); assert.equal((await policyPublishSet(d, { enabled: true, reason: '시험' })).status, 503); assert.equal(c.staff + c.tx, 0); }
+  for (const role of ['owner', 'policy_editor', 'reviewer']) assert.equal((await policyPublishGet(mk({ staff: who(role), tx: () => [{ enabled: false, updated_at: new Date() }] }).d)).status, 200, role);
+  assert.equal((await policyPublishGet(mk({ staff: who('counselor') }).d)).status, 403);
+  for (const role of ['policy_editor', 'reviewer', 'counselor']) { const { d, c } = mk({ staff: who(role) }); assert.equal((await policyPublishSet(d, { enabled: true, reason: '시험 사유' })).status, 403, role); assert.equal(c.tx, 0); }
+  assert.equal((await policyPublishGet(mk({ staff: new StaffAuthError(401, 'X') }).d)).status, 401);
+});
+test('PB2 게시 변경 입력: 정확한 키·boolean·사유 2~500자, 불량은 DB 0회, 성공은 set 함수 1회(값 바인딩)', async () => {
+  for (const b of [{ enabled: true }, { enabled: 'true', reason: '시험' }, { enabled: true, reason: '시험', x: 1 }, null, [], 'x']) { const { d, c } = mk(); assert.equal((await policyPublishSet(d, b)).status, 422); assert.equal(c.tx, 0); }
+  for (const reason of ['', ' ', 'a', 'x'.repeat(501), 5]) { const { d, c } = mk(); const r = await policyPublishSet(d, { enabled: false, reason }); assert.deepEqual([r.status, (await jj(r)).code], [422, 'REASON_REQUIRED']); assert.equal(c.tx, 0); }
+  for (const enabled of [true, false]) { const { d, c } = mk({ tx: () => [{}] }); const r = await policyPublishSet(d, { enabled, reason: '검수용 환경 시험' }); assert.deepEqual([r.status, (await jj(r)).enabled], [200, enabled]); assert.equal(c.sql.length, 1); assert.match(c.sql[0], /api\.policy_publish_set/); }
+});
+test('PB3 게시 조회 응답 검사와 DB 오류 변환(원문 비노출)', async () => {
+  const r = await policyPublishGet(mk({ tx: () => [{ enabled: true, updated_at: new Date('2026-11-21T00:00:00Z') }] }).d);
+  assert.deepEqual([r.status, (await jj(r)).enabled], [200, true]);
+  for (const bad of [[], [{ enabled: 'yes' }], [{ enabled: true }, { enabled: false }]]) assert.equal((await policyPublishGet(mk({ tx: () => bad }).d)).status, 502);
+  for (const [code, st] of [['42501', 403], ['XX000', 503]] as const) { const r2 = await policyPublishSet(mk({ tx: () => Object.assign(new Error('host=10.0.0.1 secret'), { code }) }).d, { enabled: true, reason: '시험 사유' }); assert.equal(r2.status, st); assert.ok(!JSON.stringify(await jj(r2)).includes('secret')); }
+});
+test('NA1 고지 문구: 조회는 대표·검토자, 입력은 대표만, 입력 형식 검사(DB 0회), 성공 201+해시, 중복·형식 오류 코드', async () => {
+  for (const role of ['owner', 'reviewer']) assert.equal((await noticeList(mk({ staff: who(role), tx: () => [] }).d)).status, 200, role);
+  for (const role of ['policy_editor', 'counselor']) assert.equal((await noticeList(mk({ staff: who(role) }).d)).status, 403, role);
+  const ok = { version: 'v1', key: 'sample_key', body: '시험 문구', reason: '시험 입력' };
+  for (const role of ['reviewer', 'policy_editor', 'counselor']) { const { d, c } = mk({ staff: who(role) }); assert.equal((await noticeAdd(d, ok)).status, 403); assert.equal(c.tx, 0); }
+  for (const b of [{ ...ok, extra: 1 }, { version: 'v1', key: 'k', body: 'b' }, null, []]) { const { d, c } = mk(); assert.equal((await noticeAdd(d, b)).status, 422); assert.equal(c.tx, 0); }
+  for (const bad of [{ version: 'bad version' }, { key: 'Bad-Key' }, { body: ' ' }, { body: 'x'.repeat(2001) }, { version: 5 }]) { const { d, c } = mk(); const r = await noticeAdd(d, { ...ok, ...bad }); assert.deepEqual([r.status, (await jj(r)).code], [422, 'INVALID_NOTICE']); assert.equal(c.tx, 0); }
+  { const { d, c } = mk(); assert.equal((await noticeAdd(d, { ...ok, reason: '' })).status, 422); assert.equal(c.tx, 0); }
+  const r = await noticeAdd(mk({ tx: () => [{ sha: SHA }] }).d, ok);
+  assert.deepEqual([r.status, (await jj(r)).sha256], [201, SHA]);
+  assert.equal((await noticeAdd(mk({ tx: () => [{ sha: 'zz' }] }).d, ok)).status, 502);
+  const dup = await noticeAdd(mk({ tx: () => Object.assign(new Error('NOTICE_EXISTS'), { code: '22023' }) }).d, ok);
+  assert.deepEqual([dup.status, (await jj(dup)).code], [422, 'NOTICE_EXISTS']);
 });
