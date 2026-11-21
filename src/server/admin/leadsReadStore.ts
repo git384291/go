@@ -206,6 +206,7 @@ export async function listMaskedLeads(deps: LeadsReadDeps, identity: StaffIdenti
     const items = rows.map((row) => maskedLead(row, who));
     return Object.freeze({ ok: true as const, items: Object.freeze(items) });
   } catch (e) {
+    console.error('LEADLIST_DIAG2 row-invalid', (e as Error)?.constructor?.name, JSON.stringify(rows.map((r) => (r as Record<string, unknown>)?.interest))); // TEMP 진단
     return fail(e instanceof ScopeViolation ? 'SCOPE_VIOLATION' : 'INVALID_DATA');
   }
 }

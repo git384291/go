@@ -147,9 +147,11 @@ export async function runBrowserFlow(c) {
     await adminCtx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: FX }).catch(() => {});
     const ap = await adminCtx.newPage();
     const lr = await adm('/api/admin/leads?limit=20', owner); const lrt = await lr.text();
+    console.log('DIAG interests ' + JSON.stringify(await sql.unsafe(`select interest, count(*)::int as c from core.leads group by 1 order by 1`)));
+    const l1 = await admBase('/api/admin/leads?limit=1', owner); console.log(`DIAG list limit=1 base status=${l1.status}`);
     console.log(`DIAG list api fx status=${lr.status} body=${lrt.slice(0, 120)}`);
     const lr2 = await admBase('/api/admin/leads?limit=20', owner); console.log(`DIAG list api base status=${lr2.status} body=${(await lr2.text()).slice(0, 120)}`);
-    for (const f of ['test-results/next-e2e/next-fixture.log', 'test-results/next-e2e/next.log']) { try { console.log('DIAG ' + f + ': ' + fs.readFileSync(f, 'utf8').split('\n').filter((l) => /LEADLIST_DIAG/.test(l)).slice(-3).join(' || ')); } catch { /* 없음 */ } }
+    for (const f of ['test-results/next-e2e/next-fixture.log', 'test-results/next-e2e/next.log']) { try { console.log('DIAG ' + f + ': ' + fs.readFileSync(f, 'utf8').split('\n').filter((l) => /LEADLIST_DIAG/.test(l) || /LEADLIST_DIAG2/.test(l)).slice(-3).join(' || ')); } catch { /* 없음 */ } }
     check('BF9 목록 API', lr.status === 200 && lrt.includes('010-****-5678'), lrt.slice(0, 60));
     await ap.goto(`${FX}/admin/leads/${leadRow?.id}/packet`, { waitUntil: 'networkidle' });
     await ap.waitForSelector('select[aria-label="열람 사유"]', { timeout: 20000 });
