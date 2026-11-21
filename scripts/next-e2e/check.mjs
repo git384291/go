@@ -332,7 +332,7 @@ try {
   // 문구가 더 추가되면 이전 승인은 최신이 아님(다시 검수 필요)
   await nad(ownerC, { version: 'next-e2e-v1', key: 'not_a_contract', body: '[검수용 시험 문구 2 — 실제 고지 아님]', reason: 'Next E2E 항목 추가' });
   const rl2 = await pj(await adm(rurl, reviewerC));
-  check('RV8 승인 뒤 문구가 추가되면 이전 승인은 "최신 아님"으로 표시', rl2.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === false) && rl2.items?.every((i) => !(i.decision === 'approved' && i.is_current === true)));
+  check('RV8 승인 뒤 문구가 추가되면 이전 승인은 "최신 아님"으로 표시', rl2.items?.some((i) => i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === false) && rl2.items?.every((i) => !(i.version === 'next-e2e-v1' && i.decision === 'approved' && i.is_current === true)));
   await blocked('G4 승인 뒤 문구 변경(항목 추가) 즉시 차단(NOTICE_CHANGED)', await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000004' }), 'NOTICE_CHANGED');
   await blocked('G4b 서버 상수가 옛 항목 그대로면 키 불일치로 차단(NOTICE_KEYS_MISMATCH)', await runFlow({ FLOW_IDEM: 'next-e2e-flow-0000000004', FLOW_ONLY_KEYS: 'collection_purpose' }), 'NOTICE_KEYS_MISMATCH');
   const reap2 = await rev(reviewerC, RB);
