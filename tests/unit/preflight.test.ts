@@ -90,3 +90,12 @@ test('F10 관리자 출처 스위치: db가 설정되면 정책 표시(제거 �
   const on = runChecks({ ADMIN_POLICY_SOURCE: 'db', ADMIN_AD_SOURCE: 'mock' }, { layoutSource });
   assert.deepEqual([byId(on, 'R:ADMIN_POLICY_SOURCE').status, byId(on, 'R:ADMIN_AD_SOURCE').status], ['POLICY', 'OFF']);
 });
+
+test('F11 고지 점검: 현재 상수는 미확정이라 N1 POLICY(접수 차단 유지), 값 비노출, DB 대조는 확인 불가로 남음', () => {
+  const cs = runChecks({ PRIVACY_POLICY_VERSION: 'privacy-x' }, { layoutSource });
+  assert.equal(byId(cs, 'N1').status, 'POLICY');
+  assert.match(byId(cs, 'N1').note, /NOTICE_NOT_CONFIRMED/);
+  assert.equal(byId(cs, 'N2').status, 'POLICY');
+  assert.equal(byId(runChecks({}, { layoutSource }), 'N2').status, 'MISSING');
+  assert.equal(byId(cs, 'N3').status, 'UNVERIFIABLE');
+});

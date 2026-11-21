@@ -42,3 +42,22 @@ export function sameNoticeKeys(cfg: NoticeConfig, sent: readonly string[]): bool
   if (sent.length !== cfg.items.length || new Set(sent).size !== sent.length) return false;
   return cfg.items.every((n) => sent.includes(n.key));
 }
+
+export type NoticeTextRow = { readonly version: string; readonly notice_key: string; readonly body: string };
+
+/**
+ * 화면 상수(NoticeConfig)와 DB 문구(core.notice_texts)의 일치 점검. 사유 코드만 돌려준다(문구 비노출).
+ * 빈 배열이면 같은 버전·같은 키 집합·같은 문구다. 접수 개방 전 점검 전용(읽기만, 접수 가능 여부를 바꾸지 않는다).
+ */
+export function compareNoticeTexts(cfg: NoticeConfig, rows: readonly NoticeTextRow[]): readonly string[] {
+  const mine = rows.filter((r) => r.version === cfg.version);
+  if (cfg.version === '' || mine.length === 0) return ['NO_DB_TEXTS'];
+  const out: string[] = [];
+  const dbKeys = new Map(mine.map((r) => [r.notice_key, r.body]));
+  for (const n of cfg.items) {
+    if (!dbKeys.has(n.key)) out.push(`KEY_MISSING_IN_DB:${n.key}`);
+    else if (dbKeys.get(n.key)!.trim() !== n.body.trim()) out.push(`BODY_MISMATCH:${n.key}`);
+  }
+  for (const k of dbKeys.keys()) if (!cfg.items.some((n) => n.key === k)) out.push(`KEY_EXTRA_IN_DB:${k}`);
+  return out;
+}

@@ -207,6 +207,31 @@ try {
   const lst = await adm('/api/admin/policies?limit=100', ownerC); const lj = await pj(lst);
   check('Q9 대표 정책 목록(Next→DB)에 승인본이 보이고 내부 금액 필드(수수료)는 없음', lst.status === 200 && lj.items?.some((i) => i.id === pid && i.state === 'approved') && !JSON.stringify(lj).includes('commission'), `status=${lst.status}`);
   check('Q10 상담원·무인증 목록 거부', [401, 403].includes((await adm('/api/admin/policies', counselorC)).status) && (await adm('/api/admin/policies')).status === 401);
+  // 정책 승인 → 게시 스위치(DB policy_publish, 검수용 환경에서만) → AI 상담 반영. 게시 OFF면 승인돼도 금액 안내 없음
+  const ask = async (productId, ip) => { const r = await chat({ productId }, ip); return { status: r.status, text: String(r.j?.text ?? '') }; };
+  const flag = async () => (await sql.unsafe(`select enabled from core.feature_flags where key = 'policy_publish'`))[0]?.enabled;
+  check('Q11 정책 게시 스위치 기본 OFF(DB 초기값)', (await flag()) === false);
+  const off1 = await ask('next-e2e-p1', '198.51.100.21');
+  check('Q12 승인됐어도 게시 OFF면 상담은 금액·사은품을 말하지 않음(담당자 확인 안내)', off1.status === 200 && !/11,111|3,333/.test(off1.text), `status=${off1.status}`);
+  // 초안(미승인) 정책은 게시를 켜도 보이지 않는다
+  const upload2 = { ...upload, productId: 'next-e2e-p2', productLabel: '가상 미승인 상품' };
+  const cr2 = await pol(editorC, upload2);
+  await sql.unsafe(`update core.feature_flags set enabled = true where key = 'policy_publish'`);
+  try {
+    const on1 = await ask('next-e2e-p1', '198.51.100.22');
+    check('Q13 게시 ON: 승인된 정책의 월 요금·사은품이 AI 상담 답변에 반영, 수수료·내부 필드 없음', on1.status === 200 && on1.text.includes('11,111') && on1.text.includes('3,333') && !/commission|수수료/.test(on1.text), `status=${on1.status}`);
+    const on2 = await ask('next-e2e-p2', '198.51.100.23');
+    check('Q14 게시 ON이어도 미승인(draft) 정책은 상담에 반영되지 않음', cr2.status === 201 && on2.status === 200 && !/11,111|3,333/.test(on2.text), `draft=${cr2.status}`);
+    const none = await ask('next-e2e-none', '198.51.100.24');
+    check('Q14b 정책 없는 상품은 금액을 만들어 내지 않음', none.status === 200 && !/\d{1,3}(,\d{3})+원/.test(none.text));
+  } finally { await sql.unsafe(`update core.feature_flags set enabled = false where key = 'policy_publish'`); }
+  const off2 = await ask('next-e2e-p1', '198.51.100.25');
+  check('Q15 게시를 다시 끄면 즉시 금액 안내 중단, 스위치 OFF 복구', !/11,111|3,333/.test(off2.text) && (await flag()) === false);
+  check('Q16 이 흐름에서도 AI 사용료 0건(무료 모의 모델)', (await n(`select count(*)::int as n from core.ai_usage_ledger`)) === 0);
+  // 필수 고지: 화면 상수 ↔ DB 문구 대조(읽기 전용), 불일치 사유 코드 감지
+  const nw = spawnSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/next-e2e/notice-wiring.mts'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+  let nj = null; try { nj = JSON.parse(nw.stdout.trim().split('\n').pop()); } catch { /* 아래에서 실패 처리 */ }
+  check('N15 필수 고지 문구·버전 대조: 같으면 일치, 문구 수정·키 누락·버전 없음은 사유 코드로 감지', nj && nj.n === 3 && nj.same.length === 0 && nj.edited.join() === 'BODY_MISMATCH:collection_purpose' && nj.dropped.join() === 'KEY_EXTRA_IN_DB:collection_purpose' && nj.other.join() === 'NO_DB_TEXTS', (nw.stdout + nw.stderr).slice(0, 160).replace(/\n/g, ' '));
   const page = await fetch(`${BASE}/consult/ai`);
   const html = await page.text();
   check('N14 /consult/ai 화면: 200, AI 안내·접수 양식 포함', page.status === 200 && html.includes('상담') && html.includes('가입 상담 신청'), `status=${page.status}`);

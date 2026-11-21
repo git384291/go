@@ -9,6 +9,7 @@ import { ADMIN_AUTH_REQUIRED_ENV, adminAuthMode } from '../../src/server/auth/ad
 import { EXTERNAL_CONSULT_ENABLED } from '../../src/content/channels';
 import { UTM_REGISTRY, validateRegistry } from '../../src/content/utm';
 import { signingKeyFromEnv } from '../../src/server/security/token';
+import { REQUIRED_NOTICES, noticeReadiness } from '../../src/content/requiredNotices';
 import { leadIntakeGate } from '../../src/server/leads/intake';
 
 export type Status = 'OK' | 'MISSING' | 'INVALID' | 'POLICY' | 'OFF' | 'UNVERIFIABLE' | 'INFO';
@@ -68,6 +69,12 @@ export function runChecks(env: Env, files: { layoutSource: string }): Check[] {
   add({ id: 'P7', area: '수집', name: '화면 접수 양식 NEXT_PUBLIC_LEAD_FORM_ENABLED', status: formOn ? 'POLICY' : 'OFF', note: formOn ? '켜짐 — 개방 승인 없음' : '꺼짐(정책대로)' });
   add({ id: 'P8', area: '수집', name: '외부 상담 채널(코드 상수)', status: EXTERNAL_CONSULT_ENABLED ? 'POLICY' : 'OFF', note: EXTERNAL_CONSULT_ENABLED ? '켜짐 — 승인 없음' : '꺼짐(정책대로)' });
   add({ id: 'P9', area: '수집', name: '개인정보 처리 주체·목적·보존·총판 제공 동의', status: 'UNVERIFIABLE', note: '문서·법적 검토 사항. 이 점검으로 확인 불가' });
+
+  // 3. 필수 고지 문구·버전 연결(문구 비노출, 사유 코드만)
+  const nr = noticeReadiness(REQUIRED_NOTICES, (env.PRIVACY_POLICY_VERSION ?? '').trim());
+  add({ id: 'N1', area: '고지', name: '필수 고지 확정 여부(코드 상수 REQUIRED_NOTICES)', status: nr.ready ? 'INFO' : 'POLICY', note: nr.ready ? '확정됨·형식 OK — 접수 개방은 별도 승인 필요' : `미확정/불완전(${nr.reason}) — 접수 차단 유지` });
+  add({ id: 'N2', area: '고지', name: '처리방침 버전 PRIVACY_POLICY_VERSION', status: !has(env, 'PRIVACY_POLICY_VERSION') ? 'MISSING' : REQUIRED_NOTICES.version !== '' && REQUIRED_NOTICES.version === (env.PRIVACY_POLICY_VERSION ?? '').trim() ? 'OK' : 'POLICY', note: !has(env, 'PRIVACY_POLICY_VERSION') ? '없음' : REQUIRED_NOTICES.version === (env.PRIVACY_POLICY_VERSION ?? '').trim() && REQUIRED_NOTICES.version !== '' ? '고지 버전과 일치' : '고지 버전과 불일치 또는 고지 미확정' });
+  add({ id: 'N3', area: '고지', name: '화면 고지 문구 = DB core.notice_texts 문구', status: 'UNVERIFIABLE', note: '이 점검은 DB에 접속하지 않음. DB 대조는 compareNoticeTexts(시험: tests/unit, next-e2e N15)로 하며, 실제 확정 문구·버전은 DB에 같은 값을 넣은 뒤 대조' });
 
   // 4. 관리자 인증
   const mode = adminAuthMode(env);

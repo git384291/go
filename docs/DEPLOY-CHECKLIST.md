@@ -34,3 +34,7 @@
 
 ## F. 접수 개방 전 마지막 확인 (모두 승인 필요)
 1. 실제 필수 고지 문구·버전 확정(`NOTICE_NOT_CONFIRMED`가 풀리는 유일한 조건) 2. 개인정보 처리 주체·목적·보존·제공 동의 법적 검토(P9) 3. `npm run test:next-e2e`·CI 전체 통과 4. `LEAD_INTAKE_MODE`·`NEXT_PUBLIC_LEAD_FORM_ENABLED` 개방 승인.
+
+## G. 정책 게시 스위치·필수 고지 (기준 b54a27c 이후)
+- 정책 **게시**는 DB 스위치 `policy_publish`(기본 OFF, 대표만 `api.set_feature_flag`로 변경·감사 기록)다. 승인만으로는 상담에 금액이 나가지 않는다. 운영은 OFF 유지, 켜는 것은 검수용 환경에서만(자동 검증: next-e2e Q11~Q16).
+- 필수 고지: 코드 상수 `REQUIRED_NOTICES`(현재 미확정 → 접수 차단)와 DB `core.notice_texts`에 **같은 버전·같은 문구**를 넣어야 한다. 대조는 `compareNoticeTexts`(preflight N1~N3, next-e2e N15). 문구는 임의로 만들지 않는다.
