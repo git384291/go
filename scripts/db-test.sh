@@ -69,6 +69,7 @@ run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
 run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM 11/22 P1): 0020 계정 합산 한도·fail-closed 검증
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
+run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -647,6 +648,14 @@ D -f db/migrations/0022_ad_monitor_lease.sql >/dev/null
 back22=$(D -At -c "select to_regprocedure('api.ad_monitor_begin(uuid)') is not null")
 [ "$gone22" = t ] && [ "$back22" = t ] || { echo "FAIL | M22 0022 롤백 gone=$gone22 재적용=$back22" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M22 감시 중복 실행 방지 0022 롤백: 함수 제거·시작 기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0023 대표 직접 연락 동의: 적용 → 롤백(함수 제거, 기록 보존) → 재적용
+D -f db/migrations/0023_lead_followups.sql >/dev/null
+D -f db/rollback/0023_down.sql >/dev/null
+gone23=$(D -At -c "select (to_regprocedure('api.followup_request(text,text,text,text)') is null and to_regprocedure('api.followup_list(uuid,uuid,text)') is null and to_regclass('core.lead_followups') is not null)")
+D -f db/migrations/0023_lead_followups.sql >/dev/null
+back23=$(D -At -c "select to_regprocedure('api.followup_done(uuid,uuid,text,uuid)') is not null")
+[ "$gone23" = t ] && [ "$back23" = t ] || { echo "FAIL | M23 0023 롤백 gone=$gone23 재적용=$back23" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M23 대표 직접 연락 동의 0023 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

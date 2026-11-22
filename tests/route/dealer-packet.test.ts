@@ -1,7 +1,7 @@
 // PM 11/22: 총판 전달용 신청서 열람·복사·이력 서버 모듈 시험. 가짜 의존성만 쓴다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dealerPacketGet, handoffList, handoffRecord, type DealerPacketDeps } from '../../src/server/admin/dealerPacket';
+import { dealerPacketGet, followupDone, followupList, handoffList, handoffRecord, type DealerPacketDeps } from '../../src/server/admin/dealerPacket';
 import type { NoticeConfig } from '../../src/content/requiredNotices';
 import { StaffAuthError } from '../../src/server/auth/staffAssertion';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
@@ -149,4 +149,30 @@ test('DP-AM 변경 요청: 원본 packet은 그대로, 변경 항목만 이전�
   e.d.runInTransaction = async (fn) => fn((async (s: TemplateStringsArray) => { if (/application_amendments/.test(s.join('?'))) throw Object.assign(new Error('x'), { code: '22023' }); return [row()]; }) as never);
   const je = (await (await dealerPacketGet(e.d, ID, R)).json()) as { ok: boolean; amendments: unknown[]; amendmentsError: boolean };
   assert.deepEqual([je.ok, je.amendments.length, je.amendmentsError], [true, 0, true]);
+});
+
+test('DP-FU 대표 후속 연락 목록: 대표만, 가린 이름·관심·희망 시간만(연락처 원문 없음), 완료는 leadId만 받고 NOT_PENDING은 400', async () => {
+  for (const role of ['counselor', 'reviewer', 'policy_editor']) {
+    const { d, c } = mk({ staff: who(role) });
+    assert.equal((await followupList(d)).status, 403, role);
+    assert.equal((await followupDone(d, { leadId: ID })).status, 403, role);
+    assert.equal(c.tx, 0, role);
+  }
+  assert.equal((await followupList(mk({ env: {} }).d)).status, 503);
+  const { d, c } = mk({ rows: [{ lead_id: ID, name_masked: '홍*동', interest: 'internet_tv', contact_time: '저녁', requested_at: 't' }] });
+  const r = await followupList(d);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('Cache-Control'), 'private, no-store');
+  const j = await r.json() as { items: Record<string, unknown>[] };
+  assert.deepEqual(Object.keys(j.items[0]).sort(), ['contactTime', 'interest', 'leadId', 'nameMasked', 'requestedAt']);
+  assert.ok(c.sql[0].includes('api.followup_list'));
+  for (const bad of [null, {}, { leadId: 'x' }, { leadId: ID, extra: 1 }]) {
+    const m = mk();
+    assert.equal((await followupDone(m.d, bad)).status, 400);
+    assert.equal(m.c.tx, 0);
+  }
+  const ok = mk();
+  assert.equal((await followupDone(ok.d, { leadId: ID })).status, 200);
+  assert.ok(ok.c.sql[0].includes('api.followup_done'));
+  assert.equal((await followupDone(mk({ err: { code: '22023', message: 'NOT_PENDING' } }).d, { leadId: ID })).status, 400);
 });

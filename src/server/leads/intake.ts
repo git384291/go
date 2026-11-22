@@ -43,6 +43,8 @@ export const LeadRequestSchema = z
     utmCampaign: optionalShort(100),
     // 총판 전달용 신청서(AI 상담 도우미 답변). 항목·민감정보 검사는 validateApplication이 한다(아래). 없어도 접수는 된다
     application: z.record(z.string(), z.unknown()).optional(),
+    // PM 11/22 ② 7: 대표 직접 연락 동의(선택). 체크했을 때만 true로 온다. 대표 후속 연락 목록(api.followup_request)에 올린다
+    callbackConsent: z.literal(true).optional(),
   })
   .strict();
 
@@ -79,6 +81,9 @@ export type CreateLeadArgs = {
   ipHash: string;
 };
 
+/** api.followup_request 인자(대표 직접 연락 동의, 같은 트랜잭션). 서버 서명 포함 */
+export type FollowupArgs = { token: string; idempotencyKey: string; phoneHmac: string; privacyVersion: string };
+
 /** api.application_save 인자(같은 트랜잭션에서 create_lead 뒤에 호출). 서버 서명 포함 */
 export type ApplicationArgs = {
   token: string; idempotencyKey: string; payloadEnc: string; summary: string;
@@ -108,7 +113,7 @@ export type IntakeContext = {
  * 신뢰할 수 있는 서버에서만 실행: 입력 검증 → 동의 확인 → 정규화 → 암호화·HMAC → 전체 필드 서명.
  * DB(api.create_lead)는 서명을 다시 검증하므로, 이 함수를 거치지 않은 값은 저장되지 않는다.
  */
-export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLeadArgs & { application?: ApplicationArgs } {
+export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLeadArgs & { application?: ApplicationArgs; followup?: FollowupArgs } {
   const parsed = LeadRequestSchema.safeParse(body);
   if (!parsed.success) {
     // 구버전 화면(고지 해시를 보내지 않음)은 입력 오류가 아니라 '오래된 화면'으로 닫는다 — 화면이 새로고침을 안내한다
@@ -155,7 +160,10 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
   };
 
   const token = signToken('lead', leadSignedFields(a), ctx.signingKey, ctx.nowSeconds);
-  if (input.application === undefined) return { token, ...a };
+  const followup: FollowupArgs | undefined = input.callbackConsent === true
+    ? { token: signToken('lead', ['followup', input.idempotencyKey, a.phoneHmac, input.privacyVersion], ctx.signingKey, ctx.nowSeconds), idempotencyKey: input.idempotencyKey, phoneHmac: a.phoneHmac, privacyVersion: input.privacyVersion }
+    : undefined;
+  if (input.application === undefined) return followup ? { token, ...a, followup } : { token, ...a };
   // 신청서: 형식·민감정보(주민번호·계좌·자동이체 등) 검사 → 본문은 암호화, 요약(범주형·누락 목록)만 평문. 주소·메모는 요약에 넣지 않는다
   const v = validateApplication(input.application);
   if (!v.ok) throw new LeadRejected(v.code);
@@ -170,7 +178,7 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
       phoneHmac: a.phoneHmac, contentHmac,
     },
   };
-  return { token, ...a, application };
+  return followup ? { token, ...a, application, followup } : { token, ...a, application };
 }
 
 /** DB의 array[...] 순서와 동일. boolean은 PostgreSQL의 text 변환('true'/'false')과 맞춘다 */

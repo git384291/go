@@ -21,7 +21,13 @@ export type ChatDeps = {
 export type ChatInput = { readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string };
 export type ChatReply =
   | { readonly ok: false; readonly code: 'INVALID_INPUT' }
-  | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' };
+  | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' | 'callback'; readonly callbackPrompt?: string };
+
+/** PM 11/22 ② 7: 승인 견적으로 답할 수 없거나 고객이 잘 모르겠다고 하면 대표 직접 연락 동의를 묻는다(동의는 신청 양식의 체크로만 받는다) */
+export const CALLBACK_PROMPT = '대표가 직접 연락드려도 될까요? 동의하시면 아래 신청 양식에서 "대표 직접 연락에 동의합니다"를 선택해 주세요.';
+const UNSURE = /모르|모르겠|헷갈|어렵|복잡|어떻게\s*해야|뭐가\s*좋|추천해|글쎄|확실하지|이해가\s*안/;
+export function needsCallback(message: string, kind: QuoteAnswer['kind']): boolean { return kind !== 'quote' || UNSURE.test(message); }
+const withCallback = (r: Extract<ChatReply, { ok: true }>, message: string): ChatReply => needsCallback(message, r.kind) ? { ...r, next: 'callback', callbackPrompt: CALLBACK_PROMPT } : r;
 
 // 혜택 약속 검사(PM 11/22 P1): 견적 유무와 관계없이, AI가 말한 혜택은 서버가 승인 정책 값으로 계산한 허용치(allow)와 대조한다.
 // 띄어쓰기·기호로 쪼갠 우회("상 품-권")를 막으려고 글자·숫자만 남겨 비교한다. 확인할 수 없으면 막고 승인 안내문(fallback)으로 닫는다.
@@ -56,7 +62,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const approved = await answerQuote(deps.provider, {
     supplierId: deps.supplierId, segment: 'household', carrier: input.carrier, productId: input.productId, regionCode: input.regionCode, confirmedBundles: { known: false },
   }, now);
-  const fallback = (): ChatReply => ({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' });
+  const fallback = (): ChatReply => withCallback({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' }, m);
   const model = deps.model;
   if (!model) return fallback();
   const hold = await deps.budget.reserve(model.costPerCallKrw);
@@ -72,7 +78,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     const guarded = guardAiReply(reply, approved);
     if (guarded.text !== reply) return fallback();
     if (!benefitClaimsAllowed(reply, approved)) return fallback();
-    return { ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' };
+    return withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m);
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
     if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(model.costPerCallKrw);

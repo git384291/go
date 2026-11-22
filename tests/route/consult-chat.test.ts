@@ -279,3 +279,18 @@ test('MB4 정책값 확인 불가(조회 실패·정책 없음)면 금액·할�
     }
   }
 });
+
+test('CB 대표 직접 연락 동의 질문: 승인 견적이 없거나 고객이 잘 모르겠다고 하면 next=callback·고정 문구, 견적+일반 질문은 signup', async () => {
+  const { needsCallback, CALLBACK_PROMPT } = await import('../../src/server/consult/chatAnswer');
+  assert.equal(needsCallback('요금 알려주세요', 'needs_review'), true);
+  assert.equal(needsCallback('잘 모르겠어요', 'quote'), true);
+  assert.equal(needsCallback('뭐가 좋은지 헷갈려요', 'quote'), true);
+  assert.equal(needsCallback('설치 언제 돼요?', 'quote'), false);
+  assert.ok(CALLBACK_PROMPT.startsWith('대표가 직접 연락드려도 될까요?'));
+  assert.ok(!/\d/.test(CALLBACK_PROMPT));  const none = await answerChat(deps({ provider: () => [] }), input(), NOW);
+  assert.ok(none.ok && none.next === 'callback' && none.callbackPrompt === CALLBACK_PROMPT && none.text === NEEDS_REVIEW_GUIDANCE);
+  const unsure = await answerChat(deps(), input('잘 모르겠어요'), NOW);
+  assert.ok(unsure.ok && unsure.kind === 'quote' && unsure.next === 'callback');
+  const plain = await answerChat(deps(), input(), NOW);
+  assert.ok(plain.ok && plain.next === 'signup' && plain.callbackPrompt === undefined);
+});

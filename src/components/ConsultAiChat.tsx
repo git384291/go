@@ -37,13 +37,15 @@ export function ConsultAiChat({ choice, application, intakeOpen = false }: { cho
     setMsgs((m) => [...m, { from: 'me', text: message }]);
     setText('');
     let reply = SAFE;
+    let ask: string | null = null; // 대표 직접 연락 동의 질문(서버가 정한 고정 문구만)
     try {
       const res = await fetch('/api/consult/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message, ...(session ? { session } : {}), ...campaignOf() }) });
-      const j = (await res.json()) as { ok?: boolean; text?: unknown; session?: unknown };
+      const j = (await res.json()) as { ok?: boolean; text?: unknown; session?: unknown; next?: unknown; callbackPrompt?: unknown };
       if (res.ok && j.ok === true && typeof j.text === 'string') reply = j.text;
+      if (res.ok && j.ok === true && j.next === 'callback' && typeof j.callbackPrompt === 'string' && j.callbackPrompt.length <= 200) ask = j.callbackPrompt;
       if (typeof j.session === 'string' && j.session.length <= 200) setSession(j.session);
     } catch { /* 안전 안내문 유지 */ }
-    setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(appRef.current ? [{ from: 'assist' as const, text: assistFollowUp(appRef.current, intakeOpenRef.current) }] : [])]);
+    setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(ask ? [{ from: 'ai' as const, text: ask }] : []), ...(appRef.current ? [{ from: 'assist' as const, text: assistFollowUp(appRef.current, intakeOpenRef.current) }] : [])]);
     setBusy(false);
   }
   return (

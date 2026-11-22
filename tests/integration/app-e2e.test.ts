@@ -23,6 +23,7 @@ import { mockPlatform, type AdPlatform } from '../../src/server/advertising/plat
 import { adBudgetAction, adBudgetOverview, type AdBudgetDeps } from '../../src/server/admin/adBudget';
 import { createPolicyDraft, listPolicies, policyAction, type PolicyAdminDeps } from '../../src/server/admin/policyAdmin';
 import type { StaffIdentity } from '../../src/server/auth/staffSession';
+import { followupDone, followupList, type DealerPacketDeps } from '../../src/server/admin/dealerPacket';
 
 const SOCK = process.env.FIDEON_TEST_PGSOCK ?? '/tmp';
 const PORT = Number(process.env.FIDEON_TEST_PGPORT ?? 54329);
@@ -638,4 +639,32 @@ test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수
   } finally {
     await admin`update core.ai_budget_config set monthly_limit_krw = 0 where singleton`;
   }
+});
+
+test('E16 대표 직접 연락 동의(PM 11/22 ② 7): 고객이 잘 모르면 동의 질문 → 동의 체크 접수 → 같은 트랜잭션 기록 → 대표만 목록(가린 정보)·완료, 미동의 접수는 목록에 없음', async () => {
+  const chat = { provider: () => [], supplierId: 'supplier-a', model: mockModel, budget: createAiBudget({}) };
+  const ask = await answerChat(chat, { message: '잘 모르겠어요', carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1' }, new Date());
+  assert.ok(ask.ok && ask.next === 'callback' && typeof ask.callbackPrompt === 'string' && ask.callbackPrompt.startsWith('대표가 직접 연락드려도 될까요?'));
+  const deps = (staff: StaffIdentity): DealerPacketDeps => ({
+    env: () => ({ ADMIN_LEADS_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_1_abcdef01' }),
+    mode: () => 'supabase', requireStaff: async () => staff,
+    runInTransaction: (fn) => withRoleOn(app, 'staff', (tx) => fn(tx as never)),
+    decrypt: () => { throw new Error('not used'); }, quoteFor: async () => ({ kind: 'needs_review', text: '' }),
+    notices: () => TEST_NOTICES as never, privacyVersion: () => '', now: () => new Date(),
+  });
+  const items = async () => ((await (await followupList(deps(owner))).json()) as { items: { leadId: string; nameMasked: string }[] }).items;
+  const before = (await items()).length;
+  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e16-nocallback-000001', phone: '010-6666-1111', name: '김일육' }), ctx({ clientIp: '203.0.113.161' }), run), { ok: true, outcome: 'created' });
+  assert.equal((await items()).length, before, '미동의 접수는 목록에 없음');
+  assert.deepEqual(await submitLead(body({ idempotencyKey: 'e16-callback-00000001', phone: '010-6666-2222', name: '김이육', callbackConsent: true }), ctx({ clientIp: '203.0.113.162' }), run), { ok: true, outcome: 'created' });
+  const list = await items();
+  assert.equal(list.length, before + 1);
+  const mine = list[list.length - 1];
+  assert.ok(!JSON.stringify(list).includes('6666') && !JSON.stringify(list).includes('김이육'), '목록에 연락처·이름 원문 없음');
+  assert.equal((await followupList(deps(editor))).status, 403);
+  assert.equal((await followupDone(deps(editor), { leadId: mine.leadId })).status, 403);
+  assert.equal((await followupDone(deps(owner), { leadId: mine.leadId })).status, 200);
+  assert.equal((await items()).length, before);
+  const [a] = await admin`select count(*)::int as n from core.audit_logs where action in ('followup.request', 'followup.done') and target_id = ${mine.leadId}::uuid`;
+  assert.equal(a.n, 2);
 });

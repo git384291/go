@@ -113,3 +113,15 @@ test('IN2 고지 버전 불일치·항목 확인 누락·중복·추가 키는 �
 test('IN3 처리방침 버전과 고지 버전이 다르면(설정 오류) 거부', () => {
   assert.equal(code(() => buildCreateLeadArgs(valid, { ...ctx, notices: { ...ctx.notices, version: 'other' } })), 'NOTICE_NOT_CONFIRMED');
 });
+
+test('I-FU 대표 직접 연락 동의: 체크(true)일 때만 서명된 후속 연락 인자 생성, false·문자열은 거부, 서명은 키·연락처 해시·처리방침 버전을 덮는다', () => {
+  assert.equal(buildCreateLeadArgs(valid, ctx).followup, undefined);
+  const a = buildCreateLeadArgs({ ...valid, callbackConsent: true }, ctx);
+  assert.ok(a.followup);
+  assert.equal(a.followup.phoneHmac, a.phoneHmac);
+  assert.equal(a.followup.idempotencyKey, valid.idempotencyKey);
+  assert.equal(a.followup.privacyVersion, 'privacy-test-v1');
+  assert.equal(a.followup.token, signToken('lead', ['followup', valid.idempotencyKey, a.phoneHmac, 'privacy-test-v1'], ctx.signingKey, ctx.nowSeconds));
+  assert.ok(!JSON.stringify(a.followup).includes('010'));
+  for (const v of [false, 'true', 1]) assert.equal(code(() => buildCreateLeadArgs({ ...valid, callbackConsent: v }, ctx)), 'INVALID_INPUT');
+});

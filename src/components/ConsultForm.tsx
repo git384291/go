@@ -156,6 +156,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
         consent,
         marketing: f.get('marketing') === 'on',
       };
+      const callback = f.get('callback') === 'on'; // [선택] 대표 직접 연락 동의(PM 11/22 ② 7)
 
       const fieldErrors = validateConsultInput(input);
       setErrors(fieldErrors);
@@ -195,7 +196,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
       }
 
       keeper.current ??= new IdempotencyKeeper(newKey);
-      const idempotencyKey = keeper.current.keyFor(submissionFingerprint(input, PRIVACY_VERSION) + (application ? JSON.stringify(application) : ''));
+      const idempotencyKey = keeper.current.keyFor(submissionFingerprint(input, PRIVACY_VERSION) + (application ? JSON.stringify(application) : '') + (callback ? '|callback' : ''));
       // 고객에게 실제로 보여 준 문구의 해시(서버가 자기 상수·DB 승인 문구와 대조한다). 계산할 수 없으면(https·localhost 아님) 요청을 만들지 않는다
       let shownHashes: Record<string, string>;
       try {
@@ -233,6 +234,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
             noticeHashes: shownHashes,
             idempotencyKey,
             ...(application ? { application } : {}),
+            ...(callback ? { callbackConsent: true } : {}),
             turnstileToken: token,
             ...currentAttribution(),
           }),
@@ -354,6 +356,10 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
           <label className="check">
             <input type="checkbox" name="marketing" />
             <span><b>[선택]</b> 요금 혜택 등 광고성 정보를 문자로 받겠습니다.</span>
+          </label>
+          <label className="check">
+            <input type="checkbox" name="callback" />
+            <span><b>[선택]</b> 대표 직접 연락에 동의합니다. 내용을 잘 모르시면 대표가 남겨 주신 번호로 직접 연락드립니다.</span>
           </label>
         </div>
 

@@ -43,12 +43,12 @@ function noticeReady(deps: DealerPacketDeps, version: unknown, keys: unknown): b
   } catch { return false; }
 }
 
-async function gate(deps: DealerPacketDeps, id: string, roles: readonly string[]): Promise<StaffIdentity | Response> {
+async function gate(deps: DealerPacketDeps, id: string | null, roles: readonly string[]): Promise<StaffIdentity | Response> {
   let ready = false;
   try { ready = dbReadReady(deps.env()); } catch { ready = false; }
   if (!ready) return fail('DEALER_PACKET_DISABLED', 503);
   if (deps.mode() !== 'supabase') return fail('ADMIN_AUTH_DISABLED', 503);
-  if (!UUID.test(id)) return fail('INVALID_ID', 400);
+  if (id !== null && !UUID.test(id)) return fail('INVALID_ID', 400);
   let who: StaffIdentity;
   try { who = await deps.requireStaff(); } catch (e) {
     if (e instanceof StaffAuthError) return fail(e.status === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN', e.status === 401 ? 401 : 403);
@@ -58,7 +58,7 @@ async function gate(deps: DealerPacketDeps, id: string, roles: readonly string[]
   return who;
 }
 
-const DB_CODES = new Set(['REASON_REQUIRED', 'PACKET_NOT_VIEWED', 'INVALID_EVENT', 'NOTE_REQUIRED', 'INVALID_INPUT', 'REVEAL_RATE_LIMITED']);
+const DB_CODES = new Set(['NOT_PENDING', 'REASON_REQUIRED', 'PACKET_NOT_VIEWED', 'INVALID_EVENT', 'NOTE_REQUIRED', 'INVALID_INPUT', 'REVEAL_RATE_LIMITED']);
 function dbError(e: unknown): Response {
   const err = (e ?? {}) as { code?: unknown; message?: unknown };
   if (err.code === '42501') return fail('FORBIDDEN', 403);
@@ -164,5 +164,32 @@ export async function handoffList(deps: DealerPacketDeps, id: string): Promise<R
       tx`select event, note, actor_id, created_at from api.handoff_list(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${id}::uuid)`)) as readonly Record<string, unknown>[];
     if (!Array.isArray(rows) || rows.length > 500) return fail('INVALID_DATA', 502);
     return json({ ok: true, items: rows.map((r) => ({ event: r.event, note: r.note ?? null, actorId: r.actor_id, createdAt: r.created_at })) }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+/**
+ * 대표 후속 연락 목록(PM 11/22 ② 7: 고객이 '대표 직접 연락'에 동의한 리드). 대표만(DB가 최종 판정).
+ * 가린 이름·관심 상품·연락 희망 시간만 돌려준다. 연락처 원문은 기존 연락처 열람(사유·감사 기록)으로만 본다.
+ */
+export async function followupList(deps: DealerPacketDeps): Promise<Response> {
+  const g = await gate(deps, null, ROLES);
+  if (g instanceof Response) return g;
+  try {
+    const rows = (await deps.runInTransaction(async (tx) =>
+      tx`select lead_id, name_masked, interest, contact_time, requested_at from api.followup_list(${g.actor}::uuid, ${g.session}::uuid, ${g.token})`)) as readonly Record<string, unknown>[];
+    if (!Array.isArray(rows) || rows.length > 200) return fail('INVALID_DATA', 502);
+    return json({ ok: true, items: rows.map((r) => ({ leadId: r.lead_id, nameMasked: r.name_masked, interest: r.interest, contactTime: r.contact_time ?? null, requestedAt: r.requested_at })) }, 200);
+  } catch (e) { return dbError(e); }
+}
+
+/** 후속 연락 완료 처리(대표만, 추가 전용 기록·감사) */
+export async function followupDone(deps: DealerPacketDeps, body: unknown): Promise<Response> {
+  const id = isObj(body) && Object.keys(body).length === 1 && typeof body.leadId === 'string' ? body.leadId : '';
+  if (!UUID.test(id)) return fail('INVALID_INPUT', 400);
+  const g = await gate(deps, id, ROLES);
+  if (g instanceof Response) return g;
+  try {
+    await deps.runInTransaction(async (tx) => tx`select api.followup_done(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${id}::uuid)`);
+    return json({ ok: true }, 200);
   } catch (e) { return dbError(e); }
 }

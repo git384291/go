@@ -89,6 +89,7 @@ grant execute on function
   api.consult_event_record(text, text),   -- 0012: 상담 시작 건수(개인정보 없음)
   api.notice_intake_gate(text, jsonb),    -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
   api.application_save(text, text, text, text),  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
+  api.followup_request(text, text, text, text),  -- 0023: 서버 서명이 있어야 기록되는 대표 직접 연락 동의
   api.application_amend(text, text, text, text, text, text)  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
   to app_public;
 
@@ -135,7 +136,9 @@ grant execute on function
   api.ad_launch_paused(uuid, uuid, text, text),
   api.ad_launch_resolve(uuid, uuid, text, text, text, text, text),
   api.application_amendments(uuid, uuid, text, uuid),   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
-  api.ad_spend_request_window(uuid, uuid, text, text, int, text)   -- 0021: 집행 기간·날짜별 최대 청구액 판정
+  api.ad_spend_request_window(uuid, uuid, text, text, int, text),   -- 0021: 집행 기간·날짜별 최대 청구액 판정
+  api.followup_list(uuid, uuid, text),   -- 0023: 대표 후속 연락 목록(대표만)
+  api.followup_done(uuid, uuid, text, uuid)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행

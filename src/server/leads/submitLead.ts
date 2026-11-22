@@ -43,6 +43,8 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
           if (saved === 'skipped') outcome = r === 'amended' ? 'amended' : r === 'same' ? 'already' : 'created';
         }
       }
+      // 대표 직접 연락 동의: 같은 트랜잭션, 같은 연락처의 최신 리드에 연결(새 접수·재접수 모두). 실패하면 접수도 함께 취소된다
+      if (a.followup) await tx`select api.followup_request(${a.followup.token}, ${a.followup.idempotencyKey}, ${a.followup.phoneHmac}, ${a.followup.privacyVersion})`;
       return null;
     });
     return { ok: true, outcome };
