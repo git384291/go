@@ -25,9 +25,12 @@ export type LaunchRequest = {
   readonly requestKey: string;
   /** 플랫폼 쪽 일 예산 상한(원). 어댑터는 이 값 이하로 설정해야 한다 */
   readonly platformDailyBudgetKrw: number;
+  /** 매체 종료일(YYYY-MM-DD, 계정 시간대 Asia/Seoul). DB가 승인 만료 전으로 정한 값. 어댑터는 end_date_time = 이 날 23:59:59로 설정한다 */
+  readonly endDate: string;
   readonly deadlineAt: number;
 };
-export type LaunchResult = { readonly externalId: string; readonly dailyBudgetKrw: number };
+/** endVerified: 매체에서 다시 읽은 종료일·계정 시간대가 요청과 정확히 같을 때만 true. 아니면 서버가 즉시 중지·집행 금지 */
+export type LaunchResult = { readonly externalId: string; readonly dailyBudgetKrw: number; readonly endVerified: boolean };
 export type PlatformRef = { readonly campaign: string; readonly externalId: string | null };
 export type CallOpts = { readonly deadlineAt: number };
 export type AdPlatform = {
@@ -79,7 +82,7 @@ const hash = (s: string) => { let h = 2166136261; for (const c of s) h = Math.im
 export const mockPlatform: AdPlatform = Object.freeze({
   name: 'mock',
   live: false,
-  async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}`, dailyBudgetKrw: req.platformDailyBudgetKrw }; },
+  async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}`, dailyBudgetKrw: req.platformDailyBudgetKrw, endVerified: true }; },
   async pause() { return { paused: true }; },
   async activeCampaignCount() { return 0; },
   async fetchPerformance(ref, day) {

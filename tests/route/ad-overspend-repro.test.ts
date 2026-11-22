@@ -16,7 +16,7 @@ const GOOGLE_MAX_DAY_MULTIPLIER = 2; // Google 도움말: 특정일 평균 일�
 
 /** 가짜 Google 계정: 예산·캠페인·상태를 기억하고, 하루 지출은 '일예산 × 배수'로 흉내 낸다(Google 2배 규칙의 최악값) */
 function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean; externalActive?: number; listFails?: boolean } = {}) {
-  const budgets = new Map<string, number>(); const camps = new Map<string, { budget: string; status: string }>();
+  const budgets = new Map<string, number>(); const camps = new Map<string, { budget: string; status: string; end?: string }>();
   let n = 100;
   const t: BodyTransport = async (url, init) => {
     const ok = (j: unknown) => ({ status: 200, body: stream(JSON.stringify(j)) });
@@ -25,7 +25,7 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
     if (url.endsWith('campaignBudgets:mutate')) { const id = `customers/${CID}/campaignBudgets/${++n}`; budgets.set(id, Number(body.operations[0].create.amountMicros) / 1e6); return ok({ results: [{ resourceName: id }] }); }
     if (url.endsWith('campaigns:mutate')) {
       const op = body.operations[0];
-      if (op.create) { const id = `customers/${CID}/campaigns/${++n}`; camps.set(id, { budget: op.create.campaignBudget, status: op.create.status }); return ok({ results: [{ resourceName: id }] }); }
+      if (op.create) { const id = `customers/${CID}/campaigns/${++n}`; camps.set(id, { budget: op.create.campaignBudget, status: op.create.status, end: op.create.endDateTime }); return ok({ results: [{ resourceName: id }] }); }
       if (o.pauseFails === 'throw') throw new Error('ECONNRESET');
       if (o.pauseFails === 'http500') return { status: 500, body: stream('{}') };
       camps.get(op.update.resourceName)!.status = 'PAUSED'; return ok({ results: [{ resourceName: op.update.resourceName }] });
@@ -38,7 +38,7 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
         return ok({ results: Array.from({ length: mine + (o.externalActive ?? 0) }, (_, i) => ({ campaign: { id: String(9000 + i) } })) });
       } const id = q.match(/campaign\.id = (\d+)/)?.[1];
       const c = camps.get(`customers/${CID}/campaigns/${id}`);
-      if (/amount_micros/.test(q)) return ok({ results: [{ campaignBudget: { amountMicros: String(budgets.get(c!.budget)! * 1e6) } }] });
+      if (/amount_micros/.test(q)) return ok({ results: [{ campaignBudget: { amountMicros: String(budgets.get(c!.budget)! * 1e6) }, campaign: { endDateTime: c!.end }, customer: { timeZone: 'Asia/Seoul' } }] });
       return ok({ results: o.reportRows === false ? [] : [{ metrics: { impressions: '10', clicks: '1', costMicros: String(budgets.get(c!.budget)! * GOOGLE_MAX_DAY_MULTIPLIER * 1e6) } }] });
     }
     throw new Error('unexpected url');
@@ -50,7 +50,7 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
 const plat = (t: BodyTransport, initialStatus: 'ENABLED' | 'PAUSED' = 'ENABLED') => createGoogleAdsPlatform({ transport: t, clientId: 'cid', clientSecret: 'cs', refreshToken: 'rt', customerId: CID, initialStatus })!;
 // 서버(adRun)와 같은 규칙: 매체 일예산 = 승인액 ÷ 2
 const launch = (p: ReturnType<typeof plat>, campaign: string, krw: number, k: string) =>
-  callPlatform((deadlineAt) => p.launch({ campaign, amountKrw: krw, requestKey: k, platformDailyBudgetKrw: platformDailyBudgetFor(krw), deadlineAt }));
+  callPlatform((deadlineAt) => p.launch({ campaign, amountKrw: krw, requestKey: k, platformDailyBudgetKrw: platformDailyBudgetFor(krw), endDate: '2026-12-03', deadlineAt }));
 
 test('OS0 기본 구성(PAUSED 생성)은 지출 0 — 초과 위험은 ENABLED로 집행할 때 생긴다', async () => {
   const a = fakeAccount();
@@ -62,10 +62,11 @@ test('OS1 수정: 매체 일예산 = 승인액 ÷ 2 → Google 2배 지출이 �
   const r = await launch(plat(a.t), 'camp-os', AD_DAILY_CAP_KRW, 'req-os-000000000001');
   assert.equal(r.status, 'success');
   assert.equal(r.status === 'success' && r.value.dailyBudgetKrw, 5_000);
+  assert.equal(r.status === 'success' && r.value.endVerified, true, '매체 종료일·시간대 read-back 확인');
   assert.equal(a.worstDaySpend(), 10_000);
   assert.ok(a.worstDaySpend() <= AD_DAILY_CAP_KRW);
   const b = fakeAccount();
-  const bad = await callPlatform((deadlineAt) => plat(b.t).launch({ campaign: 'camp-os', amountKrw: 10_000, requestKey: 'req-os-000000000009', platformDailyBudgetKrw: 10_000, deadlineAt }));
+  const bad = await callPlatform((deadlineAt) => plat(b.t).launch({ campaign: 'camp-os', amountKrw: 10_000, requestKey: 'req-os-000000000009', platformDailyBudgetKrw: 10_000, endDate: '2026-12-03', deadlineAt }));
   assert.deepEqual(bad, { status: 'failed', code: 'BUDGET_INVALID' });
   assert.equal(b.camps.size, 0);
   // 3일 최악: 하루 1만 × 3 = 3만 ≤ 누적 3만

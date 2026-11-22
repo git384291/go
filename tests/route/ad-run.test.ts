@@ -12,7 +12,7 @@ const NOW = new Date('2026-11-21T03:00:00Z'); // KST 12:00 11/21
 const ENV = { ADMIN_AD_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_123_abcdef01' };
 const KEY = 'req-0123456789abcdef';
 const who = (role: string) => ({ actor: '00000000-0000-4000-8000-000000000001', session: '00000000-0000-4000-8000-0000000000aa', token: 'secret-tok', role }) as StaffIdentity;
-const spy = (live = false, over: Partial<AdPlatform> = {}) => { const c = { launch: 0, fetch: 0, pause: 0 }; const p: AdPlatform = { name: 'spy', live, async launch(req) { c.launch++; return { externalId: 'ext-1', dailyBudgetKrw: req.platformDailyBudgetKrw }; }, async pause() { c.pause++; return { paused: true }; }, async activeCampaignCount() { return 0; }, async fetchPerformance() { c.fetch++; return { impressions: 1000, clicks: 40, costKrw: 400 }; }, ...over }; return { p, c }; };
+const spy = (live = false, over: Partial<AdPlatform> = {}) => { const c = { launch: 0, fetch: 0, pause: 0 }; const p: AdPlatform = { name: 'spy', live, async launch(req) { c.launch++; return { externalId: 'ext-1', dailyBudgetKrw: req.platformDailyBudgetKrw, endVerified: true }; }, async pause() { c.pause++; return { paused: true }; }, async activeCampaignCount() { return 0; }, async fetchPerformance() { c.fetch++; return { impressions: 1000, clicks: 40, costKrw: 400 }; }, ...over }; return { p, c }; };
 // launch 상태 DB 가짜 응답(기본: 열린 launch 없음·시작/완료/중지 기록 성공)
 const launchDefault = (q: string): unknown => (q.includes('ad_launch_begin') ? [{ r: { ok: true } }] : q.includes('ad_launch_active') ? [{ r: null }] : q.includes('ad_launch_paused') ? [{ r: { ok: true, paused: true } }] : [{}]);
 function mk(o: { env?: Record<string, string | undefined>; staff?: StaffIdentity | Error; platform?: AdPlatform | null; tx?: (q: string) => unknown; ltx?: (q: string) => unknown } = {}) {
@@ -20,7 +20,7 @@ function mk(o: { env?: Record<string, string | undefined>; staff?: StaffIdentity
   const d: AdRunDeps = {
     env: () => o.env ?? ENV, mode: () => 'supabase', platform: o.platform === undefined ? mockPlatform : o.platform,
     requireStaff: async () => { c.staff++; if (o.staff instanceof Error) throw o.staff; return o.staff ?? who('owner'); },
-    runInTransaction: async (fn) => { c.tx++; const tag = (async (s: TemplateStringsArray) => { const q = s.join('?'); c.sql.push(q); const r = q.includes('api.ad_launch_') ? (o.ltx ? o.ltx(q) : launchDefault(q)) : o.tx ? o.tx(q) : [{ r: { decision: 'ALLOW', recorded: true, over_ledger: false } }]; if (r instanceof Error) throw r; return r; }) as never; return fn(tag); },
+    runInTransaction: async (fn) => { c.tx++; const tag = (async (s: TemplateStringsArray) => { const q = s.join('?'); c.sql.push(q); const r = q.includes('api.ad_launch_') ? (o.ltx ? o.ltx(q) : launchDefault(q)) : o.tx ? o.tx(q) : [{ r: { decision: 'ALLOW', recorded: true, over_ledger: false, end_date: '2026-11-21' } }]; if (r instanceof Error) throw r; return r; }) as never; return fn(tag); },
     now: () => NOW,
   };
   return { d, c };
@@ -210,12 +210,13 @@ test('AR9 모의 어댑터는 결정적이고 형식이 맞음, AD_PLATFORM=mock
 
 const ACTIVE = (q: string): unknown => (q.includes('ad_launch_active') ? [{ r: { state: 'active', external_id: 'ext-9', request_key: KEY, amount_krw: 1000 } }] : launchDefault(q));
 test('AR12 launch 상태 저장: begin→지출판정→플랫폼→finish 순서, 플랫폼 일 예산 상한=승인 금액, externalId 저장', async () => {
-  const order: string[] = []; let seen: { platformDailyBudgetKrw?: number; deadlineAt?: number; requestKey?: string } = {};
-  const s = spy(false, { async launch(req) { order.push('platform'); seen = req; return { externalId: 'ext-1', dailyBudgetKrw: req.platformDailyBudgetKrw }; } });
-  const m = mk({ platform: s.p, ltx: (q) => { order.push(q.match(/ad_launch_\w+/)![0]); return launchDefault(q); }, tx: () => { order.push('spend'); return [{ r: { decision: 'ALLOW' } }]; } });
+  const order: string[] = []; let seen: { platformDailyBudgetKrw?: number; deadlineAt?: number; requestKey?: string; endDate?: string } = {};
+  const s = spy(false, { async launch(req) { order.push('platform'); seen = req; return { externalId: 'ext-1', dailyBudgetKrw: req.platformDailyBudgetKrw, endVerified: true }; } });
+  const m = mk({ platform: s.p, ltx: (q) => { order.push(q.match(/ad_launch_\w+/)![0]); return launchDefault(q); }, tx: () => { order.push('spend'); return [{ r: { decision: 'ALLOW', end_date: '2026-11-21' } }]; } });
   const b = await j(await adRunAction(m.d, launch()));
   assert.deepEqual(order, ['ad_launch_begin', 'spend', 'platform', 'ad_launch_finish']);
-  assert.deepEqual([b.ok, b.externalId, b.platformDailyBudgetKrw, seen.platformDailyBudgetKrw, seen.requestKey, typeof seen.deadlineAt], [true, 'ext-1', 500, 500, KEY, 'number']); // 매체 일예산 = 승인액 ÷ 2(Google 2배 지출 규칙, PM 11/22 P1)
+  assert.deepEqual([b.ok, b.externalId, b.platformDailyBudgetKrw, seen.platformDailyBudgetKrw, seen.requestKey, typeof seen.deadlineAt], [true, 'ext-1', 500, 500, KEY, 'number']);
+  assert.equal(seen.endDate, '2026-11-21', '종료일은 DB가 정한 값 그대로'); // 매체 일예산 = 승인액 ÷ 2(Google 2배 지출 규칙, PM 11/22 P1)
 });
 test('AR13 중복 active launch·같은 요청 키: DB가 막으면 지출 판정·플랫폼 호출 0회', async () => {
   for (const reason of ['LAUNCH_ACTIVE', 'LAUNCH_UNKNOWN', 'DUPLICATE_REQUEST']) {
@@ -239,7 +240,7 @@ test('AR14 시간 초과(unknown): 자동 재launch 없음·unknown 저장·사�
 });
 test('AR15 플랫폼 일 예산 상한이 승인 금액을 넘으면 계약 위반: 즉시 철회·중지·경고', async () => {
   const s = spy(false, { async launch() { return { externalId: 'ext-1', dailyBudgetKrw: 99999 }; } });
-  const m = mk({ platform: s.p, ltx: ACTIVE, tx: (q) => (q.includes('ad_alert_open') ? [{ id: '11111111-1111-4111-8111-111111111111' }] : [{ r: { decision: 'ALLOW' } }]) });
+  const m = mk({ platform: s.p, ltx: ACTIVE, tx: (q) => (q.includes('ad_alert_open') ? [{ id: '11111111-1111-4111-8111-111111111111' }] : [{ r: { decision: 'ALLOW', end_date: '2026-11-21' } }]) });
   const r = await adRunAction(m.d, launch());
   const b = await j(r);
   assert.deepEqual([r.status, b.reason], [502, 'PLATFORM_BUDGET_NOT_PROTECTED']);
@@ -273,4 +274,23 @@ test('AR17 launch_resolve(대표 전용·사유 필수)와 collect의 externalId
   assert.deepEqual([none.status, (await j(none)).code], [409, 'NO_ACTIVE_LAUNCH']);
   const unk = await adRunAction(mk({ env, platform: spy(true).p, ltx: (q) => (q.includes('ad_launch_active') ? [{ r: { state: 'unknown', external_id: null, request_key: KEY, amount_krw: 1000 } }] : launchDefault(q)) }).d, collect());
   assert.equal((await j(unk)).code, 'LAUNCH_UNKNOWN');
+});
+
+test('AR16 종료일(PM 11/22 P0): DB 종료일이 없거나 형식·범위 밖(오늘~오늘+2 KST)이면 플랫폼 호출 0회 집행 금지, 매체 종료일 read-back 실패면 즉시 중지', async () => {
+  for (const end of [undefined, '2026-11-20', '2026-11-24', '2026-11-21 23:59:59', 20261121]) {
+    const s = spy(); const m = mk({ platform: s.p, tx: () => [{ r: { decision: 'ALLOW', end_date: end } }] });
+    const r = await adRunAction(m.d, launch());
+    assert.deepEqual([r.status, (await j(r)).reason, s.c.launch], [502, 'WINDOW_INVALID', 0], String(end));
+  }
+  for (const end of ['2026-11-21', '2026-11-23']) {
+    const s = spy(); const m = mk({ platform: s.p, tx: () => [{ r: { decision: 'ALLOW', end_date: end } }] });
+    assert.equal((await j(await adRunAction(m.d, launch()))).ok, true, end);
+  }
+  for (const v of [false, undefined, 'true']) {
+    const s = spy(false, { async launch(req) { s.c.launch++; return { externalId: 'ext-1', dailyBudgetKrw: req.platformDailyBudgetKrw, endVerified: v } as never; } });
+    const m = mk({ platform: s.p, ltx: ACTIVE, tx: (q) => (q.includes('ad_alert_open') ? [{ id: '11111111-1111-4111-8111-111111111111' }] : [{ r: { decision: 'ALLOW', end_date: '2026-11-21' } }]) });
+    const b = await j(await adRunAction(m.d, launch()));
+    assert.equal(b.reason, 'END_DATE_NOT_VERIFIED');
+    assert.equal(s.c.pause, 1, '즉시 매체 중지');
+  }
 });

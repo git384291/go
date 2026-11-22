@@ -18,6 +18,7 @@ import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
 import { aiBudgetGet, aiBudgetSet } from '../../src/server/admin/aiBudget';
 import { issueSession } from '../../src/server/consult/consultSession';
 import { adFunnel, adRunAction } from '../../src/server/admin/adRun';
+import { runAdMonitor } from '../../src/server/admin/adMonitor';
 import { mockPlatform, type AdPlatform } from '../../src/server/advertising/platform';
 import { adBudgetAction, adBudgetOverview, type AdBudgetDeps } from '../../src/server/admin/adBudget';
 import { createPolicyDraft, listPolicies, policyAction, type PolicyAdminDeps } from '../../src/server/admin/policyAdmin';
@@ -373,6 +374,8 @@ const kst = (offset = 0) => new Date(Date.now() + 9 * 3_600_000 - offset * 86_40
 test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·원장 → 성과 수집(초과 표시) → 접수 연결 분석, 권한·실집행 스위치 차단', async () => {
   const runDeps = (w: StaffIdentity, platform: AdPlatform | null = mockPlatform, env: Record<string, string> = {}) => ({ ...adDeps(w), platform, env: () => ({ ...adDeps(w).env(), ...env }) });
   const camp = 'e11-camp';
+  // 0021: 새 집행은 최근 2시간 안의 정상 정기 감시 기록이 있어야 한다(감시 전용 역할로 기록)
+  await withRoleOn(app, 'adMonitor', (tx) => tx`select api.ad_monitor_record(true, ${'{"e2e": 11}'}::text::jsonb)`);
   const launch = (w: StaffIdentity, key: string, amount = 400, platform: AdPlatform | null = mockPlatform, env: Record<string, string> = {}) =>
     adRunAction(runDeps(w, platform, env), { action: 'launch', campaign: camp, amountKrw: amount, requestKey: key });
   const body0 = async (r: Response) => (await r.json()) as Record<string, unknown>;
@@ -566,6 +569,11 @@ test('E14 광고 중지 실패: 경고 열림 → 지출·새 승인 차단 → 
   // 해결 뒤에는 새 승인·집행이 다시 가능
   assert.equal((await adBudgetAction(adDeps(owner), { action: 'approve', campaign: camp, dailyCapKrw: 1000, totalCapKrw: 3000, hours: 24, reason: 'E14 재개' })).status, 201);
   assert.equal((await body0(await adRunAction(runDeps(owner, mockPlatform), { action: 'launch', campaign: camp, amountKrw: 100, requestKey: 'e14-key-0000000000002' }))).ok, true);
+  // 정기 감시(0021)가 실제 DB의 감시 전용 역할로 대상 조회·판정·기록까지 끝난다(모의 플랫폼, 실제 지출 없음)
+  const mon = await runAdMonitor({ platform: mockPlatform, now: () => new Date(), runAsMonitor: (fn) => withRoleOn(app, 'adMonitor', (tx) => fn(tx as never)) });
+  assert.equal(mon.recorded, true);
+  assert.ok(mon.checked >= 1);
+  assert.equal(await count(`select count(*)::int as n from core.audit_logs where action in ('ad.monitor_ok', 'ad.monitor_alert')`) >= 2, true);
   // 앱 역할은 경고를 직접 읽거나 고치거나 지울 수 없다
   await assert.rejects(withRoleOn(app, 'staff', (tx) => tx`select * from core.ad_alerts`), (e: { code?: string }) => e.code === '42501');
   await assert.rejects(admin`update core.ad_alerts set state = 'open'`, (e: { code?: string }) => e.code === '42501');

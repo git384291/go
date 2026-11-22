@@ -67,8 +67,11 @@ export function googleAdsConfigFromEnv(env: Readonly<Record<string, string | und
 const enc = new TextEncoder();
 /** 예산·캠페인 생성 본문(어댑터와 테스트 계정 진단 스크립트가 같은 값을 쓰게 공유). 광고 그룹·소재 없음 */
 export const budgetCreatePayload = (name: string, krw: number) => ({ name, amountMicros: String(krw * MICROS), deliveryMethod: 'STANDARD', explicitlyShared: false });
-export const campaignCreatePayload = (name: string, status: 'PAUSED' | 'ENABLED', budget: string) =>
-  ({ name, status, campaignBudget: budget, advertisingChannelType: 'SEARCH', manualCpc: {}, containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING' });
+export const campaignCreatePayload = (name: string, status: 'PAUSED' | 'ENABLED', budget: string, endDateTime?: string) =>
+  ({ name, status, campaignBudget: budget, advertisingChannelType: 'SEARCH', manualCpc: {}, containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING', ...(endDateTime ? { endDateTime } : {}) });
+/** Google Ads API v23+ Campaign.end_date_time: "yyyy-MM-dd HH:mm:ss", 고객 계정 시간대. 일 단위는 23:59:59(검색 캠페인은 시간 단위 미지원) */
+export const campaignEndDateTime = (day: string) => `${day} 23:59:59`;
+export const ACCOUNT_TIME_ZONE = 'Asia/Seoul';
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
 /** 요청 거부(집행 안 됨이 확실)와 집행 여부 불명을 나눈다 */
@@ -125,6 +128,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
     live: true,
     async launch(req: LaunchRequest): Promise<LaunchResult> {
       const krw = req.platformDailyBudgetKrw;
+      if (typeof req.endDate !== 'string' || !DAY.test(req.endDate)) throw new PlatformError('failed', 'END_DATE_INVALID');
       if (!Number.isInteger(krw) || krw < 1 || krw * GOOGLE_MAX_DAY_MULTIPLIER > req.amountKrw || !/^[a-z0-9_.-]{1,64}$/.test(req.campaign) || !/^[A-Za-z0-9-]{16,64}$/.test(req.requestKey)) throw new PlatformError('failed', 'BUDGET_INVALID');
       const token = await accessToken(req.deadlineAt);
       const name = `fideon-${req.campaign}-${req.requestKey}`.slice(0, 128);
@@ -140,19 +144,24 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       if (validateOnly) throw new PlatformError('failed', 'VALIDATE_ONLY');
       if (!budgetRes) throw new PlatformError('failed', 'BAD_RESPONSE');
       // 2) 캠페인(광고 그룹·소재 없음). 여기서 불명이면 캠페인이 생겼는지 모른다 → unknown(자동 재시도 금지)
-      const campRes = resourceOf(await call('campaigns:mutate', { operations: [{ create: campaignCreatePayload(name, status, budgetRes) }] }, token, req.deadlineAt, true));
+      const endDateTime = campaignEndDateTime(req.endDate);
+      const campRes = resourceOf(await call('campaigns:mutate', { operations: [{ create: campaignCreatePayload(name, status, budgetRes, endDateTime) }] }, token, req.deadlineAt, true));
       const m = campRes?.match(/\/campaigns\/(\d{1,20})$/);
       if (!m) throw new PlatformError('unknown', 'BAD_RESPONSE');
       const externalId = m[1]!;
-      // 3) 읽어서 확인(read-back). 실패·불일치는 0(미확인)으로 알려 서버가 즉시 중지·경고하게 한다(캠페인 ID는 이미 돌려준다)
+      // 3) 읽어서 확인(read-back): 예산·종료일·계정 시간대. 실패·불일치는 0/false(미확인)로 알려 서버가 즉시 중지·집행 금지하게 한다(캠페인 ID는 이미 돌려준다)
       let verified = 0;
+      let endVerified = false;
       try {
-        const j = await call('googleAds:search', { query: `SELECT campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${externalId}` }, token, req.deadlineAt, false);
-        const row = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0] : null;
+        const j = await call('googleAds:search', { query: `SELECT campaign_budget.amount_micros, campaign.end_date_time, customer.time_zone FROM campaign WHERE campaign.id = ${externalId}` }, token, req.deadlineAt, false);
+        const row = isObj(j) && Array.isArray(j.results) && j.results.length === 1 && isObj(j.results[0]) ? j.results[0] : null;
         const micros = isObj(row?.campaignBudget) ? Number((row!.campaignBudget as Record<string, unknown>).amountMicros) : NaN;
         if (Number.isSafeInteger(micros) && micros >= MICROS && micros % MICROS === 0 && micros / MICROS <= krw) verified = micros / MICROS;
-      } catch { verified = 0; }
-      return { externalId, dailyBudgetKrw: verified };
+        const end = isObj(row?.campaign) ? (row!.campaign as Record<string, unknown>).endDateTime : undefined;
+        const tz = isObj(row?.customer) ? (row!.customer as Record<string, unknown>).timeZone : undefined;
+        endVerified = end === endDateTime && tz === ACCOUNT_TIME_ZONE;
+      } catch { verified = 0; endVerified = false; }
+      return { externalId, dailyBudgetKrw: verified, endVerified };
     },
     async pause(ref: PlatformRef, opts: CallOpts) {
       if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');

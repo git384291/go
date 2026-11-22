@@ -68,6 +68,7 @@ run db/tests/99_dealer_application.sql >/dev/null   # 총판 전달용 신청서
 run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
 run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM 11/22 P1): 0020 계정 합산 한도·fail-closed 검증
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
+run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -630,6 +631,14 @@ has20() { D -At -c "select position('ACCOUNT_DAILY_CAP_EXCEEDED' in prosrc) > 0 
 on20=$(has20); D -f db/rollback/0020_down.sql >/dev/null; off20=$(has20); D -f db/migrations/0020_ad_account_caps.sql >/dev/null; back20=$(has20)
 [ "$on20" = t ] && [ "$off20" = f ] && [ "$back20" = t ] || { echo "FAIL | M20 0020 롤백 적용=$on20 롤백=$off20 재적용=$back20" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M20 계정 합산 광고 한도 0020 롤백: 0013 정의 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0021 집행 기간·정기 감시: 적용 → 롤백(함수 4개 제거, 0020·0011 복원, 기록 테이블 보존) → 재적용
+D -f db/migrations/0021_ad_window_monitor.sql >/dev/null
+D -f db/rollback/0021_down.sql >/dev/null
+gone21=$(D -At -c "select (to_regprocedure('api.ad_spend_request_window(uuid,uuid,text,text,int,text)') is null and to_regprocedure('api.ad_monitor_stop(text,text,boolean)') is null and to_regclass('core.ad_exposure') is not null and position('ad_exposure' in (select prosrc from pg_proc where oid = 'api.ad_performance_record(uuid,uuid,text,text,date,int,int,int,text)'::regprocedure)) = 0)")
+D -f db/migrations/0021_ad_window_monitor.sql >/dev/null
+back21=$(D -At -c "select (to_regprocedure('api.ad_spend_request_window(uuid,uuid,text,text,int,text)') is not null and to_regprocedure('api.ad_monitor_record(boolean,jsonb)') is not null)")
+[ "$gone21" = t ] && [ "$back21" = t ] || { echo "FAIL | M21 0021 롤백 gone=$gone21 재적용=$back21" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M21 집행 기간·정기 감시 0021 롤백: 함수 4개 제거·0020/0011 복원·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

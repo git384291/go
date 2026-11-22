@@ -31,11 +31,11 @@ const fake = (script: Partial<Record<'token' | 'budget' | 'campaign' | 'search',
 const OK_TOKEN: Resp = { status: 200, text: JSON.stringify({ access_token: ACCESS }) };
 const OK_BUDGET: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaignBudgets/777` }] }) };
 const OK_CAMP: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaigns/4242` }] }) };
-const searchBudget = (micros: string): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaignBudget: { amountMicros: micros } }] }) });
+const searchBudget = (micros: string, end = '2026-11-23 23:59:59', tz = 'Asia/Seoul'): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaignBudget: { amountMicros: micros }, campaign: { endDateTime: end }, customer: { timeZone: tz } }] }) });
 const cfg = (t: BodyTransport | null, o: Partial<GoogleAdsConfig> = {}): GoogleAdsConfig => ({
   transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, ...o,
 });
-const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 2500, deadlineAt: Date.now() + 5000, ...o });
+const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 2500, endDate: '2026-11-23', deadlineAt: Date.now() + 5000, ...o });
 const opts = () => ({ deadlineAt: Date.now() + 5000 });
 type Plat = ReturnType<typeof createGoogleAdsPlatform>;
 const run = async (p: Plat, f: (p: NonNullable<Plat>) => Promise<unknown>) => { try { return { ok: await f(p!) }; } catch (e) { return { err: e as PlatformError }; } };
@@ -62,7 +62,7 @@ test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소
   const { t, calls } = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('2500000000') });
   const p = createGoogleAdsPlatform(cfg(t))!;
   const r = await p.launch(req({ amountKrw: 5000, platformDailyBudgetKrw: 2500 }));
-  assert.deepEqual(r, { externalId: '4242', dailyBudgetKrw: 2500 });
+  assert.deepEqual(r, { externalId: '4242', dailyBudgetKrw: 2500, endVerified: true });
   const budget = JSON.parse(calls.find((c) => c.url.endsWith('campaignBudgets:mutate'))!.body);
   assert.equal(budget.operations[0].create.amountMicros, '2500000000');
   assert.ok(Number(budget.operations[0].create.amountMicros) / 1e6 <= 5000);
@@ -90,7 +90,7 @@ test('GA4 예산 보호: 상한 초과·비정수·0은 전송 0회 BUDGET_INVAL
   for (const search of [{ status: 500 }, { status: 200, text: '{}' }, searchBudget('9999000000'), searchBudget('abc'), searchBudget('2500000000'.replace('2', '5000.5')), { status: 200, throws: true }] as Resp[]) {
     const g = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search });
     const r = await createGoogleAdsPlatform(cfg(g.t))!.launch(req({ platformDailyBudgetKrw: 2500 }));
-    assert.deepEqual(r, { externalId: '4242', dailyBudgetKrw: 0 });
+    assert.deepEqual([r.externalId, r.dailyBudgetKrw], ['4242', 0]);
   }
 });
 test('GA5 오류 구분: 401·403 AUTH_ERROR, 400 BAD_REQUEST, 429 RATE_LIMITED는 failed / 5xx·전송 끊김은 캠페인 단계에서 unknown, 예산 단계는 영향 없어 failed', async () => {
@@ -171,4 +171,24 @@ test('GA10 정적: 어댑터는 process.env·기본 fetch·SDK·console·재시�
   assert.ok(!/process\.env|fetch\(|console\.|localStorage|setInterval|require\(|import\(|from 'google-ads|retry|while \(/i.test(code));
   assert.deepEqual((code.match(/https:\/\/[^'`$\s]+/g) ?? []).sort(), ['https://googleads.googleapis.com', 'https://oauth2.googleapis.com/token']);
   for (const f of ['src/server/advertising/platform.ts', 'src/server/admin/adRun.ts', 'src/app/api/admin/ads/run/route.ts']) assert.ok(!/googleAdsPlatform/.test(readFileSync(f, 'utf8')), `${f}: 아직 연결 안 함`);
+});
+
+test('GA10 종료일(end_date_time, PM 11/22 P0): 캠페인 생성 본문에 종료일 23:59:59, read-back 종료일·계정 시간대가 정확히 같을 때만 endVerified', async () => {
+  const g = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('2500000000') });
+  const r = await createGoogleAdsPlatform(cfg(g.t))!.launch(req());
+  assert.equal(r.endVerified, true);
+  const camp = JSON.parse(g.calls.find((c) => c.url.endsWith('campaigns:mutate'))!.body);
+  assert.equal(camp.operations[0].create.endDateTime, '2026-11-23 23:59:59');
+  const q = JSON.parse(g.calls.find((c) => c.url.endsWith('googleAds:search'))!.body).query;
+  assert.match(q, /campaign\.end_date_time/); assert.match(q, /customer\.time_zone/);
+  for (const search of [searchBudget('2500000000', '2026-11-24 23:59:59'), searchBudget('2500000000', '2026-11-23 00:00:00'), searchBudget('2500000000', '2026-11-23 23:59:59', 'America/Los_Angeles'),
+    { status: 200, text: JSON.stringify({ results: [{ campaignBudget: { amountMicros: '2500000000' } }] }) }, { status: 500 }] as Resp[]) {
+    const h = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search });
+    assert.equal((await createGoogleAdsPlatform(cfg(h.t))!.launch(req())).endVerified, false);
+  }
+  for (const bad of [{ endDate: undefined }, { endDate: '2026-11-2' }, { endDate: '2026-11-23 23:59:59' }]) {
+    const f = fake({ token: OK_TOKEN });
+    const e = (await run(createGoogleAdsPlatform(cfg(f.t))!, (p) => p.launch(req(bad)))).err!;
+    assert.deepEqual([e.outcome, e.code, f.calls.length], ['failed', 'END_DATE_INVALID', 0]);
+  }
 });

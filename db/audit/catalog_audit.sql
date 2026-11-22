@@ -9,7 +9,7 @@
 with
 app_roles(rolname) as (
   select r.rolname from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'anon', 'authenticated', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'anon', 'authenticated', 'release_auditor')
 ),
 guarded_tables as (
   select c.oid, n.nspname || '.' || c.relname as name, c.relrowsecurity, c.relforcerowsecurity
@@ -39,6 +39,8 @@ exec_allow(rolname, proname) as (
     -- 0018 광고 launch 상태
     ('app_staff', 'ad_launch_begin'), ('app_staff', 'ad_launch_finish'), ('app_staff', 'ad_launch_active'), ('app_staff', 'ad_launch_paused'), ('app_staff', 'ad_launch_resolve'), ('app_public', 'application_amend'), ('app_staff', 'application_amendments'),
     ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'),
+    -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
+    ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),
@@ -87,7 +89,7 @@ violations(v) as (
   from app_roles r cross join pg_namespace s
   where s.nspname in ('core', 'pii', 'security', 'api', 'extensions')
     and has_schema_privilege(r.rolname, s.oid, 'USAGE')
-    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'release_auditor') and s.nspname = 'api')
+    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'release_auditor') and s.nspname = 'api')
   union all
   -- V4 SECURITY DEFINER 함수는 search_path 고정
   select 'V4 search_path not fixed: ' || f.name
@@ -123,7 +125,7 @@ violations(v) as (
   -- V9 로그인 가능한 앱 역할은 app_server와 release_auditor뿐, 둘 다 슈퍼유저·RLS 우회 아님
   select 'V9 role attribute: ' || r.rolname
   from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'fideon_api', 'app_server', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'fideon_api', 'app_server', 'release_auditor')
     and (r.rolsuper or r.rolbypassrls
          or (r.rolcanlogin and r.rolname not in ('app_server', 'release_auditor')))
   union all

@@ -9,7 +9,7 @@ do $$
 declare
   r text;
 begin
-  foreach r in array array['public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai'] loop
+  foreach r in array array['public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor'] loop
     if r = 'public' or exists (select 1 from pg_roles where rolname = r) then
       execute format('revoke all on schema core, pii, security, api from %s', r);
       execute format('revoke all on all tables in schema core, pii, security from %s', r);
@@ -27,6 +27,7 @@ alter default privileges in schema core, pii, security revoke all on sequences f
 
 -- 3) 스키마 USAGE
 grant usage on schema api to app_public, app_staff, app_ai;
+do $$ begin if exists (select 1 from pg_roles where rolname = 'app_ad_monitor') then execute 'grant usage on schema api to app_ad_monitor'; end if; end $$;  -- 0021 정기 감시 전용
 grant usage on schema core, pii, security, api, extensions to fideon_api;
 grant create on schema api to fideon_api;
 
@@ -133,8 +134,14 @@ grant execute on function
   api.ad_launch_active(uuid, uuid, text, text),
   api.ad_launch_paused(uuid, uuid, text, text),
   api.ad_launch_resolve(uuid, uuid, text, text, text, text, text),
-  api.application_amendments(uuid, uuid, text, uuid)   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
+  api.application_amendments(uuid, uuid, text, uuid),   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
+  api.ad_spend_request_window(uuid, uuid, text, text, int, text)   -- 0021: 집행 기간·날짜별 최대 청구액 판정
   to app_staff;
+
+-- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
+grant execute on function core.ad_account_day(date), core.ad_account_total(), core.ad_window_end(date, timestamptz) to fideon_api;
+-- 0021 광고 정기 감시: 전용 역할 app_ad_monitor만(대상 조회·중지·실행 기록 3개, 테이블 권한 없음)
+grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb) to app_ad_monitor;
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
 grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint) to app_ai;

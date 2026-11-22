@@ -28,6 +28,7 @@ const exact = (o: Record<string, unknown>, keys: readonly string[]) => Object.ke
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
 const realDay = (s: string) => { if (!DAY.test(s)) return false; const d = new Date(`${s}T00:00:00Z`); return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; };
 const kstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Response> {
   const action = isObj(body) ? body.action : undefined;
@@ -87,11 +88,11 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
     } catch (e) { return dbErr(e); }
     const finish = (state: 'active' | 'failed' | 'unknown', externalId: string | null, note: string | null) =>
       deps.runInTransaction(async (tx) => tx`select api.ad_launch_finish(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${requestKey}, ${state}, ${externalId}, ${note})`);
-    // 2) DB 예산 판정(승인·일/누적 한도·중복). 막히면 launch는 failed(집행 안 됨 확실)로 닫는다. 기록이 실패하면 requested로 남아 재launch를 막는다(보수적)
+    // 2) DB 예산 판정(0021: 집행 종료일을 DB가 정하고, 기간 전체 날짜별 최대 청구액으로 캠페인·계정 한도·정기 감시 상태를 판정). 막히면 launch는 failed(집행 안 됨 확실)로 닫는다. 기록이 실패하면 requested로 남아 재launch를 막는다(보수적)
     let decision: Record<string, unknown>;
     try {
       const rows = await deps.runInTransaction(async (tx) =>
-        tx`select api.ad_spend_request(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${amountKrw}::int, ${requestKey}) as r`);
+        tx`select api.ad_spend_request_window(${g.actor}::uuid, ${g.session}::uuid, ${g.token}, ${campaign}, ${amountKrw}::int, ${requestKey}) as r`);
       const r = (rows as readonly { r?: unknown }[])[0]?.r;
       if (!isObj(r) || (r.decision !== 'ALLOW' && r.decision !== 'BLOCK')) { await finish('failed', null, 'SPEND_ERROR').catch(() => undefined); return adBlock('ERROR', 502); }
       decision = r;
@@ -103,8 +104,15 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
       await finish('failed', null, 'SPEND_BLOCKED').catch(() => undefined);
       return adJson({ ok: false, decision: 'BLOCK', reason: decision.reason ?? 'ERROR' }, 200);
     }
-    // 3) 플랫폼 호출(시간 제한·플랫폼 일 예산 상한 = 승인액 ÷ 2). 결과는 success / failed / unknown
-    const res = await callPlatform((deadlineAt) => platform.launch({ campaign, amountKrw, requestKey, platformDailyBudgetKrw: platformBudgetKrw, deadlineAt }));
+    // 종료일은 DB 값만 쓴다: 형식·범위(오늘~오늘+2, KST)가 맞지 않으면 집행하지 않는다
+    const today = kstDay(deps.now());
+    const endDate = decision.end_date;
+    if (typeof endDate !== 'string' || !realDay(endDate) || endDate < today || endDate > addDays(today, 2)) {
+      await finish('failed', null, 'WINDOW_INVALID').catch(() => undefined);
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'WINDOW_INVALID', spendRecorded: true }, 502);
+    }
+    // 3) 플랫폼 호출(시간 제한·플랫폼 일 예산 상한 = 승인액 ÷ 2·종료일). 결과는 success / failed / unknown
+    const res = await callPlatform((deadlineAt) => platform.launch({ campaign, amountKrw, requestKey, platformDailyBudgetKrw: platformBudgetKrw, endDate, deadlineAt }));
     if (res.status === 'failed') {
       await finish('failed', null, res.code).catch(() => undefined);
       // 지출은 원장에 이미 기록됐다(보수적: 집행 안 됨이 확실해도 되돌리지 않는다)
@@ -131,7 +139,12 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
       const stop = await stopCampaign(deps, g, platform, campaign, '플랫폼 일 예산 상한이 승인 금액 이하가 아님 — 자동 중지', 'budget_cap_violation');
       return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_BUDGET_NOT_PROTECTED', spendRecorded: true, externalId, autoStop: stop }, 502);
     }
-    return adJson({ ok: true, decision: 'ALLOW', executed: live, simulated: !live, externalId, platformDailyBudgetKrw: out.dailyBudgetKrw }, 200);
+    // 매체 종료일·계정 시간대를 다시 읽어 확인하지 못하면(불일치·미확인) 즉시 중지·집행 금지
+    if ((out as { endVerified?: unknown }).endVerified !== true) {
+      const stop = await stopCampaign(deps, g, platform, campaign, '매체 종료일 확인 실패 — 자동 중지', 'end_date_unverified');
+      return adJson({ ok: false, decision: 'BLOCK', reason: 'END_DATE_NOT_VERIFIED', spendRecorded: true, externalId, autoStop: stop }, 502);
+    }
+    return adJson({ ok: true, decision: 'ALLOW', executed: live, simulated: !live, externalId, platformDailyBudgetKrw: out.dailyBudgetKrw, endDate }, 200);
   }
   // collect
   if (!exact(b, ['action', 'campaign', 'day']) || typeof b.campaign !== 'string' || !CAMPAIGN.test(b.campaign) || typeof b.day !== 'string' || !realDay(b.day)) return adFail('INVALID_INPUT', 422);
@@ -176,7 +189,7 @@ async function currentLaunch(deps: AdRunDeps, g: StaffIdentity, campaign: string
  * 중지(초과 감지 자동·수동 공통): ① DB 승인 철회(이후 모든 새 지출 차단) → ② 플랫폼 pause(externalId, 시간 제한) → ③ 하나라도 끝나지 않으면 경고.
  * pause가 실패해도 플랫폼 쪽 일 예산 상한(어댑터 계약: 승인 amountKrw 이하)이 추가 피해를 제한한다. 각 단계 결과를 숨기지 않는다.
  */
-async function stopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdPlatform, campaign: string, reason: string, trigger: 'overspend' | 'manual' | 'budget_cap_violation') {
+async function stopCampaign(deps: AdRunDeps, g: StaffIdentity, platform: AdPlatform, campaign: string, reason: string, trigger: 'overspend' | 'manual' | 'budget_cap_violation' | 'end_date_unverified') {
   let revoked = false;
   let revokeNote: string | null = null;
   try {
