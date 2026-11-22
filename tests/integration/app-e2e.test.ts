@@ -303,12 +303,13 @@ test('E9 광고 예산: 승인 없으면 차단, 한도·중복·동시 요청 �
   assert.equal((await decide(owner, spendReq(C, 1, 'e2e-ad-req-000000005'))).reason, 'DAILY_CAP_EXCEEDED');
   assert.ok((await count(AUDITS)) >= a0 + 5, '승인·허용·차단이 모두 감사 기록에 남음');
 
-  // 동시 요청: 일 한도 10,000원에 4,000원 5건을 한꺼번에 → 정확히 2건만 허용
+  // 동시 요청: 캠페인 일 한도 10,000원에 4,000원 5건을 한꺼번에 → 계정 합산(0020: 모든 캠페인 당일 1만)으로 C 5,000원 + 4,000원 = 정확히 1건만 허용
   const C2 = 'e2e-ad-par';
   assert.equal((await adBudgetAction(adDeps(owner), { ...body, campaign: C2, dailyCapKrw: 10000, totalCapKrw: 30000 })).status, 201);
   const results = await Promise.all([1, 2, 3, 4, 5].map((i) => decide(owner, spendReq(C2, 4000, `e2e-ad-par-req-00000${i}`))));
-  assert.equal(results.filter((r) => r.decision === 'ALLOW').length, 2);
-  assert.equal(await ledgerSum(C2), 8000);
+  assert.equal(results.filter((r) => r.decision === 'ALLOW').length, 1);
+  assert.equal(results.filter((r) => r.reason === 'ACCOUNT_DAILY_CAP_EXCEEDED').length, 4, '나머지는 계정 당일 합산 초과로 차단(경합에도 초과 없음)');
+  assert.equal(await ledgerSum(C2), 4000);
 
   // 철회 → 즉시 차단
   assert.equal((await adBudgetAction(adDeps(owner), { action: 'revoke', campaign: C2, reason: '철회 시험' })).status, 200);
