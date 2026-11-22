@@ -496,6 +496,7 @@ test('E13 상담 시작 집계(API 핸들러→DB): 서버 서명 세션당 1건
   const nsl = (() => { let n = 0; return () => ++n <= 3; })(); // 새 세션 발급은 이 시험에서 3개까지
   const mkChat = (session: string | null, campaign?: string, key: Buffer | null = SKEY) => handleChat(new Request('http://x/api/consult/chat', { method: 'POST', body: JSON.stringify({ carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1', message: '요금이 궁금해요', ...(session ? { session } : {}), ...(campaign ? { campaign } : {}) }) }), {
     enabled: true, limiter: () => true, ip: '203.0.113.50', now: () => new Date(), sessionKey: key, newSessionLimiter: nsl,
+    botCheck: async () => 'ok', rateLimit: async (k: 'chat' | 'session') => (await withRoleOn(app, 'public', (tx) => tx`select api.consult_rate_hit(${'e13'.padEnd(64, '0').replace(/[^0-9a-f]/g, '0')}, ${k}) as ok`) as unknown as { ok: boolean }[])[0]!.ok,
     chat: { provider: dbPolicyProvider(async () => []), supplierId: 'supplier-a', model: mockModel, budget: createAiBudget({}) },
     recordConsult: async (sess, c) => { await withRoleOn(app, 'public', (tx) => tx`select api.consult_event_record(${sess}, ${c})`); },
   });

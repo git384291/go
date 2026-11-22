@@ -114,13 +114,13 @@ test('CH8 입력 검사: 빈 글·301자·문자열 아님', async () => {
   for (const m of ['', '   ', 'a'.repeat(301), 5, null, { a: 1 }]) assert.deepEqual(await answerChat(deps(), input(m), NOW), { ok: false, code: 'INVALID_INPUT' });
 });
 const KEY = Buffer.alloc(32, 7);
-const HD = (over: Record<string, unknown> = {}) => ({ enabled: true, chat: deps(), limiter: createLimiter(2, 60_000), ip: '203.0.113.9', now: () => NOW, sessionKey: KEY, newSessionLimiter: createLimiter(50, 60_000), ...over }) as never;
+const HD = (over: Record<string, unknown> = {}) => ({ enabled: true, chat: deps(), limiter: createLimiter(2, 60_000), ip: '203.0.113.9', now: () => NOW, sessionKey: KEY, newSessionLimiter: createLimiter(50, 60_000), botCheck: async () => 'ok', rateLimit: async () => true, ...over }) as never;
 const post = (b: unknown, raw?: string) => new Request('http://x/api/consult/chat', { method: 'POST', body: raw ?? JSON.stringify(b) });
 const good = { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금?' };
 test('CH9 핸들러: 꺼짐 503·크기 413·형식 400·여분 키 400·횟수 제한 429·no-store', async () => {
   assert.equal((await handleChat(post(good), HD({ enabled: false }))).status, 503);
   assert.equal((await handleChat(post(good), HD({ chat: null }))).status, 503);
-  assert.equal((await handleChat(post(null, 'x'.repeat(3000)), HD())).status, 413);
+  assert.equal((await handleChat(post(null, 'x'.repeat(5000)), HD())).status, 413);
   assert.equal((await handleChat(post(null, '{bad'), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, extra: 1 }), HD())).status, 400);
   assert.equal((await handleChat(post({ ...good, session: 'short' }), HD())).status, 400);
@@ -293,4 +293,32 @@ test('CB 대표 직접 연락 동의 질문: 승인 견적이 없거나 고객�
   assert.ok(unsure.ok && unsure.kind === 'quote' && unsure.next === 'callback');
   const plain = await answerChat(deps(), input(), NOW);
   assert.ok(plain.ok && plain.next === 'signup' && plain.callbackPrompt === undefined);
+});
+
+test('CH-F1 서버 측 봇 확인·DB 공용 한도: 새 세션은 봇 확인 통과+세션 한도 안에서만, 메시지마다 chat 한도, 확인 불가·DB 오류는 503(모델 호출 0회)', async () => {
+  const calls: string[] = [];
+  let gen = 0;
+  const spy = { name: 'spy', costPerCallKrw: 0, generate: async (i: { approved: string }) => { gen++; return i.approved; } };
+  const hd = (o: Record<string, unknown> = {}) => HD({ chat: deps({ model: spy }), rateLimit: async (k: string) => { calls.push(k); return true; }, ...o });
+  const ok = await handleChat(post({ ...good, turnstileToken: 'tok' }), hd({ botCheck: async (t: string, ip: string) => (t === 'tok' && ip === '203.0.113.9' ? 'ok' : 'rejected') }));
+  assert.equal(ok.status, 200); assert.deepEqual(calls, ['session', 'chat']); assert.equal(gen, 1);
+  const tok = (await ok.json()).session as string;
+  calls.length = 0;
+  assert.equal((await handleChat(post({ ...good, session: tok }), hd({ botCheck: async () => { throw new Error('must not call'); } }))).status, 200);
+  assert.deepEqual(calls, ['chat'], '기존 세션은 봇 확인 없이 chat 한도만');
+  gen = 0;
+  const st = async (o: Record<string, unknown>, b: unknown = { ...good, turnstileToken: 'tok' }) => { const r = await handleChat(post(b), hd(o)); return [r.status, (await r.json()).code]; };
+  assert.deepEqual(await st({ botCheck: async () => 'rejected' }), [403, 'BOT_CHECK_FAILED']);
+  assert.deepEqual(await st({ botCheck: async () => 'rejected' }, good), [403, 'BOT_CHECK_FAILED']); // 토큰 없이 새 세션 불가
+  assert.deepEqual(await st({ botCheck: async () => 'unavailable' }), [503, 'BOT_CHECK_UNAVAILABLE']);
+  assert.deepEqual(await st({ botCheck: async () => { throw new Error('x'); } }), [503, 'BOT_CHECK_UNAVAILABLE']);
+  assert.deepEqual(await st({ rateLimit: async (k: string) => k !== 'session' }), [429, 'SESSION_LIMIT']);
+  assert.deepEqual(await st({ rateLimit: async (k: string) => k !== 'chat' }), [429, 'RATE_LIMITED']);
+  assert.deepEqual(await st({ rateLimit: async () => { throw new Error('db down'); } }), [503, 'RATE_CHECK_UNAVAILABLE']);
+  assert.deepEqual(await st({}, { ...good, session: tok, turnstileToken: 'tok' }), [400, 'INVALID_INPUT']);
+  assert.equal(gen, 0, '막힌 요청은 모델 호출 0회');
+  const route = readFileSync('src/app/api/consult/chat/route.ts', 'utf8');
+  assert.match(route, /botCheck: \(token, from\) => verifyTurnstile\(token, from\)/);
+  assert.match(route, /api\.consult_rate_hit\(\$\{h\}, \$\{kind\}\)/);
+  assert.match(route, /ipHash\(ip\)/);
 });

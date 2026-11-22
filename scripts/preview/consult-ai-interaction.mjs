@@ -10,12 +10,16 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const OUT = path.join(ROOT, 'test-results/screens');
 mkdirSync(OUT, { recursive: true });
 const ORIGIN = 'http://chat.test';
+const TS_HOST = 'challenges.cloudflare.com';
+// 가짜 Turnstile(PM 11/22 F1): 렌더·재발급마다 토큰을 자동 발급한다. 실제 Cloudflare 접속 없음
+const FAKE_TURNSTILE = `(function () { var st = window.__ts = { renders: 0, issued: 0, opts: null }; function issue() { setTimeout(function () { st.issued++; st.opts && st.opts.callback('auto-tok-' + st.issued); }, 10); }
+  window.turnstile = { render: function (el, opts) { st.renders++; st.opts = opts; issue(); return 'w' + st.renders; }, reset: function () { issue(); }, remove: function () {} }; })();`;
 const results = [];
 const check = (name, cond, detail = '') => { results.push(!!cond); console.log(`${cond ? 'PASS' : 'FAIL'} | ${name}${detail ? ` | ${detail}` : ''}`); };
 const entry = `import { createRoot } from 'react-dom/client';
   import { ConsultAiChat } from './src/components/ConsultAiChat';
   createRoot(document.getElementById('root')).render(<ConsultAiChat choice={{ carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }} />);`;
-const js = (await build({ stdin: { contents: entry, loader: 'tsx', resolveDir: ROOT, sourcefile: 'chat-entry.tsx' }, bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', logLevel: 'silent', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0].text;
+const js = (await build({ stdin: { contents: entry, loader: 'tsx', resolveDir: ROOT, sourcefile: 'chat-entry.tsx' }, bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', logLevel: 'silent', define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY': '"test-only-site-key"' } })).outputFiles[0].text;
 const browser = await chromium.launch();
 try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } });
@@ -26,6 +30,7 @@ try {
   const TOKEN = `${'a1'.repeat(16)}.1893456000.${'b2'.repeat(32)}`;
   await ctx.route('**/*', async (route) => {
     const req = route.request(); const u = new URL(req.url());
+    if (u.host === TS_HOST && u.pathname === '/turnstile/v0/api.js') return route.fulfill({ contentType: 'text/javascript', body: FAKE_TURNSTILE });
     if (u.origin !== ORIGIN) { seen.external.push(u.host); return route.abort('blockedbyclient'); }
     if (u.pathname === '/') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script src="/a.js"></script>' });
     if (u.pathname === '/a.js') return route.fulfill({ contentType: 'text/javascript', body: js });
@@ -53,7 +58,7 @@ try {
   await send.click();
   await page.waitForSelector('[data-from="ai"]');
   const b = seen.api[0];
-  check('C5 요청 본문: 고정 코드 3개 + 글 + 첫 요청엔 세션 없음(서버가 발급, 키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode']) && b.message === '요금이 얼마예요?');
+  check('C5 요청 본문: 고정 코드 3개 + 글 + 첫 요청엔 세션 대신 1회용 봇 확인 토큰(서버가 세션 발급, 키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode', 'turnstileToken']) && b.message === '요금이 얼마예요?' && b.carrier === 'carrier-x' && b.turnstileToken === 'auto-tok-1');
   check('C6 승인 안내가 AI 도우미 말풍선에 표시, 입력칸 비워짐', (await page.locator('[data-from="ai"]').innerText()).includes('11,111원') && (await box.inputValue()) === '');
   await page.screenshot({ path: `${OUT}/23-consult-ai-answer-w390.png`, fullPage: true });
   mode = 'down'; await box.fill('또 질문'); await send.click();

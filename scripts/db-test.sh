@@ -70,6 +70,7 @@ run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
+run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -120,6 +121,26 @@ if [ "$ok" = 10 ] && [ "$limited" = 2 ]; then
 else
   echo "FAIL | C3 accepted=$ok limited=$limited" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
+echo "== concurrency: consult chat rate, 25 parallel hits from one IP on separate connections (limit 10/min)"
+"${PSQL[@]}" -d "$DB" -c "delete from core.consult_rate" >/dev/null
+while [ "$(date +%S)" -ge 55 ]; do sleep 1; done   # 1분 창 경계를 넘지 않게
+pids=()
+for i in $(seq 1 25); do
+  ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+      -c "begin" -c "set local role app_public" -c "select api.consult_rate_hit(repeat('c1', 32), 'chat')" -c "commit" > "$LOG_DIR/rate-$i.out" 2>&1 ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+rt=$(cat "$LOG_DIR"/rate-*.out | grep -c '^t$' || true)
+rf=$(cat "$LOG_DIR"/rate-*.out | grep -c '^f$' || true)
+rows=$("${PSQL[@]}" -d "$DB" -At -c "select coalesce(max(hits), 0) from core.consult_rate where bucket = 'chat:' || repeat('c1', 32)")
+if [ "$rt" = 10 ] && [ "$rf" = 15 ] && [ "$rows" = 10 ]; then
+  echo "NOTICE:  PASS | C5 상담 공용 제한: 서로 다른 연결(다중 서버 모사) 동시 25건 → 정확히 10건 허용, 15건 거부, 집계 10" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C5 allowed=$rt denied=$rf hits=$rows" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+rm -f "$LOG_DIR"/rate-*
+"${PSQL[@]}" -d "$DB" -c "delete from core.consult_rate" >/dev/null
 echo "== concurrency: identical request submitted 5 times at once (double click)"
 # 경쟁 상황을 확실히 만든다: 1번 요청은 저장 후 1.5초 동안 확정(commit)하지 않고, 그 사이 2~5번이 시작된다.
 # 2~5번은 잠금 전 재전송 확인 시점에 1번의 행을 볼 수 없으므로, 잠금 후 재확인이 없으면 '재문의'로 잘못 기록된다.
@@ -656,6 +677,14 @@ D -f db/migrations/0023_lead_followups.sql >/dev/null
 back23=$(D -At -c "select to_regprocedure('api.followup_done(uuid,uuid,text,uuid)') is not null")
 [ "$gone23" = t ] && [ "$back23" = t ] || { echo "FAIL | M23 0023 롤백 gone=$gone23 재적용=$back23" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M23 대표 직접 연락 동의 0023 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0024 상담 공용 횟수 제한: 적용 → 롤백(함수 제거, 집계 보존) → 재적용
+D -f db/migrations/0024_consult_rate.sql >/dev/null
+D -f db/rollback/0024_down.sql >/dev/null
+gone24=$(D -At -c "select (to_regprocedure('api.consult_rate_hit(text,text)') is null and to_regclass('core.consult_rate') is not null)")
+D -f db/migrations/0024_consult_rate.sql >/dev/null
+back24=$(D -At -c "select to_regprocedure('api.consult_rate_hit(text,text)') is not null")
+[ "$gone24" = t ] && [ "$back24" = t ] || { echo "FAIL | M24 0024 롤백 gone=$gone24 재적용=$back24" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M24 상담 공용 횟수 제한 0024 롤백: 함수 제거·집계 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

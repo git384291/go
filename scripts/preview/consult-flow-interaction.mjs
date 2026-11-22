@@ -30,7 +30,8 @@ async function scenario(confirmed) {
   page.on('pageerror', (e) => seen.errors.push(e.message.split('\n')[0]));
   await ctx.route('**/*', async (route) => {
     const req = route.request(); const u = new URL(req.url());
-    if (u.host === 'challenges.cloudflare.com') return route.fulfill({ contentType: 'text/javascript', body: '' });
+    // 가짜 Turnstile(PM 11/22 F1: 상담창 새 세션은 봇 확인 토큰 필요). 렌더·재발급마다 토큰 자동 발급, 실제 Cloudflare 접속 없음
+    if (u.host === 'challenges.cloudflare.com') return route.fulfill({ contentType: 'text/javascript', body: "(function(){var n=0;window.turnstile={render:function(el,o){var f=function(){setTimeout(function(){o.callback('auto-tok-'+(++n));},10);};el.__f=f;f();return 'w'+n;},reset:function(id){setTimeout(function(){},0);var els=document.querySelectorAll('*');for(var i=0;i<els.length;i++){if(els[i].__f){els[i].__f();}}},remove:function(){}};})();" });
     if (u.origin !== ORIGIN) { seen.external.push(u.host); return route.abort('blockedbyclient'); }
     if (u.pathname === '/api/leads') { seen.leads = (seen.leads ?? 0) + 1; return route.fulfill({ status: 503, contentType: 'application/json', body: '{"ok":false}' }); }
     if (u.pathname === '/') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><meta charset="utf-8"><div id="root"></div><script src="/a.js"></script>' });
@@ -74,7 +75,7 @@ async function scenario(confirmed) {
     check(tag + 'FW8 확정 fixture: 고지 제목·확인 체크박스가 표시되고 접수 가능 표시', boxes === 1 && gateText.includes('시험 고지') && /접수:/.test(state) && !/접수 대기/.test(state), `boxes=${boxes}`);
   }
   const sent = JSON.stringify(seen.api);
-  check(tag + 'FW5 채팅 서버로 가는 요청에는 고객의 신청서 답(주소·이메일 등)이 없다(상품 고정 코드+상담 글만)', !/시험로|example\.com|ack12m|installAddress|email/.test(sent) && seen.api.every((b) => Object.keys(b).every((k) => ['carrier', 'productId', 'regionCode', 'message', 'session', 'campaign'].includes(k))), sent.slice(0, 120));
+  check(tag + 'FW5 채팅 서버로 가는 요청에는 고객의 신청서 답(주소·이메일 등)이 없다(상품 고정 코드+상담 글만, 새 세션엔 1회용 봇 확인 토큰)', !/시험로|example\.com|ack12m|installAddress|email/.test(sent) && seen.api.every((b) => Object.keys(b).every((k) => ['carrier', 'productId', 'regionCode', 'message', 'session', 'campaign', 'turnstileToken'].includes(k))), sent.slice(0, 120));
   const all = await page.locator('[role=log]').textContent();
   check(tag + 'FW6 대화에서 주민번호·자동이체·사은품계좌를 묻는 질문은 없다(안내 문구에서 묻지 않는다고만 밝힘)', !/(주민번호|자동이체|사은품계좌|계좌).{0,12}(알려|입력해|말씀해)/.test(all) && all.includes('묻지 않습니다'));
   check(tag + 'FW7 외부 요청 0·페이지 오류 0', seen.external.length === 0 && seen.errors.length === 0, `${seen.external.join(',')} ${seen.errors.join(',')}`);

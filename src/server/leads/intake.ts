@@ -1,8 +1,8 @@
 import { applicationSummary, validateApplication } from '../../content/applicationForm';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { maskName, normalizeMobile, type PiiCrypto } from '../security/piiCrypto';
-import { signToken, type SigningKey } from '../security/token';
+import { createPiiCrypto, maskName, normalizeMobile, piiKeysFromEnv, type PiiCrypto } from '../security/piiCrypto';
+import { signingKeyFromEnv, signToken, type SigningKey } from '../security/token';
 import { isActiveInterest } from '../../content/catalog';
 import { noticeReadiness, REQUIRED_NOTICES, sameNoticeKeys, type NoticeConfig } from '../../content/requiredNotices';
 
@@ -192,10 +192,16 @@ export function leadSignedFields(a: Omit<CreateLeadArgs, 'token'>): string[] {
 }
 
 /**
- * 실제 고객정보 수집 허용 여부. REV-004에 따라 현재 빌드는 로컬 가상 DB 모드만 허용한다.
- * 'live' 등 다른 값은 모두 차단(운영 수집은 SEC-01~03 재검수 통과 후 별도 변경으로 연다).
+ * 실제 고객정보 수집 허용 여부. 기본은 꺼짐.
+ * - 'local': 로컬 가상 DB만(REV-004).
+ * - 'live'(PM 11/22 운영 접수 Gate 최소 구현): 아래를 **모두** 만족할 때만 열린다. 하나라도 어긋나면 사유 코드로 닫는다.
+ *   ① 운영 환경(VERCEL_ENV=production, 검수 환경 preview 불가) ② 필수 고지 확정 + 개인정보처리방침 버전 일치(noticeReadiness)
+ *   ③ DATABASE_URL 호스트 = LEAD_INTAKE_DB_HOST(정확히 일치, 로컬 주소 불가) ④ 접수 서명 키·개인정보 암호화/HMAC 키 유효
+ *   ⑤ 봇 확인(TURNSTILE_SECRET_KEY·PUBLIC_HOSTNAME) 설정. DB 쪽 차단(lead_form 스위치·고지 승인 게이트 0016)은 그대로 추가로 적용된다.
+ *   지금은 필수 고지가 코드 상수에서 미확정(confirmed:false)이라 'live'도 항상 닫힌다 — 고지 확정은 별도 승인·코드 변경 사항이다.
  */
-export function leadIntakeGate(env: Record<string, string | undefined>): { enabled: boolean; reason: string } {
+export function leadIntakeGate(env: Record<string, string | undefined>, notices: NoticeConfig = REQUIRED_NOTICES): { enabled: boolean; reason: string } {
+  if (env.LEAD_INTAKE_MODE === 'live') return liveIntakeGate(env, notices);
   if (env.LEAD_INTAKE_MODE !== 'local') return { enabled: false, reason: 'LEAD_INTAKE_DISABLED' };
   if (env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview') {
     return { enabled: false, reason: 'LOCAL_MODE_NOT_ALLOWED_ON_VERCEL' };
@@ -208,4 +214,25 @@ export function leadIntakeGate(env: Record<string, string | undefined>): { enabl
   }
   if (host !== 'localhost' && host !== '127.0.0.1') return { enabled: false, reason: 'NON_LOCAL_DATABASE' };
   return { enabled: true, reason: 'LOCAL_VIRTUAL_DB' };
+}
+
+function liveIntakeGate(env: Record<string, string | undefined>, notices: NoticeConfig): { enabled: boolean; reason: string } {
+  const off = (reason: string) => ({ enabled: false, reason });
+  if (env.VERCEL_ENV !== 'production') return off('LIVE_REQUIRES_PRODUCTION');
+  const nr = noticeReadiness(notices, (env.PRIVACY_POLICY_VERSION ?? '').trim());
+  if (!nr.ready) return off(nr.reason);
+  let url: URL;
+  try { url = new URL(env.DATABASE_URL ?? ''); } catch { return off('DATABASE_URL_INVALID'); }
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') return off('DATABASE_URL_INVALID');
+  const host = url.hostname.toLowerCase();
+  const expected = (env.LEAD_INTAKE_DB_HOST ?? '').trim().toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return off('LIVE_DB_LOCAL');
+  if (expected === '' || host !== expected) return off('LIVE_DB_HOST_MISMATCH');
+  try {
+    signingKeyFromEnv('lead', env as NodeJS.ProcessEnv);
+    const c = createPiiCrypto(piiKeysFromEnv(env as NodeJS.ProcessEnv));
+    c.encrypt('gate-check'); // 현재 암호화 키 버전이 실제로 쓰이는지
+  } catch { return off('LIVE_KEYS_INVALID'); }
+  if ((env.TURNSTILE_SECRET_KEY ?? '').trim() === '' || (env.PUBLIC_HOSTNAME ?? '').trim() === '') return off('LIVE_BOT_CHECK_NOT_CONFIGURED');
+  return { enabled: true, reason: 'LIVE' };
 }

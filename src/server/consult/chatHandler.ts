@@ -30,6 +30,10 @@ export type HandlerDeps = {
   enabled: boolean; chat: ChatDeps | null; limiter: Limiter; ip: string; now: () => Date; recordConsult?: RecordConsult;
   /** 서버 서명 세션(필수 — 없으면 상담 경로는 열리지 않는다)과 IP별 새 세션 발급 제한 */
   sessionKey: Buffer | null; newSessionLimiter: Limiter;
+  /** 서버 측 봇 확인(PM 11/22 F1). 새 세션을 만들 때만 부른다(Turnstile). 'ok'가 아니면 세션을 주지 않는다 */
+  botCheck: (token: string, ip: string) => Promise<'ok' | 'rejected' | 'unavailable'>;
+  /** DB 공용 횟수 제한(PM 11/22 F1, api.consult_rate_hit). 서버 인스턴스가 여러 개여도 한 곳에서 센다. 오류는 막는다(503) */
+  rateLimit: (kind: 'chat' | 'session') => Promise<boolean>;
 };
 
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
@@ -39,7 +43,7 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   let body: unknown;
   try {
     const raw = await req.text();
-    if (raw.length > 2048) return json(413, { ok: false, code: 'PAYLOAD_TOO_LARGE' });
+    if (raw.length > 4096) return json(413, { ok: false, code: 'PAYLOAD_TOO_LARGE' });
     body = JSON.parse(raw);
   } catch {
     return json(400, { ok: false, code: 'INVALID_JSON' });
@@ -49,7 +53,9 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   const ok = (v: unknown): v is string => typeof v === 'string' && CODE.test(v);
   const hasCampaign = 'campaign' in b;
   const hasSession = 'session' in b;
-  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : [])].sort().join(',');
+  const hasBot = 'turnstileToken' in b;
+  if (hasSession && hasBot) return json(400, { ok: false, code: 'INVALID_INPUT' }); // 봇 확인 토큰은 새 세션 요청에서만
+  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : [])].sort().join(',');
   if (Object.keys(b).sort().join(',') !== allowed || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode) || (hasCampaign && !ok(b.campaign))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   // 세션: 있으면 서명 검증, 없으면 새로 발급(IP별 횟수 제한). 브라우저가 만든 id는 받지 않는다
   let sessionId: string;
@@ -61,9 +67,20 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     sessionId = id; token = b.session as string;
   } else {
     if (!d.newSessionLimiter(d.ip, d.now().getTime())) return json(429, { ok: false, code: 'SESSION_LIMIT' });
+    // 새 세션: 서버 측 봇 확인 → DB 공용 세션 한도. 둘 다 통과해야 세션을 발급한다
+    const bot = await d.botCheck(typeof b.turnstileToken === 'string' ? b.turnstileToken : '', d.ip).catch(() => 'unavailable' as const);
+    if (bot === 'unavailable') return json(503, { ok: false, code: 'BOT_CHECK_UNAVAILABLE' });
+    if (bot !== 'ok') return json(403, { ok: false, code: 'BOT_CHECK_FAILED' });
+    const sessionOk = await d.rateLimit('session').catch(() => null);
+    if (sessionOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
+    if (!sessionOk) return json(429, { ok: false, code: 'SESSION_LIMIT' });
     const s = issueSession(d.sessionKey as Buffer, nowSec);
     sessionId = s.id; token = s.token;
   }
+  // 메시지마다 DB 공용 한도(IP별·전체). 모델 호출 전에 막는다
+  const chatOk = await d.rateLimit('chat').catch(() => null);
+  if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
+  if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
   const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode }, d.now());
   if (!r.ok) return json(400, r);
   if (d.recordConsult) { try { await d.recordConsult(sessionId, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }
