@@ -141,7 +141,7 @@ grant execute on function
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
 grant execute on function core.ad_account_day(date), core.ad_account_total(), core.ad_window_end(date, timestamptz) to fideon_api;
 -- 0021 광고 정기 감시: 전용 역할 app_ad_monitor만(대상 조회·중지·실행 기록 3개, 테이블 권한 없음)
-grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb) to app_ad_monitor;
+grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb), api.ad_monitor_begin(uuid) to app_ad_monitor;  -- 0022: 중복 실행 방지
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
 grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint) to app_ai;

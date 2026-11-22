@@ -178,6 +178,14 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       if (!Array.isArray(j.results) || j.results.length > 10_000) throw new PlatformError('failed', 'BAD_RESPONSE');
       return j.results.length;
     },
+    async accountTimeZone(opts: CallOpts) {
+      const token = await accessToken(opts.deadlineAt);
+      const j = await call('googleAds:search', { query: 'SELECT customer.time_zone FROM customer' }, token, opts.deadlineAt, false);
+      const row = isObj(j) && Array.isArray(j.results) && j.results.length === 1 && isObj(j.results[0]) ? j.results[0] : null;
+      const tz = isObj(row?.customer) ? (row!.customer as Record<string, unknown>).timeZone : undefined;
+      if (typeof tz !== 'string' || !/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(tz)) throw new PlatformError('failed', 'BAD_RESPONSE');
+      return tz;
+    },
     async fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts) {
       if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');
       if (!DAY.test(day)) throw new PlatformError('failed', 'BAD_REQUEST');

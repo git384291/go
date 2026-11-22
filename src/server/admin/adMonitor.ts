@@ -13,16 +13,20 @@ export type MonitorDeps = {
   readonly platform: AdPlatform | null;
   readonly now: () => Date;
   readonly runAsMonitor: <T>(fn: (tx: MonitorTx) => Promise<T>) => Promise<T>;
+  /** 회차 ID(UUID). 겹친·중복 호출은 DB 시작 기록(0022)으로 거부된다 */
+  readonly runId: string;
 };
 export type MonitorCode =
   | 'NO_ACTIVE_APPROVAL' | 'APPROVAL_EXPIRED' | 'WINDOW_ENDED' | 'NO_WINDOW' | 'DAY_OVER_MAX' | 'ACCOUNT_TOTAL_REACHED'
-  | 'SPEND_UNKNOWN' | 'FETCH_FAILED' | 'LAUNCH_UNKNOWN' | 'PLATFORM_UNAVAILABLE' | 'STOP_FAILED' | 'STOP_RECORD_FAILED' | 'TARGETS_UNAVAILABLE' | 'RECORD_FAILED';
+  | 'ACCOUNT_TIMEZONE_MISMATCH' | 'ACCOUNT_CHECK_FAILED' | 'SPEND_UNKNOWN' | 'FETCH_FAILED' | 'LAUNCH_UNKNOWN' | 'PLATFORM_UNAVAILABLE' | 'STOP_FAILED' | 'STOP_RECORD_FAILED' | 'TARGETS_UNAVAILABLE' | 'RECORD_FAILED';
 export type MonitorResult = {
   readonly ok: boolean;
   readonly checked: number;
   readonly stopped: readonly { readonly campaign: string; readonly code: MonitorCode; readonly paused: boolean }[];
   readonly unknown: readonly { readonly campaign: string; readonly code: MonitorCode }[];
   readonly recorded: boolean;
+  /** 다른 회차가 진행 중이라 이번 호출은 아무것도 하지 않음(중복 실행) */
+  readonly busy: boolean;
 };
 
 const ACCOUNT_TOTAL_CAP_KRW = 30_000;
@@ -57,6 +61,14 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
   const today = kstDay(now);
   const stopped: { campaign: string; code: MonitorCode; paused: boolean }[] = [];
   const unknown: { campaign: string; code: MonitorCode }[] = [];
+  // 0) 중복·겹친 실행 방지: 시작 기록을 못 잡으면 아무것도 하지 않는다(조회·중지·기록 0회)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deps.runId)) return { ok: false, checked: 0, stopped, unknown: [{ campaign: '-', code: 'TARGETS_UNAVAILABLE' }], recorded: false, busy: false };
+  try {
+    const rows = await deps.runAsMonitor((tx) => tx`select api.ad_monitor_begin(${deps.runId}::uuid) as r`);
+    if ((rows as readonly { r?: unknown }[])[0]?.r !== true) return { ok: false, checked: 0, stopped, unknown: [], recorded: false, busy: true };
+  } catch {
+    return { ok: false, checked: 0, stopped, unknown: [{ campaign: '-', code: 'TARGETS_UNAVAILABLE' }], recorded: false, busy: false };
+  }
   let targets: ReturnType<typeof parseTargets> = null;
   try {
     const rows = await deps.runAsMonitor((tx) => tx`select api.ad_monitor_targets() as r`);
@@ -64,10 +76,17 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
   } catch { targets = null; }
   if (!targets) {
     // 대상 조회 실패: 기록도 시도하지 않는다(보통 같은 원인) → 기록이 끊겨 2시간 뒤 새 집행 차단
-    return { ok: false, checked: 0, stopped, unknown: [{ campaign: '-', code: 'TARGETS_UNAVAILABLE' }], recorded: false };
+    return { ok: false, checked: 0, stopped, unknown: [{ campaign: '-', code: 'TARGETS_UNAVAILABLE' }], recorded: false, busy: false };
   }
   const platform = deps.platform;
   let knownTotal = 0;
+  // 계정 시간대 확인(실제 플랫폼, 열린 launch가 있을 때): Asia/Seoul이 아니면 열린 캠페인 전부 중지, 조회 실패는 UNKNOWN
+  let tzBad: MonitorCode | null = null;
+  if (platform && platform.live && targets.launches.length > 0) {
+    const tz = await callPlatform((deadlineAt) => platform.accountTimeZone({ deadlineAt }));
+    if (tz.status !== 'success') unknown.push({ campaign: '-', code: 'ACCOUNT_CHECK_FAILED' });
+    else if (tz.value !== 'Asia/Seoul') tzBad = 'ACCOUNT_TIMEZONE_MISMATCH';
+  }
 
   const stop = async (campaign: string, externalId: string | null, code: MonitorCode) => {
     let paused = false;
@@ -86,8 +105,9 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
     if (l.state !== 'active' || !l.externalId) { unknown.push({ campaign: l.campaign, code: 'LAUNCH_UNKNOWN' }); continue; }
     if (!platform) { unknown.push({ campaign: l.campaign, code: 'PLATFORM_UNAVAILABLE' }); continue; }
     // 1) 기간·승인: 종료일 경과, 승인 없음·만료, 기간 기록 없음 → 중지
-    let code: MonitorCode | null = null;
-    if (l.days.length === 0 || !l.endDate) code = 'NO_WINDOW';
+    let code: MonitorCode | null = tzBad;
+    if (code) { /* 시간대 불일치: 아래 판정 없이 중지 */ }
+    else if (l.days.length === 0 || !l.endDate) code = 'NO_WINDOW';
     else if (l.validUntil === null) code = 'NO_ACTIVE_APPROVAL';
     else if (now.getTime() >= l.validUntil) code = 'APPROVAL_EXPIRED';
     else if (today > l.endDate) code = 'WINDOW_ENDED';
@@ -111,8 +131,8 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
   const ok = unknown.length === 0;
   let recorded = true;
   try {
-    const detail = { today, checked: targets.launches.length, stopped: stopped.map((s) => `${s.campaign}:${s.code}:${s.paused ? 'paused' : 'not_paused'}`).slice(0, 20), unknown: unknown.map((u) => `${u.campaign}:${u.code}`).slice(0, 20) };
+    const detail = { run_id: deps.runId, today, checked: targets.launches.length, stopped: stopped.map((s) => `${s.campaign}:${s.code}:${s.paused ? 'paused' : 'not_paused'}`).slice(0, 20), unknown: unknown.map((u) => `${u.campaign}:${u.code}`).slice(0, 20) };
     await deps.runAsMonitor((tx) => tx`select api.ad_monitor_record(${ok}, ${JSON.stringify(detail)}::text::jsonb)`);
   } catch { recorded = false; }
-  return { ok: ok && recorded, checked: targets.launches.length, stopped, unknown, recorded };
+  return { ok: ok && recorded, checked: targets.launches.length, stopped, unknown, recorded, busy: false };
 }

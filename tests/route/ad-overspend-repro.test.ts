@@ -32,6 +32,7 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
     }
     if (url.endsWith('googleAds:search')) {
       const q: string = body.query;
+      if (/FROM customer$/.test(q)) return ok({ results: [{ customer: { timeZone: 'Asia/Seoul' } }] });
       if (/campaign\.status = 'ENABLED'/.test(q)) {
         if (o.listFails) return { status: 500, body: stream('{}') };
         const mine = [...camps.values()].filter((c) => c.status === 'ENABLED').length;

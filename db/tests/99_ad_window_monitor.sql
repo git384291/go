@@ -61,9 +61,47 @@ select test.expect_eq(test.lx('owner', 'ad_spend_request_window', $$'camp-wm-d',
 reset role;
 -- 권한: 감시 역할은 감시 함수 3개만, 직원 역할은 감시 함수 불가
 select test.expect_eq($$select string_agg(p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname in ('core', 'pii', 'security', 'api') and has_function_privilege('app_ad_monitor', p.oid, 'EXECUTE')$$, 'ad_monitor_record,ad_monitor_stop,ad_monitor_targets', 'WM9 app_ad_monitor 실행 가능 함수는 감시 3개뿐');
+  where n.nspname in ('core', 'pii', 'security', 'api') and has_function_privilege('app_ad_monitor', p.oid, 'EXECUTE')$$, 'ad_monitor_begin,ad_monitor_record,ad_monitor_stop,ad_monitor_targets', 'WM9 app_ad_monitor 실행 가능 함수는 감시 4개뿐(0022 중복 방지 포함)');
 select test.expect_eq($$select has_function_privilege('app_staff', 'api.ad_monitor_stop(text,text,boolean)', 'EXECUTE')::text || has_function_privilege('app_public', 'api.ad_monitor_record(boolean,jsonb)', 'EXECUTE')::text$$, 'falsefalse', 'WM9b 직원·공개 역할은 감시 함수 실행 불가');
 select test.expect_eq($$select count(*)::text from information_schema.role_table_grants where grantee = 'app_ad_monitor'$$, '0', 'WM9c 감시 역할 테이블 권한 0');
 select test.expect_error($$update core.ad_exposure set max_krw = 1$$, '42501', 'WM10 집행 기간 기록 수정 불가');
 select test.expect_error($$delete from core.ad_monitor_runs$$, '42501', 'WM10b 감시 기록 삭제 불가');
+
+-- 0022 중복 실행 방지: 끝나지 않은 회차가 10분 안에 있으면 새 회차 거부, 같은 run_id 재사용 거부, 기록이 남으면 다음 회차 허용, 10분 지난 시작은 무시
+\ir reset_ad_account.sql
+set role app_ad_monitor;
+select set_config('wm.b1', api.ad_monitor_begin('aaaaaaaa-0000-4000-8000-000000000001')::text, false);
+select set_config('wm.b2', api.ad_monitor_begin('aaaaaaaa-0000-4000-8000-000000000002')::text, false);
+select set_config('wm.b1again', api.ad_monitor_begin('aaaaaaaa-0000-4000-8000-000000000001')::text, false);
+select api.ad_monitor_record(true, '{"run_id": "aaaaaaaa-0000-4000-8000-000000000001"}'::jsonb);
+select set_config('wm.b3', api.ad_monitor_begin('aaaaaaaa-0000-4000-8000-000000000003')::text, false);
+reset role;
+select test.expect_eq($$select 'b1=' || current_setting('wm.b1') || ',b1again=' || current_setting('wm.b1again') || ',b2=' || current_setting('wm.b2') || ',b3=' || current_setting('wm.b3')$$, 'b1=true,b1again=false,b2=false,b3=true', 'WM11 겹친 회차 거부(b2)·같은 run_id 재사용 거부·끝난 뒤 다음 회차 허용');
+select test.expect_eq($$select count(*)::text from core.audit_logs where action = 'ad.monitor_busy'$$, '2', 'WM11b 거부된 회차는 감사 기록(감시 기록·중지는 없음)');
+insert into core.ad_monitor_leases (run_id, started_at) values ('aaaaaaaa-0000-4000-8000-000000000009', now() - interval '11 minutes');
+set role app_ad_monitor;
+select set_config('wm.b4', api.ad_monitor_begin('aaaaaaaa-0000-4000-8000-000000000004')::text, false);
+reset role;
+select test.expect_eq($$select current_setting('wm.b4')$$, 'false', 'WM11c b3가 아직 끝나지 않아(10분 안) b4 거부');
+select test.expect_error($$delete from core.ad_monitor_leases$$, '42501', 'WM11d 시작 기록 삭제 불가');
+\ir reset_ad_account.sql
+insert into core.ad_monitor_leases (run_id, started_at) values ('aaaaaaaa-0000-4000-8000-000000000010', now() - interval '11 minutes');
+set role app_ad_monitor;
+select set_config('wm.b5', api.ad_monitor_begin('aaaaaaaa-0000-4000-8000-000000000005')::text, false);
+reset role;
+select test.expect_eq($$select current_setting('wm.b5')$$, 'true', 'WM11e 10분 넘게 끝나지 않은 회차는 실패로 보고 새 회차 허용');
+
+-- 실행 누락 경계: 마지막 정상 기록이 1시간 59분 전이면 허용 판정 단계로, 2시간 1분 전이면 MONITOR_STALE
+\ir reset_ad_account.sql
+set role app_staff;
+select test.expect_ok(test.adcall('owner', 'ad_budget_approve', $$'camp-wm-s', 1000, 3000, now() + interval '72 hours', '감시 경계'$$), 'WM12 승인');
+reset role;
+insert into core.ad_monitor_runs (ran_at, ok, detail) values (now() - interval '2 hours 1 minute', true, '{}');
+set role app_staff;
+select test.expect_eq(test.lx('owner', 'ad_spend_request_window', $$'camp-wm-s', 1000, 'req-wm-s-00000001'$$, 'reason'), 'MONITOR_STALE', 'WM12b 마지막 정상 감시 2시간 1분 전 → 새 집행 차단');
+reset role;
+insert into core.ad_monitor_runs (ran_at, ok, detail) values (now() - interval '1 hour 59 minutes', true, '{}');
+set role app_staff;
+select test.expect_eq(test.lx('owner', 'ad_spend_request_window', $$'camp-wm-s', 1000, 'req-wm-s-00000002'$$, 'decision'), 'ALLOW', 'WM12c 1시간 59분 전 정상 기록 → 다른 조건 통과 시 허용');
+reset role;
 \ir reset_ad_account.sql

@@ -570,8 +570,10 @@ test('E14 광고 중지 실패: 경고 열림 → 지출·새 승인 차단 → 
   assert.equal((await adBudgetAction(adDeps(owner), { action: 'approve', campaign: camp, dailyCapKrw: 1000, totalCapKrw: 3000, hours: 24, reason: 'E14 재개' })).status, 201);
   assert.equal((await body0(await adRunAction(runDeps(owner, mockPlatform), { action: 'launch', campaign: camp, amountKrw: 100, requestKey: 'e14-key-0000000000002' }))).ok, true);
   // 정기 감시(0021)가 실제 DB의 감시 전용 역할로 대상 조회·판정·기록까지 끝난다(모의 플랫폼, 실제 지출 없음)
-  const mon = await runAdMonitor({ platform: mockPlatform, now: () => new Date(), runAsMonitor: (fn) => withRoleOn(app, 'adMonitor', (tx) => fn(tx as never)) });
+  const mon = await runAdMonitor({ platform: mockPlatform, now: () => new Date(), runId: '0e14e14e-0000-4000-8000-000000000014', runAsMonitor: (fn) => withRoleOn(app, 'adMonitor', (tx) => fn(tx as never)) });
   assert.equal(mon.recorded, true);
+  // 같은 회차 ID로 다시 부르면 중복 실행으로 거부(0022)
+  assert.equal((await runAdMonitor({ platform: mockPlatform, now: () => new Date(), runId: '0e14e14e-0000-4000-8000-000000000014', runAsMonitor: (fn) => withRoleOn(app, 'adMonitor', (tx) => fn(tx as never)) })).busy, true);
   assert.ok(mon.checked >= 1);
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action in ('ad.monitor_ok', 'ad.monitor_alert')`) >= 2, true);
   // 앱 역할은 경고를 직접 읽거나 고치거나 지울 수 없다

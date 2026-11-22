@@ -639,6 +639,14 @@ D -f db/migrations/0021_ad_window_monitor.sql >/dev/null
 back21=$(D -At -c "select (to_regprocedure('api.ad_spend_request_window(uuid,uuid,text,text,int,text)') is not null and to_regprocedure('api.ad_monitor_record(boolean,jsonb)') is not null)")
 [ "$gone21" = t ] && [ "$back21" = t ] || { echo "FAIL | M21 0021 롤백 gone=$gone21 재적용=$back21" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M21 집행 기간·정기 감시 0021 롤백: 함수 4개 제거·0020/0011 복원·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0022 감시 중복 실행 방지: 적용 → 롤백(함수 제거, 시작 기록 보존) → 재적용
+D -f db/migrations/0022_ad_monitor_lease.sql >/dev/null
+D -f db/rollback/0022_down.sql >/dev/null
+gone22=$(D -At -c "select (to_regprocedure('api.ad_monitor_begin(uuid)') is null and to_regclass('core.ad_monitor_leases') is not null)")
+D -f db/migrations/0022_ad_monitor_lease.sql >/dev/null
+back22=$(D -At -c "select to_regprocedure('api.ad_monitor_begin(uuid)') is not null")
+[ "$gone22" = t ] && [ "$back22" = t ] || { echo "FAIL | M22 0022 롤백 gone=$gone22 재적용=$back22" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M22 감시 중복 실행 방지 0022 롤백: 함수 제거·시작 기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

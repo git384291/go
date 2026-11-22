@@ -121,6 +121,7 @@
 | `ADMIN_AD_SOURCE`·`ADMIN_POLICY_SOURCE` | 선택 | 닫힘(503) | `db`는 개발·시험 폐기 DB에서만 열림 |
 | `AD_PLATFORM` | 선택 | 매체 없음 | `mock`만 허용(실제 광고 API 금지) |
 | `AD_MONITOR_SECRET` | 선택 | 비움(감시 503, 새 집행 `MONITOR_STALE`) | 32자 이상. 외부 스케줄러가 `Authorization: Bearer <값>`으로 `/api/internal/ad-monitor`를 1시간 이내 간격으로 호출. 스케줄 등록은 배포 승인 사항 |
+| `CRON_SECRET` | 선택 | 비움 | Vercel Cron 사용 시 32자 이상(Vercel이 `Bearer`로 자동 전송, `AD_MONITOR_SECRET` 없을 때 사용). 설정안: `docs/AD-MONITOR-SCHEDULER.md` |
 | `AD_EXECUTION_ENABLED` | 선택 | 꺼짐(`EXECUTION_DISABLED` 403) | 정확히 `true`일 때만 live 어댑터 집행 허용. 현재 live 어댑터 없음, 승인 전 `true` 금지 |
 | `TURNSTILE_VERIFY_URL_TEST`·`DIAG_IP_ENABLED` | **시험 전용** | 무시 | 운영·미리보기에서 설정하지 않음(코드가 무시하지만 설정 자체 금지) |
 | `NODE_ENV`·`VERCEL`·`VERCEL_ENV` | 플랫폼 제공 | — | 직접 설정 금지 |

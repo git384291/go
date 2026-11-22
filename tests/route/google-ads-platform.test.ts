@@ -192,3 +192,14 @@ test('GA10 종료일(end_date_time, PM 11/22 P0): 캠페인 생성 본문에 종
     assert.deepEqual([e.outcome, e.code, f.calls.length], ['failed', 'END_DATE_INVALID', 0]);
   }
 });
+
+test('GA11 계정 시간대 조회: customer.time_zone 1행만 인정, 형식 이상·빈 결과·HTTP 오류는 failed', async () => {
+  const ok = fake({ token: OK_TOKEN, search: { status: 200, text: JSON.stringify({ results: [{ customer: { timeZone: 'Asia/Seoul' } }] }) } });
+  assert.equal(await createGoogleAdsPlatform(cfg(ok.t))!.accountTimeZone(opts()), 'Asia/Seoul');
+  assert.match(JSON.parse(ok.calls.find((c) => c.url.endsWith('googleAds:search'))!.body).query, /^SELECT customer\.time_zone FROM customer$/);
+  for (const search of [{ status: 200, text: '{"results":[]}' }, { status: 200, text: '{"results":[{"customer":{"timeZone":"<x>"}}]}' }, { status: 200, text: '{"results":[{"customer":{}},{"customer":{}}]}' }, { status: 500 }] as Resp[]) {
+    const f = fake({ token: OK_TOKEN, search });
+    const e = (await run(createGoogleAdsPlatform(cfg(f.t))!, (p) => p.accountTimeZone(opts()))).err!;
+    assert.ok(e && (e.outcome === 'failed' || e.outcome === 'unknown'));
+  }
+});
