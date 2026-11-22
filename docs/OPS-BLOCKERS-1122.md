@@ -14,6 +14,7 @@
 6. 운영 배포 승인(대표·PM). 등록 전까지는 `MONITOR_STALE`로 신규 집행이 계속 막힌다(안전 방향).
 
 ### 1-2. Google 테스트 계정 검증 도구 (코드 완료, 실행은 외부)
+- **상태: 미검증.** 테스트 계정이 없어 한 번도 실행하지 않았다. 실행 전까지 실제 Google 응답 형식(종료일·예산·시간대 read-back, pause)은 확인되지 않은 것으로 본다.
 - `scripts/google-ads-probe/readback.mts` — 로컬 PC에서 사람이 직접 실행. CI·서버는 실행하지 않는다.
 - 확인 항목: test_account · KRW · Asia/Seoul · end_date_time read-back · budget read-back · pause 응답.
 - 안전: `GOOGLE_ADS_PROBE_READBACK=test-account-only`를 명시해야 실행. 테스트 계정·KRW·Asia/Seoul·비관리자일 때만 변경 호출. 캠페인은 PAUSED로 생성, 광고 그룹·소재 없음, 예산 1,000원 표기(테스트 계정은 광고 게재·과금 없음 — Google 공식 "Can't serve ads", "don't ... charge your account").
@@ -37,7 +38,7 @@
 | 전입 | 전입 후 인터넷 설치 (11) | 새 주소에서 쓸 인터넷·TV 구성과 설치 가능일을 확인하세요 (33) | 전입 인터넷 신청, 새집 인터넷 |
 | 통신사 변경 | 통신사 변경 전 확인 (11) | 위약금·설치 조건·결합 할인 적용 여부를 신청 전에 확인하세요 (34) | 인터넷 통신사 변경, 인터넷 갈아타기 |
 
-코드 반영(`src/content/adDrafts.ts` 상황 ID 추가)은 영상·캠페인 모듈 여러 곳이 함께 바뀌므로 PM 승인 후 별도 작업.
+고정 데이터로 준비: `src/content/adTargetCopy.ts`(시험 AT1~AT3, 어디에도 연결 안 함). 기존 상황 ID·영상·캠페인 모듈 연결은 PM 승인 후 별도 작업.
 
 ## 2. AI 24시간 상담·가입접수
 
@@ -77,3 +78,31 @@
 
 변경하지 않는 내부 식별자(PM 지시 13): 환경변수 `FIDEON_*_SIGNING_KEY`, 서명 문자열 접두어 `fideon|`, 브라우저 저장 키 `fideon_attr_v1`, Turnstile 속성 `data-fideon-turnstile`, 임시 파일 접두어, 캠페인 이름 접두어 `fideon-`(광고 계정 내부), 시험 DB 이름, 관리자 화면(직원 전용 11곳)·문서·스크립트.
 바꾸면 관련 시험(SEO·미리보기·영상 스토리보드) 기대값도 함께 바뀐다. 상표 확인 전 외부 게시 금지.
+
+## 4. SEC-01~03 보안 검수 결과 (코드 기준, 4c7f269 이후)
+
+검수 방법: 코드 열람 + 자동 시험(CI) 결과. 운영 환경(실제 Supabase·운영 DB·운영 키)은 검수하지 못했다.
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| SEC-01 관리자 2단계 인증 | 통과(코드) | `staffAssertion.ts`에서 aal2가 아니면 403 MFA_REQUIRED, (사용자·세션) 서버 서명, DB 세션 테이블 확인. 관리자 경로 전부 직원 확인(시험 admin-guard). 새 경로 `/api/admin/leads/followups`도 대표만 |
+| SEC-01 운영 로그인 | **미검증(외부)** | 운영 Supabase에서 실제 로그인·TOTP·세션 등록·로그아웃 미실행 |
+| SEC-02 접수 API | 통과(코드) | 서버 전용 암호화·HMAC·전체 필드 서명(DB 재검증), Turnstile 필수(비밀 키 없으면 거부), 본문 4KB 상한, 신뢰 헤더 순서로 IP, 고지 해시 게이트, 동의·처리방침 버전 이중 확인 |
+| SEC-02 대표 연락 동의(0023) | 통과(코드) | 서명 필수·연락처 원문 없음·추가 전용·대표만 열람(FU0~FU22, E16) |
+| SEC-03 DB 권한 | 통과(CI) | V1~V15(RLS+FORCE, 실행 허용 목록, search_path 고정, 함수 본문 고정), G1~G9. 0023 함수 3개 허용 목록 반영 |
+| SEC-03 운영 DB | **미검증(외부)** | `scripts/db-audit.sh`(release_auditor)를 운영 DB에서 실행한 적 없음 |
+| 보안 헤더 | 통과(코드) | HSTS, X-Frame-Options DENY, CSP frame-ancestors 'none' (`next.config.ts`) |
+
+발견 사항:
+- **F1 (P1, 코드)** 상담 채팅 `/api/consult/chat`은 봇 확인(Turnstile)이 없고, 횟수 제한이 서버 인스턴스 메모리라 인스턴스가 여러 개거나 재시작되면 합산되지 않는다. 지금은 모의 모델(0원)이라 비용 위험은 없고 DB 월 한도(기본 0원)가 실제 모델 비용을 막지만, 실제 모델 연결 전에 보완 필요.
+- **F2 (P1, 외부)** 운영 키(암호화·HMAC·서명 3종) 생성·보관과 교체 절차(`docs/ADMIN-AUTH-OPERATIONS.md`) 실행 기록 없음.
+- **F3 (P0, 외부)** 운영 DB 점검·운영 로그인 미검증(위 표).
+
+### 4-1. 운영 접수 gate 최소 수정안 (구현하지 않음 — PM 승인 후)
+현재 `leadIntakeGate`는 `LEAD_INTAKE_MODE=local` + 로컬 DB만 허용한다. 제안: `LEAD_INTAKE_MODE=live`를 추가하되 아래를 **모두** 만족할 때만 연다(하나라도 어긋나면 지금처럼 503).
+1. `VERCEL_ENV=production`(검수 환경 preview는 계속 차단).
+2. `DATABASE_URL` 호스트가 별도 환경변수 `LEAD_INTAKE_DB_HOST`와 정확히 일치(엉뚱한 DB로 수집 방지).
+3. 필수 고지 `REQUIRED_NOTICES.confirmed === true`이고 `PRIVACY_POLICY_VERSION`이 비어 있지 않음(지금 미확정 → 계속 차단).
+4. 서명·암호화·HMAC 키와 `TURNSTILE_SECRET_KEY`가 모두 있음.
+5. DB 쪽 기존 차단 유지: `lead_form` 스위치, 고지 승인 게이트(0016), 보유기간·처리방침 버전.
+변경 파일은 `src/server/leads/intake.ts`(gate 함수)와 시험만. 시험: live 조건 하나씩 빠질 때마다 차단, preview·원격 DB 불일치·고지 미확정 차단, local 기존 동작 유지.
