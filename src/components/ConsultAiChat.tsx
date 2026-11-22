@@ -73,7 +73,7 @@ export function ConsultAiChat({ choice, application, intakeOpen = false }: { cho
         <TurnstileWidget key={widgetKey} ref={widget} siteKey={TURNSTILE_SITE_KEY} onToken={(t) => { botRef.current = t; setBotReady(t !== null); }} onStatus={setBotStatus} />
       ) : null}
       {session === null && TURNSTILE_SITE_KEY !== '' && (botStatus === 'error' || botStatus === 'expired') ? (
-        <p role="alert" data-bot-status={botStatus}>{botStatus === 'expired' ? '자동 확인 시간이 지났습니다.' : '자동 확인 중 오류가 발생했습니다.'} 아래 아래 "다시 확인" 버튼ldquo;다시 확인아래 "다시 확인" 버튼rdquo; 버튼을 눌러 주세요. 계속 안 되면 페이지를 새로고침하거나 신청 양식으로 문의해 주세요. <button type="button" onClick={retryBot}>다시 확인</button></p>
+        <p role="alert" data-bot-status={botStatus}>{botStatus === 'expired' ? '자동 확인 시간이 지났습니다.' : '자동 확인 중 오류가 발생했습니다.'} 아래 다시 확인 버튼을 눌러 주세요. 계속 안 되면 페이지를 새로고침하거나 신청 양식으로 문의해 주세요. <button type="button" onClick={retryBot}>다시 확인</button></p>
       ) : null}
       {session === null && TURNSTILE_SITE_KEY === '' ? <p className="muted" role="status">자동 확인을 준비 중이라 지금은 상담을 시작할 수 없습니다.</p> : null}
       <textarea aria-label="상담 내용" placeholder="궁금한 점을 적어 주세요(300자 이내)" maxLength={300} rows={3} value={text} onChange={(e) => setText(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }} />
