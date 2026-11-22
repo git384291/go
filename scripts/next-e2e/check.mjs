@@ -414,6 +414,8 @@ try {
     const { chromium } = await import('playwright');
     const br = await chromium.launch();
     const ctx = await br.newContext({ viewport: { width: 390, height: 1600 }, bypassCSP: true }); // next dev eval 때문에 시험 브라우저만 CSP 우회
+    // 상담창 새 세션은 봇 확인 토큰 필요(PM 11/22 F1): Cloudflare 스크립트 대신 위젯별로 'ok' 토큰을 주는 가짜(서버 확인은 로컬 가짜 확인 서버)
+    await ctx.route('https://challenges.cloudflare.com/**', (r) => r.fulfill({ contentType: 'text/javascript', body: "(function(){var n=0,c={};window.turnstile={render:function(el,o){var id='w'+(++n);c[id]=o.callback;setTimeout(function(){c[id]&&c[id]('ok');},10);return id;},reset:function(id){setTimeout(function(){c[id]&&c[id]('ok');},10);},remove:function(id){delete c[id];}};})();" }));
     const pg = await ctx.newPage();
     let leadPosts = 0;
     pg.on('request', (r) => { if (r.url().endsWith('/api/leads') && r.method() === 'POST') leadPosts++; });
