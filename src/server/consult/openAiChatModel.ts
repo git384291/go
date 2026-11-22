@@ -1,20 +1,22 @@
 import 'server-only';
 // 상담 AI 실제 모델 어댑터 — **인터페이스·모의시험 전용 준비 코드(PM 11/22 4c7f269 지시 9). 상담 경로에 연결하지 않았다.**
 // - createModel(chatModel.ts)은 여전히 'mock'만 돌려준다. 이 어댑터를 쓰려면 별도 승인(비용 한도·모델·키)과 연결 변경이 필요하다.
-// - 계약은 광고 소재 어댑터(openAiAdGenerator.ts)와 같은 OpenAI Responses API 형식(POST /v1/responses, store:false, tools 없음).
-//   Claude 환경에서 공식 원문을 이번에 다시 열람하지 않았다. 실제 모델명·가격·응답 형식은 연결 승인 시 공식 문서로 다시 확인한다.
+// - 요청·응답 형식은 광고 소재 생성 어댑터와 같은 Responses API 형식(store:false, tools 없음)을 가정한다.
+//   **실제 업체·주소·모델명·가격은 정하지 않았다**: 주소(endpoint)도 주입이며 코드에 실제 서비스 주소를 두지 않는다(정적 시험 RD2·CH10).
+//   연결 승인 시 공식 문서로 형식을 다시 확인한다(Claude 환경에서 이번에 원문 미열람).
 // - transport·키·모델·실행 허용은 모두 명시 주입(환경변수·기본 클라이언트 없음). 설정이 없거나 허용이 아니면 ModelNotCalledError(전송 0회 → 예약 취소).
 // - 입력은 chatAnswer가 이미 가린 고객 글(maskPii)과 서버가 만든 승인 안내문뿐이다. 이 어댑터는 다른 고객 정보를 받지 않는다.
 // - 출력은 그대로 믿지 않는다: chatAnswer가 금액·혜택 가드(guardAiReply·benefitClaimsAllowed)로 다시 검사하고, 실패하면 승인 안내문으로 대체한다.
 // - 1요청 1호출, 재시도 없음, 응답 크기 상한, 마감 시각 초과 시 중단. 오류 본문·헤더·키는 반사하지 않는다.
-import { boundedRequest, parseJsonSafe, type BodyTransport } from '../advertising/boundedHttp';
+import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
 import { ModelNotCalledError, type ChatModel, type ModelInput } from './chatModel';
 
-export const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const MAX_REPLY_CHARS = 600;
 
 export type OpenAiChatModelConfig = {
   readonly transport: BodyTransport | null;
+  /** 요청 주소(https, 승인 시 주입). 사용자 정보·쿼리·조각 불가 */
+  readonly endpoint: string | null;
   readonly apiKey: string | null;
   readonly model: string | null;
   /** 정확히 true일 때만 전송한다 */
@@ -27,8 +29,10 @@ export type OpenAiChatModelConfig = {
 };
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
-const valid = (c: OpenAiChatModelConfig | null): c is OpenAiChatModelConfig & { transport: BodyTransport; apiKey: string; model: string } =>
+const ENDPOINT = /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9/._-]{1,100}$/;
+const valid = (c: OpenAiChatModelConfig | null): c is OpenAiChatModelConfig & { transport: BodyTransport; endpoint: string; apiKey: string; model: string } =>
   !!c && c.executionAllowed === true && typeof c.transport === 'function' &&
+  typeof c.endpoint === 'string' && ENDPOINT.test(c.endpoint) &&
   typeof c.apiKey === 'string' && /^[A-Za-z0-9_-]{20,200}$/.test(c.apiKey) &&
   typeof c.model === 'string' && /^[a-z0-9][a-z0-9._-]{1,63}$/.test(c.model) &&
   Number.isSafeInteger(c.costPerCallKrw) && c.costPerCallKrw >= 1 && c.costPerCallKrw <= 1000 &&
@@ -78,7 +82,7 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
     async generate(input: ModelInput, signal: AbortSignal): Promise<string> {
       if (!valid(config)) throw new ModelNotCalledError('NOT_CONFIGURED');
       if (signal.aborted) throw new ModelNotCalledError('ABORTED');
-      const r = await boundedRequest(config.transport, OPENAI_RESPONSES_URL, {
+      const r = await boundedRequest(config.transport, config.endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
         body: enc.encode(buildChatBody(config.model, input, config.maxOutputTokens)),

@@ -2,13 +2,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildChatBody, createOpenAiChatModel, MAX_REPLY_CHARS, OPENAI_RESPONSES_URL, parseChatReply, type OpenAiChatModelConfig } from '../../src/server/consult/openAiChatModel';
+import { buildChatBody, createOpenAiChatModel, MAX_REPLY_CHARS, parseChatReply, type OpenAiChatModelConfig } from '../../src/server/consult/openAiChatModel';
 import { createModel, ModelNotCalledError } from '../../src/server/consult/chatModel';
 import { answerChat } from '../../src/server/consult/chatAnswer';
 import { createAiBudget } from '../../src/server/consult/chatModel';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 
 const KEY = 'sk-test-' + 'A'.repeat(30);
+const EP = 'https://model.example.test/v1/responses'; // 가짜 주소(실제 서비스 아님)
 const ok = (text: string, status = 'completed') => JSON.stringify({ status, output: [{ type: 'reasoning' }, { type: 'message', content: [{ type: 'output_text', text }] }] });
 function fake(res: { status?: number; text?: string; throws?: boolean } = {}) {
   const calls: { url: string; headers: Record<string, string>; body: string; redirect: string }[] = [];
@@ -19,12 +20,12 @@ function fake(res: { status?: number; text?: string; throws?: boolean } = {}) {
   };
   return { t, calls };
 }
-const cfg = (t: BodyTransport | null, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, ...over });
+const cfg = (t: BodyTransport | null, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, endpoint: EP, apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, ...over });
 const IN = { system: 'SYS', user: '이름은 *** 요금이 궁금해요', approved: '월 11,111원' };
 const sig = () => new AbortController().signal;
 
 test('OC1 설정 누락·실행 허용 아님·잘못된 값: 전송 0회, ModelNotCalledError(예약 취소 대상)', async () => {
-  for (const over of [{ executionAllowed: 'true' }, { executionAllowed: false }, { apiKey: 'short' }, { model: 'Bad Model' }, { costPerCallKrw: 0 }, { maxOutputTokens: 5000 }, { timeoutMs: 60000 }]) {
+  for (const over of [{ executionAllowed: 'true' }, { executionAllowed: false }, { endpoint: null }, { endpoint: 'http://model.example.test/v1/responses' }, { endpoint: 'https://user:pw@model.example.test/x' }, { endpoint: 'https://model.example.test/x?k=1' }, { apiKey: 'short' }, { model: 'Bad Model' }, { costPerCallKrw: 0 }, { maxOutputTokens: 5000 }, { timeoutMs: 60000 }]) {
     const f = fake();
     await assert.rejects(createOpenAiChatModel(cfg(f.t, over as never)).generate(IN, sig()), ModelNotCalledError, JSON.stringify(over));
     assert.equal(f.calls.length, 0);
@@ -39,7 +40,7 @@ test('OC2 요청 계약: 고정 URL·Bearer·store false·tools 없음·redirect
   assert.equal(out, '안녕하세요. 승인된 안내입니다.');
   assert.equal(f.calls.length, 1);
   const c = f.calls[0]!;
-  assert.deepEqual([c.url, c.redirect, c.headers.Authorization], [OPENAI_RESPONSES_URL, 'error', `Bearer ${KEY}`]);
+  assert.deepEqual([c.url, c.redirect, c.headers.Authorization], [EP, 'error', `Bearer ${KEY}`]);
   const b = JSON.parse(c.body);
   assert.deepEqual(Object.keys(b).sort(), ['input', 'instructions', 'max_output_tokens', 'model', 'store']);
   assert.equal(b.store, false);

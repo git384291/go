@@ -1,8 +1,8 @@
 // 핵심 타깃 광고 문안 5종 — 고정 데이터(PM 11/22 4c7f269 지시 5). **미게시 사전 작성 초안. 어떤 화면·API·광고 계정에도 연결하지 않았다.**
-// - 길이·금지 주장 기준은 adDrafts.ts(네이버 파워링크 첫 후보: 제목 ≤15자, 설명 20~45자, 코드포인트)와 같다.
+// - 길이·금지 주장 기준은 기존 광고 초안 데이터(네이버 파워링크 첫 후보: 제목 ≤15자, 설명 20~45자, 코드포인트)와 같다.
 // - 브랜드명 없음(바른통신 상호·상표 확인 전), 가격·사은품·할인 금액 없음. 고객 상황·검색어는 가설(검색량·CPC 미조회).
 // - 검색광고는 약정 만료일을 직접 타깃할 수 없어, 만료 시점을 말하는 검색어·문안으로 의도를 잡는다.
-// - 기존 상황 ID(adDrafts)·영상·캠페인 모듈과의 연결은 별도 승인 작업이다.
+// - 기존 상황 ID·영상·캠페인 모듈과의 연결은 별도 승인 작업이다.
 export const AD_TARGET_IDS = Object.freeze(['contract_2m', 'contract_soon', 'moving', 'move_in', 'carrier_change'] as const);
 export type AdTargetId = (typeof AD_TARGET_IDS)[number];
 export type AdTargetCopy = {
