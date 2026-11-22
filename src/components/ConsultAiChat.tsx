@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { AI_NOTICE } from '../content/consultPreview';
 import { resolveAttribution } from '../content/attribution';
 import { neededFields, nextQuestion, type Application } from '../content/applicationForm';
-import { TurnstileWidget, type TurnstileHandle } from './TurnstileWidget';
+import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './TurnstileWidget';
 
 // AI 24시간 상담창(PM 11/21 ②). 글을 서버(/api/consult/chat)로만 보낸다. 요금·사은품은 서버가 승인 정책에서 만든 문장만 돌려준다.
 // 개인정보는 여기 쓰지 않도록 안내하고(서버도 가림), 신청은 기존 접수 양식(/consult)으로 이어진다. 모델·키·비용 정보는 화면에 없다.
@@ -32,6 +32,10 @@ export function ConsultAiChat({ choice, application, intakeOpen = false }: { cho
   const botRef = useRef<string | null>(null);
   const [botReady, setBotReady] = useState(false);
   const widget = useRef<TurnstileHandle>(null);
+  // 봇 확인이 오류·만료되면 고객에게 안내하고 다시 확인할 수 있게 한다(토큰이 없으면 보내기는 계속 잠김 — 우회 없음)
+  const [botStatus, setBotStatus] = useState<TurnstileStatus>('loading');
+  const [widgetKey, setWidgetKey] = useState(0);
+  const retryBot = () => { if (!widget.current?.reset()) setWidgetKey((k) => k + 1); };
   const appRef = useRef(application);
   appRef.current = application;
   const intakeOpenRef = useRef(intakeOpen);
@@ -66,7 +70,10 @@ export function ConsultAiChat({ choice, application, intakeOpen = false }: { cho
         ))}
       </div>
       {session === null && TURNSTILE_SITE_KEY !== '' ? (
-        <TurnstileWidget ref={widget} siteKey={TURNSTILE_SITE_KEY} onToken={(t) => { botRef.current = t; setBotReady(t !== null); }} onStatus={() => {}} />
+        <TurnstileWidget key={widgetKey} ref={widget} siteKey={TURNSTILE_SITE_KEY} onToken={(t) => { botRef.current = t; setBotReady(t !== null); }} onStatus={setBotStatus} />
+      ) : null}
+      {session === null && TURNSTILE_SITE_KEY !== '' && (botStatus === 'error' || botStatus === 'expired') ? (
+        <p role="alert" data-bot-status={botStatus}>{botStatus === 'expired' ? '자동 확인 시간이 지났습니다.' : '자동 확인 중 오류가 발생했습니다.'} 아래 "다시 확인" 버튼을 눌러 주세요. 계속 안 되면 페이지를 새로고침하거나 신청 양식으로 문의해 주세요. <button type="button" onClick={retryBot}>다시 확인</button></p>
       ) : null}
       {session === null && TURNSTILE_SITE_KEY === '' ? <p className="muted" role="status">자동 확인을 준비 중이라 지금은 상담을 시작할 수 없습니다.</p> : null}
       <textarea aria-label="상담 내용" placeholder="궁금한 점을 적어 주세요(300자 이내)" maxLength={300} rows={3} value={text} onChange={(e) => setText(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }} />

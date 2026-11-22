@@ -72,6 +72,32 @@ try {
   await page.screenshot({ path: `${OUT}/24-consult-ai-fallback-w390.png`, fullPage: true });
   check('C9 신청 링크는 같은 화면의 접수 양식으로 이동', (await page.getByRole('link', { name: '가입 상담 신청하기' }).getAttribute('href')) === '#apply');
   check('C10 외부 요청 0·예외 0·가로 넘침 없음', seen.external.length === 0 && seen.errors.length === 0 && (await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)));
+  // BT: 봇 확인 오류·만료 안내와 재시도(PM 11/23 P2). 우회 없음: 토큰이 없으면 글이 있어도 잠김
+  {
+    const p2 = await ctx.newPage();
+    const n0 = seen.api.length;
+    await p2.goto(`${ORIGIN}/`);
+    await p2.waitForSelector('textarea');
+    await p2.waitForFunction(() => window.__ts && window.__ts.issued >= 1);
+    const s2 = p2.getByRole('button', { name: '보내기' });
+    const b2 = p2.locator('textarea[aria-label="상담 내용"]');
+    await b2.fill('요금 문의');
+    await p2.waitForFunction(() => !document.querySelector('button[disabled]'));
+    await p2.evaluate(() => window.__ts.opts['error-callback']());
+    await p2.waitForSelector('[data-bot-status="error"]');
+    check('BT1 오류: 안내 문구와 다시 확인 버튼 표시, 보내기 잠김(우회 없음), 요청 0회', (await s2.isDisabled()) && (await p2.getByRole('alert').innerText()).includes('오류') && (await p2.getByRole('button', { name: '다시 확인' }).count()) === 1 && seen.api.length === n0);
+    await p2.getByRole('button', { name: '다시 확인' }).click();
+    await p2.waitForFunction(() => document.querySelector('[data-bot-status]') === null);
+    await p2.waitForFunction(() => !document.querySelector('button[disabled]'));
+    check('BT2 다시 확인 후 새 토큰으로 열리고 안내 사라짐', !(await s2.isDisabled()));
+    await p2.evaluate(() => window.__ts.opts['expired-callback']());
+    await p2.waitForSelector('[data-bot-status="expired"]');
+    check('BT3 만료: 안내 표시, 보내기 잠김', (await s2.isDisabled()) && (await p2.getByRole('alert').innerText()).includes('시간이 지났'));
+    await p2.getByRole('button', { name: '다시 확인' }).click();
+    await p2.waitForFunction(() => !document.querySelector('button[disabled]'));
+    check('BT4 만료 후 재시도로 복구, 안내 사라짐', (await p2.locator('[data-bot-status]').count()) === 0 && !(await s2.isDisabled()));
+    await p2.close();
+  }
   await ctx.close();
 } catch (e) { check('실행 중 예외 없음', false, String(e.message).split('\n')[0]); } finally { await browser.close(); }
 const fail = results.filter((r) => !r).length;
