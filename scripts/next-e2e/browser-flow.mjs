@@ -10,8 +10,9 @@ import path from 'node:path';
 
 const sha = (s) => crypto.createHash('sha256').update(s.trim(), 'utf8').digest('hex');
 const FX_PORT = 3139;
-const FAKE_TS = `(function(){var st=window.__ts={r:0,opts:null};function issue(){setTimeout(function(){st.opts&&st.opts.callback('ok');},10);}
-window.turnstile={render:function(el,o){st.r++;st.opts=o;issue();return 'w'+st.r;},reset:function(){issue();},remove:function(){}};})();`;
+// 가짜 Turnstile: 위젯마다 따로 토큰을 준다(PM 11/22 F1: 상담창·신청 양식 두 위젯이 한 화면에 있음). reset은 그 위젯에 다시 발급
+const FAKE_TS = `(function(){var st=window.__ts={r:0,cbs:{}};function issue(id){setTimeout(function(){var f=st.cbs[id];f&&f('ok');},10);}
+window.turnstile={render:function(el,o){st.r++;var id='w'+st.r;st.cbs[id]=o.callback;issue(id);return id;},reset:function(id){issue(id);},remove:function(id){delete st.cbs[id];}};})();`;
 
 /** 시험 전용 앱 사본: 고지 상수만 승인된 시험 fixture로 바꾼다(원본 소스는 건드리지 않는다) */
 function buildFixtureApp(root, items, version) {

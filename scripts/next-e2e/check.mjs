@@ -55,7 +55,8 @@ const ownerC = cookieFor({ sub: U(1), session_id: S(1), aal: 'aal2' });
 const reviewerC = cookieFor({ sub: U(5), session_id: S(5), aal: 'aal2' });
 const adm = (p, cookie, init = {}) => fetch(BASE + p, { ...init, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...(init.headers ?? {}) } });
 const CAMP = 'next-e2e-camp';
-const chat = (extra = {}, ip = '198.51.100.7') => post('/api/consult/chat', { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금이 궁금해요', campaign: CAMP, ...extra }, { 'x-forwarded-for': ip });
+// 새 세션(session 없음)은 서버 측 봇 확인 필요(PM 11/22 F1) — 로컬 가짜 확인 서버가 'ok' 토큰을 통과시킨다
+const chat = (extra = {}, ip = '198.51.100.7') => post('/api/consult/chat', { carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1', message: '요금이 궁금해요', campaign: CAMP, ...('session' in extra ? {} : { turnstileToken: 'ok' }), ...extra }, { 'x-forwarded-for': ip });
 try {
   const ev = () => n(`select count(*)::int as n from core.consult_events where campaign_key = '${CAMP}'`);
   const e0 = await ev();
