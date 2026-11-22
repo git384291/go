@@ -25,12 +25,13 @@ export function thresholdEval(calA, calB, evA, evB) {
   return { thresholdMs: r2(best.t), aSlowerThanT: best.aAbove, calibrationBalancedAcc: r2(best.ba), evalBalancedAcc: r2(ba), evalAccuracy: r2(acc), majorityBaseline: r2(majority), evalMisclassified: missA + missB, evalN: evA.length + evB.length };
 }
 
-export async function runTimingProbe({ FX, sql, sampleBody, outDir, perCategory = 100, warmup = 20, basePhones = 40, phoneBase = 1000, ipPrefix = '198.18', fileName = 'timing-probe.json', environment = 'Next E2E 시험 전용 앱(next dev 개발 모드, 127.0.0.1), 폐기 PostgreSQL, 가짜 봇 확인 서버(로컬 HTTP), 고지 확정 fixture. 인터넷·운영 환경 아님' }) {
+export async function runTimingProbe({ FX, sql, sampleBody, outDir, perCategory = 100, warmup = 20, basePhones = 40, phoneBase = 1000, ipPrefix = '198.18', runTag = 'd', fileName = 'timing-probe.json', environment = 'Next E2E 시험 전용 앱(next dev 개발 모드, 127.0.0.1), 폐기 PostgreSQL, 가짜 봇 확인 서버(로컬 HTTP), 고지 확정 fixture. 인터넷·운영 환경 아님' }) {
   const tpl = JSON.parse(sampleBody);
   const rand = rng(20261122);
   let ipN = 0; let keyN = 0;
   const ip = () => { ipN++; return `${ipPrefix}.${Math.floor(ipN / 250)}.${(ipN % 250) + 1}`; };
-  const key = (c) => `tp-${c}-${String(++keyN).padStart(6, '0')}-${Math.floor(rand() * 1e9).toString(16)}`.slice(0, 64);
+  // 실행마다 다른 접두어: 같은 DB에서 두 번째 진단의 요청 키가 앞 진단과 겹치면 서버가 재전송으로 보고 저장 없이 202를 준다(e5b4886 BF31 무효 원인)
+  const key = (c) => `tp-${runTag}${c}-${String(++keyN).padStart(6, '0')}-${Math.floor(rand() * 1e9).toString(16)}`.slice(0, 64);
   const phone = (i) => `010-7${String(Math.floor(i / 10000)).padStart(3, '0')}-${String(i % 10000).padStart(4, '0')}`;
   const app = (addr) => ({ ...tpl.application, installAddress: addr });
   const send = async (body) => {

@@ -386,7 +386,7 @@ export async function runBrowserFlow(c) {
           psrv = spawn(nextBin, ['start', '-p', String(PP), '-H', '127.0.0.1'], { cwd: dir2, env: penv, stdio: ['ignore', plog, plog] });
           for (let i = 0; i < 60 && !pup; i++) { try { await fetch(`${FXP}/api/consult/chat`); pup = true; } catch { await new Promise((r) => setTimeout(r, 1000)); } }
         }
-        const tpp = pup ? await runTimingProbe({ FX: FXP, sql, sampleBody: d1.posts[0], outDir: path.join(root, 'test-results/next-e2e'), phoneBase: 50000, ipPrefix: '198.19', fileName: 'timing-probe-prod.json', environment: '로컬 최적화 빌드(next build + next start, 런타임 NODE_ENV=test), 127.0.0.1, 폐기 PostgreSQL, 가짜 봇 확인 서버(로컬 HTTP), 고지 확정 fixture. 인터넷·운영 환경 아님' }) : null;
+        const tpp = pup ? await runTimingProbe({ FX: FXP, sql, sampleBody: d1.posts[0], outDir: path.join(root, 'test-results/next-e2e'), phoneBase: 50000, ipPrefix: '198.19', runTag: 'p', fileName: 'timing-probe-prod.json', environment: '로컬 최적화 빌드(next build + next start, 런타임 NODE_ENV=test), 127.0.0.1, 폐기 PostgreSQL, 가짜 봇 확인 서버(로컬 HTTP), 고지 확정 fixture. 인터넷·운영 환경 아님' }) : null;
         check('BF31 최적화 빌드 응답 시간 진단 실행: 빌드·기동 후 신규·같은 내용·변경 재접수 각 100회 모두 202 {"ok":true}, 요청별 DB 처리 결과가 의도와 같음 — 시간 판정은 합격 조건 아님', !!tpp && tpp.failures === 0 && tpp.stats.new.n === 100 && tpp.stats.same.n === 100 && tpp.stats.amend.n === 100, `built=${built} up=${pup} fail=${tpp?.failures} ${JSON.stringify(tpp?.failureSample ?? [])}`);
         if (tpp) {
           console.log('INFO | BF31 시간 분포(ms) ' + JSON.stringify(tpp.stats));
