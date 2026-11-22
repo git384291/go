@@ -39,28 +39,57 @@ export async function answerQuote(provider: ApprovedPolicyProvider, request: Quo
 
 const closed = (): QuoteAnswer => Object.freeze({ kind: 'needs_review', text: NEEDS_REVIEW_GUIDANCE });
 
-// 한글 수사 금액("삼만원", "십일만 원")은 값을 확인할 수 없으니 승인 문장에 없으면 막는다
+// 한글 수사 금액("삼만원", "십일만 원")·한글 수사 할인율("십퍼센트")은 값을 확인할 수 없으니 승인 문장에 없으면 막는다
 const KO_NUM_WON = /[영일이삼사오육칠팔구십백천만억]+\s*원/;
-const WON = /(\d[\d,]*)\s*(만\s*원|천\s*원|원)/g;
-const BARE = /\d[\d,]{3,}/g; // 쉼표 포함 4자리 이상 숫자는 금액일 수 있어 같은 규칙을 적용한다
+const KO_NUM_PCT = /[영일이삼사오육칠팔구십백]+\s*(퍼센트|프로|할)/;
 
+// 금전 표현 판별(PM 11/22 B): 숫자를 금액 / 할인율 / 일반 숫자로 나눈다.
+// 일반 숫자(24시간·36개월·날짜·500M·3명)는 정상 허용, 금액과 할인율만 승인 문장의 값과 대조한다. 애매하면 금액으로 본다(보수적).
+const NUM_TOKEN = /(?:[₩$]\s*)?\d[\d,]*(?:\.\d+)?(?:\s*(?:억|만|천|백))?(?:\s*\d[\d,]*(?:\s*(?:천|백))?)?(?:\s*(?:원|won|krw|usd|달러))?/gi;
+const NON_MONEY_AFTER = /^\s*(개월|개|명|건|회|시간|분|초|일|년|월|시|대|가구|세대|메가|기가|채널|mbps|gbps|m\b|g\b|mb|gb|배|번|차|주|세|층|호|동|%|퍼센트|프로|할)/i;
+const CURRENCY = /원|won|krw|usd|달러|[₩$]/i;
+const UNIT = { 억: 1e8, 만: 1e4, 천: 1e3, 백: 1e2 } as const;
 const toNum = (s: string) => Number(s.replace(/,/g, ''));
 
-export function extractAmounts(text: string): Set<number> {
-  const out = new Set<number>();
-  for (const m of text.matchAll(WON)) {
-    const n = toNum(m[1]);
-    out.add(m[2].startsWith('만') ? n * 10000 : m[2].startsWith('천') ? n * 1000 : n);
+function tokenValue(tok: string): number {
+  const t = tok.replace(/[₩$]|\s+|원|won|krw|usd|달러/gi, '');
+  let total = 0; let rest = t;
+  for (const u of ['억', '만', '천', '백'] as const) {
+    const i = rest.indexOf(u);
+    if (i >= 0) { const head = rest.slice(0, i); total += (head === '' ? 1 : toNum(head)) * UNIT[u]; rest = rest.slice(i + 1); }
   }
-  for (const m of text.matchAll(BARE)) out.add(toNum(m[0]));
-  return out;
+  return rest === '' ? total : total + toNum(rest);
 }
+
+export type MoneyFacts = { readonly won: Set<number>; readonly pct: Set<number> };
+export function extractMoneyFacts(text: string): MoneyFacts {
+  const won = new Set<number>(); const pct = new Set<number>();
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*(%|퍼센트|프로|할)/g)) pct.add(m[2] === '할' ? Number(m[1]) * 10 : Number(m[1]));
+  for (const m of text.matchAll(NUM_TOKEN)) {
+    const tok = m[0]; const end = (m.index ?? 0) + tok.length; const after = text.slice(end, end + 6);
+    const cur = CURRENCY.test(tok);
+    const unit = /[억만천백]/.test(tok);
+    if (!cur && NON_MONEY_AFTER.test(after)) continue; // 24시간·36개월·2026년·500M·3명·10%(할인율은 위에서 따로 처리)
+    if (!cur && !unit) {
+      const digits = tok.replace(/,/g, '');
+      if (!tok.includes(',') && digits.length < 4) continue; // 3자리 이하 일반 숫자(24·36·500)
+      if (/^(19|20)\d\d$/.test(digits) && /^[-./]\d{1,2}/.test(after)) continue; // 2026-11-23·2026.11.23 날짜 앞머리
+      if (/^\d{1,2}[-./]\d{1,2}$/.test(tok) || /^(19|20)\d\d\.\d{1,2}$/.test(tok)) continue; // 11/23·2026.11
+    }
+    won.add(tokenValue(tok));
+  }
+  return { won, pct };
+}
+
+/** 하위 호환: 금액 값 집합 */
+export const extractAmounts = (text: string): Set<number> => extractMoneyFacts(text).won;
 
 export function guardAiReply(aiText: unknown, approved: QuoteAnswer): QuoteAnswer {
   if (typeof aiText !== 'string' || aiText.length > 2000) return closed();
-  const allowed = approved.kind === 'quote' ? extractAmounts(approved.text) : new Set<number>();
-  if (KO_NUM_WON.test(aiText) && approved.kind !== 'quote') return closed();
-  if (KO_NUM_WON.test(aiText)) return closed();
-  for (const n of extractAmounts(aiText)) if (!allowed.has(n)) return closed();
+  const ok = approved.kind === 'quote' ? extractMoneyFacts(approved.text) : { won: new Set<number>(), pct: new Set<number>() };
+  if (KO_NUM_WON.test(aiText) || KO_NUM_PCT.test(aiText)) return closed();
+  const f = extractMoneyFacts(aiText);
+  for (const n of f.won) if (!ok.won.has(n)) return closed();
+  for (const n of f.pct) if (!ok.pct.has(n)) return closed(); // 할인율은 승인 문장에 있는 값만
   return Object.freeze({ kind: approved.kind, text: aiText });
 }

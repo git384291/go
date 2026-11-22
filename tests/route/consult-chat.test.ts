@@ -251,3 +251,31 @@ test('BN5 정책 조회 실패·정책 없음이면 어떤 혜택 언급도 BLOC
     }
   }
 });
+
+// PM 11/22 B: 금전 표현과 일반 숫자 구분. 일반 숫자는 허용, 금액·할인율은 승인 값과 대조
+test('MB1 일반 숫자 PASS: 24시간·36개월·날짜·500M·인원은 금전이 아니므로 그대로', async () => {
+  for (const t of ['월 11,111원, 약정 36개월입니다. 24시간 상담 가능해요.', '월 11,111원이고 2026년 11월 23일부터 가능합니다.', '2026-11-23 기준 월 11,111원, 500M 인터넷과 TV 150채널입니다.',
+    '월 11,111원, 1000Mbps 속도, 3명이 함께 쓸 수 있어요.', '2026.11.23 기준 월 11,111원입니다.']) {
+    const a = await say(recWith({}), t); assert.ok(a.ok && a.source === 'model' && a.text === t, t);
+  }
+});
+test('MB2 승인 금액은 표기 달라도 통과, 미승인 금액·단위 우회는 BLOCK', async () => {
+  const ok = ['월 11,111원이고 사은품 3,333원 상품권입니다.', '월 1만1111원이고 3333원 상품권입니다.', '월 ₩11,111, 상품권 3,333원입니다.'];
+  for (const t of ok) { const a = await say(recWith({}), t); assert.ok(a.ok && a.source === 'model', t); }
+  for (const t of ['월 3만원 할인', '월 3만 할인해 드려요', '월 3만5천원에 해 드려요', '월 30000원입니다', '월 30,000 won 입니다', '월 $30 입니다', '월 11,111원, 사은품 5천원 상품권', '월 11111 원 그리고 9900', '월 십일만원', '월 이만 원']) {
+    const a = await say(recWith({}), t); assert.ok(a.ok && a.source === 'fallback', t);
+  }
+});
+test('MB3 할인율: 승인 문장에 없는 %·퍼센트·할·한글 수사는 BLOCK', async () => {
+  for (const t of ['월 11,111원, 10% 할인됩니다', '20퍼센트 깎아 드려요', '3할 할인', '십퍼센트 할인', '월 11,111원에 50 % 할인', '월 11,111원, 100% 만족']) {
+    const a = await say(recWith({ form: 'bill_discount' }), t); assert.ok(a.ok && a.source === 'fallback', t);
+  }
+});
+test('MB4 정책값 확인 불가(조회 실패·정책 없음)면 금액·할인율·혜택 모두 담당자 확인으로 전환', async () => {
+  for (const provider of [() => { throw new Error('db down'); }, () => []]) {
+    for (const t of ['월 11,111원입니다', '10% 할인', '36개월 약정이고 3만원 드려요']) {
+      const a = await say(rec, t, provider as never);
+      assert.ok(a.ok && a.source === 'fallback' && a.text === NEEDS_REVIEW_GUIDANCE, t);
+    }
+  }
+});
