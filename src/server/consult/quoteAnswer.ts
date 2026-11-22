@@ -11,13 +11,27 @@ import type { QuoteRequest } from '@/server/policies';
 export type ApprovedPolicyProvider = (now: Date) => readonly unknown[] | Promise<readonly unknown[]>;
 export const NO_APPROVED_POLICIES: ApprovedPolicyProvider = () => [];
 
-export type QuoteAnswer = { readonly kind: 'quote' | 'needs_review'; readonly text: string };
+/** 서버가 승인 정책 값으로 계산한 '안내해도 되는 혜택'(PM 11/22 P1). AI 답변의 혜택 약속은 이것과 대조한다(문장 키워드 일치로 승인하지 않음) */
+export type BenefitAllowance = {
+  readonly giftForm: 'gift_card' | 'cash' | 'bill_discount' | null; // 사은품 형태(금액 > 0일 때만)
+  readonly installFree: boolean;   // 승인 설치비가 0원
+  readonly equipmentFree: boolean; // 승인 장비 임대료가 0원
+};
+export type QuoteAnswer = { readonly kind: 'quote' | 'needs_review'; readonly text: string; readonly allow?: BenefitAllowance };
 
 export async function answerQuote(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): Promise<QuoteAnswer> {
   try {
     const records = await provider(now);
     if (!Array.isArray(records)) return closed();
-    return renderQuoteMessage(quotePolicy(records, request, now));
+    const r = quotePolicy(records, request, now);
+    const m = renderQuoteMessage(r);
+    if (r.status !== 'quote' || m.kind !== 'quote') return m;
+    const b = r.quote.benefit;
+    return Object.freeze({ ...m, allow: Object.freeze({
+      giftForm: b.form !== 'none' && b.amountKrw > 0 ? b.form : null,
+      installFree: r.quote.installFee.amountKrw === 0,
+      equipmentFree: r.quote.equipmentMonthlyFee.amountKrw === 0,
+    }) });
   } catch {
     return closed();
   }

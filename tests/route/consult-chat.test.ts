@@ -202,3 +202,52 @@ test('CH13 AI 정산 재시도: 일시 장애는 최대 3회까지 다시 시도
   await h?.cancel();
   assert.deepEqual([log.length, log.every((q) => q.includes('ai_budget_release'))], [2, true]);
 });
+
+// PM 11/22 P1: 혜택 약속은 견적 유무와 관계없이 서버 승인 정책 값(allow)과 대조. 막히면 승인 안내문(fallback)
+const recWith = (o: { form?: string; amount?: number; install?: number; equip?: number }) => ({
+  ...rec,
+  installFee: K({ amountKrw: o.install ?? 2222, vat: 'included' }),
+  equipmentMonthlyFee: K({ amountKrw: o.equip ?? 0, vat: 'included' }),
+  customerBenefit: K({ amountKrw: o.amount ?? 3333, form: o.form ?? 'gift_card', payoutCondition: K('개통 후 지급(가상)'), cancellationCondition: K('약정 내 해지 시 환수(가상)') }),
+});
+const say = async (r: Record<string, unknown>, text: string, provider?: () => unknown[]) =>
+  answerChat(deps({ provider: provider ?? (() => [r]), model: fake(async () => text) }), input(), NOW);
+test('BN1 승인된 혜택 PASS: 승인 상품권·승인 현금·승인 요금할인·승인 0원 설치비는 모델 답변 그대로', async () => {
+  const ok: [Record<string, unknown>, string][] = [
+    [recWith({}), '월 11,111원이고 사은품은 3,333원 상품권입니다.'],
+    [recWith({ form: 'cash' }), '월 11,111원, 현금 3,333원을 지급 조건에 따라 드립니다.'],
+    [recWith({ form: 'bill_discount' }), '월 11,111원이고 요금 할인 3,333원이 적용됩니다.'],
+    [recWith({ install: 0 }), '월 11,111원, 설치비는 무료(0원)입니다.'],
+    [recWith({}), '장비 임대료는 무료이고 월 11,111원입니다.'],
+  ];
+  for (const [r, t] of ok) { const a = await say(r, t); assert.ok(a.ok && a.source === 'model' && a.text === t, t); }
+});
+test('BN2 미승인 혜택 BLOCK: 승인 형태와 다른 혜택(상품권 정책에 현금·할인, 사은품 없음 정책에 상품권)', async () => {
+  const bad: [Record<string, unknown>, string][] = [
+    [recWith({}), '월 11,111원, 현금 3,333원 드립니다.'],
+    [recWith({}), '월 11,111원이고 3,333원 할인됩니다.'],
+    [recWith({ form: 'none', amount: 0 }), '월 11,111원이고 상품권도 드려요.'],
+    [recWith({ form: 'none', amount: 0 }), '월 11,111원, 사은품 챙겨 드려요.'],
+  ];
+  for (const [r, t] of bad) { const a = await say(r, t); assert.ok(a.ok && a.source === 'fallback', t); }
+});
+test('BN3 금액 없는 허위 혜택 BLOCK: 설치비 무료(승인 2,222원)·추가 상품권·현금 지원·무상 제공·면제·페이백', async () => {
+  for (const t of ['월 11,111원입니다. 설치비 무료에 상품권도 드려요.', '월 11,111원, 추가 상품권 드려요.', '월 11,111원, 현금 지원 가능합니다.',
+    '공유기 무상 제공해 드려요.', '설치비 면제됩니다.', '페이백 해 드립니다.', 'TV는 무료로 드려요.', '월 11,111원에 상품권 더 드려요.']) {
+    const a = await say(recWith({}), t); assert.ok(a.ok && a.source === 'fallback', t);
+  }
+});
+test('BN4 표현만 바꾼 허위 혜택 BLOCK(사은품 없음·설치비 2,222원 정책): 띄어쓰기·기호·영문·유사어 우회', async () => {
+  for (const t of ['상 품-권 드립니다', '현.금 드려요', 'gift card 드려요', '캐쉬 말고 캐시백 드려요', '설치는 공짜예요', '설치비 안 받아요',
+    '설치비 0원', '기프티콘 쏩니다', '깎아 드릴게요', '반값에 해 드려요', '포인트 적립해 드려요']) {
+    const a = await say(recWith({ form: 'none', amount: 0 }), t); assert.ok(a.ok && a.source === 'fallback', t);
+  }
+});
+test('BN5 정책 조회 실패·정책 없음이면 어떤 혜택 언급도 BLOCK(담당자 확인)', async () => {
+  for (const provider of [() => { throw new Error('db down'); }, () => []]) {
+    for (const t of ['상품권 드려요', '설치비 무료', '혜택 많아요']) {
+      const a = await say(rec, t, provider as never);
+      assert.ok(a.ok && a.source === 'fallback' && a.text === NEEDS_REVIEW_GUIDANCE, t);
+    }
+  }
+});
