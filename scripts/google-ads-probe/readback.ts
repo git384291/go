@@ -26,7 +26,7 @@ export async function runReadback(env: Readonly<Record<string, string | undefine
   const cfg = { ...googleAdsConfigFromEnv(env, transport), initialStatus: 'PAUSED' as const, validateOnly: false };
   const platform = createGoogleAdsPlatform(cfg);
   if (!platform || !cfg.customerId) { log({ step: 'config', ok: false }); return 2; }
-  const deadline = () => now().getTime() + 15_000;
+  const deadline = () => Date.now() + 15_000; // 요청 시간 제한은 실제 시계(종료일 계산용 now와 분리)
 
   // ① 읽기 전용: 토큰 → 계정 정보(test_account·manager·통화·시간대)
   const tk = await boundedRequest(transport, 'https://oauth2.googleapis.com/token', {
