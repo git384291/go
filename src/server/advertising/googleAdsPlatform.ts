@@ -1,6 +1,6 @@
 import 'server-only';
 import { boundedRequest, parseJsonSafe, type BodyTransport, type BoundedResult } from './boundedHttp';
-import { PlatformError, type AdPlatform, type CallOpts, type LaunchRequest, type LaunchResult, type PlatformRef } from './platform';
+import { GOOGLE_MAX_DAY_MULTIPLIER, PlatformError, type AdPlatform, type CallOpts, type LaunchRequest, type LaunchResult, type PlatformRef } from './platform';
 
 // Google Ads 어댑터 (PM 11/22 지시). **비활성 준비 코드: 실계정 연결·실접속·실집행이 아니다.**
 // - 기존 AdPlatform 계약(platform.ts 1~4항)과 0018 launch 상태 구조를 그대로 쓴다. 서버(adRun.ts)는 이 파일을 모른다 — createPlatform에 연결하지 않았다.
@@ -125,7 +125,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
     live: true,
     async launch(req: LaunchRequest): Promise<LaunchResult> {
       const krw = req.platformDailyBudgetKrw;
-      if (!Number.isInteger(krw) || krw < 1 || krw > req.amountKrw || !/^[a-z0-9_.-]{1,64}$/.test(req.campaign) || !/^[A-Za-z0-9-]{16,64}$/.test(req.requestKey)) throw new PlatformError('failed', 'BUDGET_INVALID');
+      if (!Number.isInteger(krw) || krw < 1 || krw * GOOGLE_MAX_DAY_MULTIPLIER > req.amountKrw || !/^[a-z0-9_.-]{1,64}$/.test(req.campaign) || !/^[A-Za-z0-9-]{16,64}$/.test(req.requestKey)) throw new PlatformError('failed', 'BUDGET_INVALID');
       const token = await accessToken(req.deadlineAt);
       const name = `fideon-${req.campaign}-${req.requestKey}`.slice(0, 128);
       const validateOnly = cfg.validateOnly === true;
@@ -160,15 +160,25 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       const j = await call('campaigns:mutate', { operations: [{ update: { resourceName: `customers/${customerId}/campaigns/${ref.externalId}`, status: 'PAUSED' }, updateMask: 'status' }] }, token, opts.deadlineAt, true);
       return { paused: resourceOf(j) === `customers/${customerId}/campaigns/${ref.externalId}` };
     },
+    async activeCampaignCount(opts: CallOpts) {
+      // 계정 전체에서 ENABLED 캠페인 수(FIDEON 외부에서 만든 것 포함). 응답 형식이 이상하면 조회 실패(failed) → 서버가 집행 차단
+      const token = await accessToken(opts.deadlineAt);
+      const j = await call('googleAds:search', { query: "SELECT campaign.id FROM campaign WHERE campaign.status = 'ENABLED'" }, token, opts.deadlineAt, false);
+      if (!isObj(j)) throw new PlatformError('failed', 'BAD_RESPONSE');
+      if (j.results === undefined) return 0;
+      if (!Array.isArray(j.results) || j.results.length > 10_000) throw new PlatformError('failed', 'BAD_RESPONSE');
+      return j.results.length;
+    },
     async fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts) {
       if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');
       if (!DAY.test(day)) throw new PlatformError('failed', 'BAD_REQUEST');
       const token = await accessToken(opts.deadlineAt);
       const j = await call('googleAds:search', { query: `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros FROM campaign WHERE campaign.id = ${ref.externalId} AND segments.date = '${day}'` }, token, opts.deadlineAt, false);
       const row = isObj(j) && Array.isArray(j.results) && isObj(j.results[0]) ? j.results[0] : null;
-      const mt = row && isObj(row.metrics) ? row.metrics : {};
+      // 행이 없으면 보고 지연일 수 있다 → 0으로 보지 않고 UNKNOWN(null). 값은 서버가 다시 검증한다(믿지 않음)
+      if (!row || !isObj(row.metrics)) return { impressions: null, clicks: null, costKrw: null };
+      const mt = row.metrics;
       const num = (v: unknown) => (v === undefined ? 0 : Number(v));
-      // 행이 없으면 그날 성과 0. 값은 서버가 다시 검증한다(믿지 않음)
       return { impressions: num(mt.impressions), clicks: num(mt.clicks), costKrw: Math.round(num(mt.costMicros) / MICROS) };
     },
   });

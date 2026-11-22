@@ -1,6 +1,6 @@
 import 'server-only';
 import { AD_DAILY_CAP_KRW } from '../advertising/budgetGuard';
-import { callPlatform, createPlatform } from '../advertising/platform';
+import { callPlatform, createPlatform, platformDailyBudgetFor } from '../advertising/platform';
 import type { AdPlatform } from '../advertising/platform';
 import { adBlock, adDbError, adFail, adGate, adJson } from './adBudget';
 import type { AdBudgetDeps, SqlTag } from './adBudget';
@@ -67,6 +67,15 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
     if (!exact(b, ['action', 'campaign', 'amountKrw', 'requestKey'])
         || typeof b.campaign !== 'string' || !CAMPAIGN.test(b.campaign) || !isInt(b.amountKrw, 1, AD_DAILY_CAP_KRW) || typeof b.requestKey !== 'string' || !REQ_KEY.test(b.requestKey)) return adBlock('INVALID_INPUT', 422);
     const campaign = b.campaign, amountKrw = b.amountKrw, requestKey = b.requestKey;
+    // 매체 일예산 = 승인액 ÷ 2(Google 하루 최대 2배 지출 반영). 1원 미만이면 집행하지 않는다
+    const platformBudgetKrw = platformDailyBudgetFor(amountKrw);
+    if (platformBudgetKrw < 1) return adBlock('INVALID_INPUT', 422);
+    // 0) 실제 플랫폼: 계정에 이미 노출 가능한 캠페인이 있으면(FIDEON 밖에서 만든 것 포함) 집행 차단. 조회 실패·형식 오류도 차단(fail-closed). DB·원장 미변경
+    if (live) {
+      const ext = await callPlatform((deadlineAt) => platform.activeCampaignCount({ deadlineAt }));
+      if (ext.status !== 'success' || !isInt(ext.value, 0, 10_000)) return adJson({ ok: false, decision: 'BLOCK', reason: 'EXTERNAL_CHECK_FAILED' }, 503);
+      if (ext.value > 0) return adJson({ ok: false, decision: 'BLOCK', reason: 'EXTERNAL_ACTIVE_CAMPAIGN' }, 409);
+    }
     const dbErr = (e: unknown) => { const code = (e as { code?: string })?.code; return adBlock(code === '42501' ? 'FORBIDDEN' : 'ERROR', code === '42501' ? 403 : 503); };
     // 1) launch 시작 기록: 캠페인당 열린 launch 1건·같은 요청 키 1회. 막히면 지출 판정·플랫폼 호출 0회
     try {
@@ -94,8 +103,8 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
       await finish('failed', null, 'SPEND_BLOCKED').catch(() => undefined);
       return adJson({ ok: false, decision: 'BLOCK', reason: decision.reason ?? 'ERROR' }, 200);
     }
-    // 3) 플랫폼 호출(시간 제한·플랫폼 일 예산 상한 = 승인 amountKrw). 결과는 success / failed / unknown
-    const res = await callPlatform((deadlineAt) => platform.launch({ campaign, amountKrw, requestKey, platformDailyBudgetKrw: amountKrw, deadlineAt }));
+    // 3) 플랫폼 호출(시간 제한·플랫폼 일 예산 상한 = 승인액 ÷ 2). 결과는 success / failed / unknown
+    const res = await callPlatform((deadlineAt) => platform.launch({ campaign, amountKrw, requestKey, platformDailyBudgetKrw: platformBudgetKrw, deadlineAt }));
     if (res.status === 'failed') {
       await finish('failed', null, res.code).catch(() => undefined);
       // 지출은 원장에 이미 기록됐다(보수적: 집행 안 됨이 확실해도 되돌리지 않는다)
@@ -117,8 +126,8 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
       // 플랫폼은 집행됐는데 상태 저장이 실패: externalId를 응답에 돌려주고(비밀 아님) requested로 남겨 재launch를 막는다. 대표가 launch_resolve(executed)로 정리한다
       return adJson({ ok: false, decision: 'BLOCK', reason: 'LAUNCH_STATE_UNSAVED', outcome: 'success', spendRecorded: true, needsReview: true, externalId }, 502);
     }
-    // 플랫폼 일 예산 상한이 승인 금액 이하가 아니면 계약 위반: 즉시 중지·경고(철회 → pause → 경고)
-    if (!isInt(out.dailyBudgetKrw, 1, amountKrw)) {
+    // 플랫폼 일 예산 상한이 승인액 ÷ 2 이하가 아니면 계약 위반: 즉시 중지·경고(철회 → pause → 경고)
+    if (!isInt(out.dailyBudgetKrw, 1, platformBudgetKrw)) {
       const stop = await stopCampaign(deps, g, platform, campaign, '플랫폼 일 예산 상한이 승인 금액 이하가 아님 — 자동 중지', 'budget_cap_violation');
       return adJson({ ok: false, decision: 'BLOCK', reason: 'PLATFORM_BUDGET_NOT_PROTECTED', spendRecorded: true, externalId, autoStop: stop }, 502);
     }
@@ -136,6 +145,8 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
   const pr = await callPlatform((deadlineAt) => platform.fetchPerformance(ref, b.day as string, { deadlineAt }));
   if (pr.status !== 'success') return adFail('PLATFORM_ERROR', 502);
   const perf: unknown = pr.value;
+  // 보고 지연(성과 행 없음): 0원으로 기록하지 않고 UNKNOWN으로 돌려준다(초과를 0으로 숨기지 않음). 원장·성과 미기록
+  if (isObj(perf) && perf.costKrw === null) return adJson({ ok: false, recorded: false, spend: 'UNKNOWN', reason: 'SPEND_UNKNOWN' }, 202);
   if (!isObj(perf) || !isInt(perf.impressions, 0, 100_000_000) || !isInt(perf.clicks, 0, 100_000_000) || !isInt(perf.costKrw, 0, 100_000) || (perf.clicks as number) > (perf.impressions as number)) return adFail('PLATFORM_DATA_INVALID', 502);
   const source = platform.live ? 'platform' : 'mock';
   try {

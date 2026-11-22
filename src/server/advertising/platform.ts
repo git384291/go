@@ -5,7 +5,7 @@
  * - 키·토큰은 서버 환경변수에서만 읽는 자리이며 이 인터페이스의 입출력에 나오지 않는다.
  *
  * 실제 어댑터가 반드시 지켜야 할 계약(어댑터 시험 규약):
- *  1) 예산 보호: launch는 플랫폼 쪽 일 예산을 req.platformDailyBudgetKrw(= 승인된 amountKrw) 이하로 설정하고, 실제 설정값을 dailyBudgetKrw로 돌려준다.
+ *  1) 예산 보호: launch는 플랫폼 쪽 일 예산을 req.platformDailyBudgetKrw(= 승인액 ÷ 2, Google 2배 지출 규칙 반영) 이하로 설정하고, 실제 설정값을 dailyBudgetKrw로 돌려준다.
  *     설정할 수 없으면 집행하지 말고 PlatformError('failed')를 던진다. 서버는 돌려받은 값이 상한을 넘으면 즉시 중지·경고한다(pause가 실패해도 플랫폼 상한이 추가 피해를 제한한다).
  *  2) 시간 제한: 모든 호출은 opts.deadlineAt(절대 시각 ms)까지 끝내야 하며 HTTP는 boundedHttp.boundedRequest로 보낸다. 서버도 같은 시간 뒤에 결과를 버린다(callPlatform).
  *  3) 오류 구분: 요청이 플랫폼에 닿지 않았거나 집행이 일어나지 않았음이 확실하면 PlatformError('failed'), 그 밖(시간 초과·응답 유실·5xx 등 집행 여부 불명)은
@@ -13,6 +13,11 @@
  *  4) pause·fetchPerformance는 서버가 저장한 externalId(ref.externalId)로 호출된다. 키·토큰·URL은 오류에 담지 않는다.
  */
 export const AD_CALL_TIMEOUT_MS = 10_000;
+/** Google Ads: 특정일 지출은 평균 일예산의 최대 2배까지 나갈 수 있다(월 30.4배 이내). PM 11/22 P1 */
+export const GOOGLE_MAX_DAY_MULTIPLIER = 2;
+/** 매체에 설정할 일예산 = 승인액 ÷ 2(내림). 2배 지출이 나가도 하루 최악값이 승인액 이하가 된다. 1원 미만이면 0(집행 불가) */
+export const platformDailyBudgetFor = (approvedKrw: number): number =>
+  Number.isSafeInteger(approvedKrw) && approvedKrw > 0 ? Math.floor(approvedKrw / GOOGLE_MAX_DAY_MULTIPLIER) : 0;
 
 export type LaunchRequest = {
   readonly campaign: string;
@@ -31,7 +36,9 @@ export type AdPlatform = {
   launch(req: LaunchRequest): Promise<LaunchResult>;
   /** 캠페인 노출 중지. 초과 감지·수동 중지 때 서버가 부른다(이미 중지돼 있어도 안전해야 한다) */
   pause(ref: PlatformRef, opts: CallOpts): Promise<{ readonly paused: boolean }>;
-  /** 하루치 성과. 형식 검증은 호출측(서버)이 한다 — 어댑터 값은 믿지 않는다 */
+  /** 계정에서 지금 노출 가능한(ENABLED) 캠페인 수. 집행 전 확인 — 1 이상이거나 조회 실패면 서버는 집행하지 않는다(fail-closed) */
+  activeCampaignCount(opts: CallOpts): Promise<number>;
+  /** 하루치 성과. 보고가 아직 없으면 costKrw를 null(UNKNOWN)로 돌려준다. 형식 검증은 호출측(서버)이 한다 — 어댑터 값은 믿지 않는다 */
   fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts): Promise<unknown>;
 };
 
@@ -74,6 +81,7 @@ export const mockPlatform: AdPlatform = Object.freeze({
   live: false,
   async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}`, dailyBudgetKrw: req.platformDailyBudgetKrw }; },
   async pause() { return { paused: true }; },
+  async activeCampaignCount() { return 0; },
   async fetchPerformance(ref, day) {
     const h = hash(`${ref.campaign}:${day}`);
     const impressions = 500 + (h % 2000);

@@ -35,7 +35,7 @@ const searchBudget = (micros: string): Resp => ({ status: 200, text: JSON.string
 const cfg = (t: BodyTransport | null, o: Partial<GoogleAdsConfig> = {}): GoogleAdsConfig => ({
   transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, ...o,
 });
-const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 5000, deadlineAt: Date.now() + 5000, ...o });
+const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 2500, deadlineAt: Date.now() + 5000, ...o });
 const opts = () => ({ deadlineAt: Date.now() + 5000 });
 type Plat = ReturnType<typeof createGoogleAdsPlatform>;
 const run = async (p: Plat, f: (p: NonNullable<Plat>) => Promise<unknown>) => { try { return { ok: await f(p!) }; } catch (e) { return { err: e as PlatformError }; } };
@@ -59,12 +59,12 @@ test('GA2 환경변수 이름만 참조: 값은 읽어 설정으로 넘길 뿐, 
   assert.equal(createGoogleAdsPlatform(c), null);
 });
 test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소재 없음, externalId·read-back 값 반환, 요청 이름에 requestKey', async () => {
-  const { t, calls } = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('3000000000') });
+  const { t, calls } = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('2500000000') });
   const p = createGoogleAdsPlatform(cfg(t))!;
-  const r = await p.launch(req({ amountKrw: 5000, platformDailyBudgetKrw: 3000 }));
-  assert.deepEqual(r, { externalId: '4242', dailyBudgetKrw: 3000 });
+  const r = await p.launch(req({ amountKrw: 5000, platformDailyBudgetKrw: 2500 }));
+  assert.deepEqual(r, { externalId: '4242', dailyBudgetKrw: 2500 });
   const budget = JSON.parse(calls.find((c) => c.url.endsWith('campaignBudgets:mutate'))!.body);
-  assert.equal(budget.operations[0].create.amountMicros, '3000000000');
+  assert.equal(budget.operations[0].create.amountMicros, '2500000000');
   assert.ok(Number(budget.operations[0].create.amountMicros) / 1e6 <= 5000);
   const camp = JSON.parse(calls.find((c) => c.url.endsWith('campaigns:mutate'))!.body);
   assert.equal(camp.operations[0].create.status, 'PAUSED');
@@ -74,22 +74,22 @@ test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소
   const api = calls.find((c) => c.url.includes('googleads'))!;
   // developer token 없이 동작: 헤더에 developer-token이 없다. legacy 토큰을 주입한 때만 보낸다
   assert.deepEqual([api.headers.authorization, 'developer-token' in api.headers], [`Bearer ${ACCESS}`, false]);
-  const lg = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('3000000000') });
-  await createGoogleAdsPlatform(cfg(lg.t, { legacyDeveloperToken: 'dev-token-SECRET' }))!.launch(req({ platformDailyBudgetKrw: 3000 }));
+  const lg = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('2500000000') });
+  await createGoogleAdsPlatform(cfg(lg.t, { legacyDeveloperToken: 'dev-token-SECRET' }))!.launch(req({ platformDailyBudgetKrw: 2500 }));
   assert.equal(lg.calls.find((c) => c.url.includes('googleads'))!.headers['developer-token'], 'dev-token-SECRET');
   assert.ok(!calls.some((c) => /pageSize|page_size/.test(c.body)), '검색 요청에 page_size 없음(v26에서 오류)');
 });
 test('GA4 예산 보호: 상한 초과·비정수·0은 전송 0회 BUDGET_INVALID(failed), read-back 실패·불일치·초과는 dailyBudgetKrw=0(미확인) → 서버가 즉시 중지', async () => {
   const f = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP });
   const p = createGoogleAdsPlatform(cfg(f.t))!;
-  for (const bad of [{ platformDailyBudgetKrw: 5001 }, { platformDailyBudgetKrw: 0 }, { platformDailyBudgetKrw: 10.5 }, { platformDailyBudgetKrw: -1 }, { campaign: 'Bad Campaign' }, { requestKey: 'x' }]) {
+  for (const bad of [{ platformDailyBudgetKrw: 5001 }, { platformDailyBudgetKrw: 2501 } /* 2배 지출 시 승인액 초과 */, { platformDailyBudgetKrw: 0 }, { platformDailyBudgetKrw: 10.5 }, { platformDailyBudgetKrw: -1 }, { campaign: 'Bad Campaign' }, { requestKey: 'x' }]) {
     const e = (await run(p, (q) => q.launch(req(bad)))).err!;
     assert.deepEqual([e.outcome, e.code], ['failed', 'BUDGET_INVALID']);
   }
   assert.equal(f.calls.length, 0);
   for (const search of [{ status: 500 }, { status: 200, text: '{}' }, searchBudget('9999000000'), searchBudget('abc'), searchBudget('2500000000'.replace('2', '5000.5')), { status: 200, throws: true }] as Resp[]) {
     const g = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search });
-    const r = await createGoogleAdsPlatform(cfg(g.t))!.launch(req({ platformDailyBudgetKrw: 3000 }));
+    const r = await createGoogleAdsPlatform(cfg(g.t))!.launch(req({ platformDailyBudgetKrw: 2500 }));
     assert.deepEqual(r, { externalId: '4242', dailyBudgetKrw: 0 });
   }
 });
@@ -135,7 +135,7 @@ test('GA7 pause·성과 조회는 저장된 externalId로: 형식 검증, PAUSED
   }
   for (const day of ["2026-11-20' OR '1'='1", '11/20', '']) assert.equal((await run(p, (q) => q.fetchPerformance({ campaign: 'camp-a', externalId: '4242' }, day, opts()))).err!.code, 'BAD_REQUEST');
   const empty = fake({ token: OK_TOKEN, search: { status: 200, text: '{"results":[]}' } });
-  assert.deepEqual(await createGoogleAdsPlatform(cfg(empty.t))!.fetchPerformance({ campaign: 'camp-a', externalId: '4242' }, '2026-11-20', opts()), { impressions: 0, clicks: 0, costKrw: 0 });
+  assert.deepEqual(await createGoogleAdsPlatform(cfg(empty.t))!.fetchPerformance({ campaign: 'camp-a', externalId: '4242' }, '2026-11-20', opts()), { impressions: null, clicks: null, costKrw: null }); // 보고 지연: 0이 아니라 UNKNOWN(PM 11/22 P1 OS5)
   const other = fake({ token: OK_TOKEN, campaign: { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaigns/9` }] }) } });
   assert.deepEqual(await createGoogleAdsPlatform(cfg(other.t))!.pause({ campaign: 'camp-a', externalId: '4242' }, opts()), { paused: false });
 });

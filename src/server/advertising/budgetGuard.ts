@@ -60,3 +60,38 @@ export function judgeSpend(input: unknown): GuardResult {
     return INVALID;
   }
 }
+
+/**
+ * 계정 전체 판정(PM 11/22 P1): 여러 캠페인의 같은 날 지출을 합산해 judgeSpend 규칙으로 본다.
+ * 어느 캠페인이든 그날 값이 없으면(보고 지연) 그날 계정 합계도 UNKNOWN(null) → STOP_REQUIRED(fail-closed).
+ */
+export type CampaignSpend = { readonly campaign: string; readonly days: readonly SpendDay[] };
+export function judgeAccountSpend(campaigns: unknown): GuardResult {
+  try {
+    if (!Array.isArray(campaigns) || campaigns.length < 1 || campaigns.length > 50) return INVALID;
+    const byDate = new Map<string, number | null>();
+    const names = new Set<string>();
+    for (const c of campaigns as unknown[]) {
+      if (typeof c !== 'object' || c === null || Array.isArray(c)) return INVALID;
+      const r = c as Record<string, unknown>;
+      if (Object.keys(r).sort().join() !== 'campaign,days' || typeof r.campaign !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(r.campaign) || names.has(r.campaign)) return INVALID;
+      names.add(r.campaign);
+      if (!Array.isArray(r.days) || r.days.length < 1 || r.days.length > 3) return INVALID;
+      const seen = new Set<string>();
+      for (const d of r.days as unknown[]) {
+        if (typeof d !== 'object' || d === null || Array.isArray(d)) return INVALID;
+        const x = d as Record<string, unknown>;
+        if (Object.keys(x).sort().join() !== 'date,spendKrw' || !isDate(x.date) || seen.has(x.date)) return INVALID;
+        seen.add(x.date);
+        if (x.spendKrw !== null && (typeof x.spendKrw !== 'number' || !Number.isSafeInteger(x.spendKrw) || x.spendKrw < 0)) return INVALID;
+        const prev = byDate.get(x.date);
+        byDate.set(x.date, prev === null || x.spendKrw === null ? null : (prev ?? 0) + (x.spendKrw as number));
+      }
+    }
+    if (byDate.size > 3) return INVALID;
+    const days = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, spendKrw]) => ({ date, spendKrw }));
+    return judgeSpend({ dailyCapKrw: AD_DAILY_CAP_KRW, totalCapKrw: AD_FIRST3DAYS_CAP_KRW, days });
+  } catch {
+    return INVALID;
+  }
+}

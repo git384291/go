@@ -66,7 +66,7 @@ run db/tests/97_notice_reviews.sql >/dev/null   # 총판 고지 검수 기록(00
 run db/tests/98_notice_intake_gate.sql >/dev/null   # 접수 직전 고지 승인 게이트(0016)
 run db/tests/99_dealer_application.sql >/dev/null   # 총판 전달용 신청서(0017)
 run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
-run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험 재현(PM 11/22 P1, 현재 동작 기록)
+run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM 11/22 P1): 0020 계정 합산 한도·fail-closed 검증
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 
 echo "== TypeScript ↔ DB signature parity"
@@ -624,9 +624,17 @@ D -f db/rollback/0019_restore.sql >/dev/null
 back19=$(D -At -c "select (to_regprocedure('api.application_amend(text,text,text,text,text,text)') is not null and to_regclass('pii.lead_amendments') is not null)")
 [ "$gone19" = t ] && [ "$back19" = t ] || { echo "FAIL | M19 0019 롤백 gone=$gone19 복구=$back19" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M19 재접수 변경 요청 0019 롤백: 함수 2개·테이블 제거(보관), 재적용·복구" >> "$LOG_DIR/db-test.log"
+# 0020 계정 합산 광고 한도: 적용 → 롤백(0013 정의 복원) → 재적용
+D -f db/migrations/0020_ad_account_caps.sql >/dev/null
+has20() { D -At -c "select position('ACCOUNT_DAILY_CAP_EXCEEDED' in prosrc) > 0 from pg_proc where oid = 'api.ad_spend_request(uuid,uuid,text,text,int,text)'::regprocedure"; }
+on20=$(has20); D -f db/rollback/0020_down.sql >/dev/null; off20=$(has20); D -f db/migrations/0020_ad_account_caps.sql >/dev/null; back20=$(has20)
+[ "$on20" = t ] && [ "$off20" = f ] && [ "$back20" = t ] || { echo "FAIL | M20 0020 롤백 적용=$on20 롤백=$off20 재적용=$back20" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M20 계정 합산 광고 한도 0020 롤백: 0013 정의 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
-"${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)
+"${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null
+# 0020 계정 합산 한도는 DB 전체 원장을 본다: 앞선 SQL 시험이 남긴 광고 원장·경고·launch를 폐기 DB에서만 비운다(통합 시험 격리, 운영 DB에 쓰지 않음)
+"${PSQL[@]}" -d "$DB" -f db/tests/reset_ad_account.sql >/dev/null   # 통합 시험의 가상 고지 승인(접수 게이트용)
 echo "== app ↔ DB integration (staff session service + withRole, real PostgreSQL)"
 # 앱과 같은 TypeScript 배선을 실제 가상 DB에 실행한다. postgres 드라이버가 없으면 통과로 처리하지 않고 실패한다.
 if ! node -e "require.resolve('postgres')" >/dev/null 2>&1; then

@@ -92,7 +92,7 @@ insert into core.ad_spend_ledger (campaign_key, approval_id, spend_date, amount_
 values ('camp-b', current_setting('t.bid')::uuid, (now() at time zone 'Asia/Seoul')::date - 1, 9000, 'req-b-0000000000001', '00000000-0000-4000-8000-000000000001');
 set role app_staff;
 select test.expect_eq($$select test.addecide('owner', 'camp-b', 4000, 'req-b-0000000000002')$$, 'BLOCK:TOTAL_CAP_EXCEEDED', 'A14 총 한도 초과 차단');
-select test.expect_eq($$select test.addecide('owner', 'camp-b', 3000, 'req-b-0000000000003')$$, 'ALLOW:', 'A14b 총 한도 안이면 허용');
+select test.expect_eq($$select test.addecide('owner', 'camp-b', 3000, 'req-b-0000000000003')$$, 'BLOCK:ACCOUNT_DAILY_CAP_EXCEEDED', 'A14b 캠페인 총 한도 안이어도 계정 당일 합계(camp-a 1만 + 3천) 초과면 차단(0020)');
 reset role;
 
 -- A15 원장·승인 내용은 수정·삭제 불가

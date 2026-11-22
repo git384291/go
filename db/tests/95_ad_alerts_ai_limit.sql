@@ -32,7 +32,7 @@ select test.expect_eq($$select count(*)::text from core.audit_logs where action 
 set role app_staff;
 select test.expect_eq($$select test.aidec('camp-w', 100, 'req-w-0000000000001')$$, 'BLOCK:STOP_PENDING', 'W3 경고 열림 → 지출 차단(STOP_PENDING)');
 select test.expect_error_msg(test.adapprove('owner', 'camp-w', 5000, 20000), '22023', 'ALERT_OPEN', 'W3b 경고 열림 → 새 승인 불가');
-select test.expect_eq($$select test.aidec('camp-other', 100, 'req-w-0000000000002')$$, 'BLOCK:NO_APPROVAL', 'W3c 다른 캠페인은 영향 없음(원래 규칙)');
+select test.expect_eq($$select test.aidec('camp-other', 100, 'req-w-0000000000002')$$, 'BLOCK:STOP_PENDING', 'W3c 다른 캠페인도 차단(0020: 중지 실패 경고는 계정 전체 fail-closed)');
 -- W4 목록
 select test.expect_ok(test.adcall('reviewer', 'ad_alert_list', '50'), 'W4 검토자 경고 목록 조회');
 select test.expect_error(test.adcall('counselor', 'ad_alert_list', '50'), '42501', 'W4b 상담원 조회 불가');

@@ -1,5 +1,6 @@
 -- 광고 성과 수집·분석 + AI 사용료 집계(0011): 권한, 멱등, 초과 표시, 추가 전용, 예약 한도. 가상 데이터만 사용한다.
 \set ON_ERROR_STOP 1
+\ir reset_ad_account.sql   -- 0020 계정 합산 한도: 앞 파일(70)의 당일 원장 격리
 grant usage on schema test to app_ai;
 grant execute on all functions in schema test to app_ai;
 
