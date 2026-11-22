@@ -228,7 +228,7 @@ test('AR13 중복 active launch·같은 요청 키: DB가 막으면 지출 판�
 test('AR14 시간 초과(unknown): 자동 재launch 없음·unknown 저장·사람 확인 필요 표시, 비밀 노출 없음', async () => {
   const s = spy(false, { async launch() { return new Promise(() => undefined); } });
   const t0 = Date.now();
-  const pr = await callPlatform(() => s.p.launch({ campaign: 'c', amountKrw: 1, requestKey: KEY, platformDailyBudgetKrw: 1, deadlineAt: Date.now() }), 30);
+  const pr = await callPlatform(() => s.p.launch({ campaign: 'c', amountKrw: 1, requestKey: KEY, platformDailyBudgetKrw: 1, endDate: '2026-11-21', deadlineAt: Date.now() }), 30);
   assert.deepEqual(pr, { status: 'unknown', code: 'TIMEOUT' }); assert.ok(Date.now() - t0 < 2000);
   const f = await callPlatform(async () => { throw new PlatformError('failed', 'REJECTED'); });
   assert.deepEqual(f, { status: 'failed', code: 'REJECTED' });
@@ -239,7 +239,7 @@ test('AR14 시간 초과(unknown): 자동 재launch 없음·unknown 저장·사�
   assert.deepEqual([b.reason, b.outcome, b.needsReview, su.c.launch, states.length], ['PLATFORM_UNKNOWN', 'unknown', true, 0, 1]);
 });
 test('AR15 플랫폼 일 예산 상한이 승인 금액을 넘으면 계약 위반: 즉시 철회·중지·경고', async () => {
-  const s = spy(false, { async launch() { return { externalId: 'ext-1', dailyBudgetKrw: 99999 }; } });
+  const s = spy(false, { async launch() { return { externalId: 'ext-1', dailyBudgetKrw: 99999, endVerified: true }; } });
   const m = mk({ platform: s.p, ltx: ACTIVE, tx: (q) => (q.includes('ad_alert_open') ? [{ id: '11111111-1111-4111-8111-111111111111' }] : [{ r: { decision: 'ALLOW', end_date: '2026-11-21' } }]) });
   const r = await adRunAction(m.d, launch());
   const b = await j(r);
