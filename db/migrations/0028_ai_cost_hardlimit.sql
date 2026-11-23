@@ -31,7 +31,8 @@ alter table core.ai_usage_closures drop constraint ai_usage_closures_kind_check;
 alter table core.ai_usage_closures drop constraint ai_usage_closures_check;
 alter table core.ai_usage_closures
   add constraint ai_usage_closures_kind_check check (kind in ('confirm', 'cancel', 'uncertain')),
-  add constraint ai_usage_closures_amount_check check ((kind = 'cancel' and actual_cost_krw = 0) or (kind in ('confirm', 'uncertain') and actual_cost_krw >= 1));
+  -- NOT VALID: 새 기록에만 적용한다. 0012 규칙으로 이미 저장된 '0원 확정' 기록(추가 전용, 수정 불가)이 있는 DB에서도 이 마이그레이션이 멈추지 않게 한다
+  add constraint ai_usage_closures_amount_check check ((kind = 'cancel' and actual_cost_krw = 0) or (kind in ('confirm', 'uncertain') and actual_cost_krw >= 1)) not valid;
 
 -- 불확실 정산의 사후 조정(예약당 1번, 추가 전용)
 create table core.ai_usage_adjustments (
