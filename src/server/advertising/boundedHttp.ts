@@ -11,11 +11,11 @@ import 'server-only';
 export type BodyTransport = (
   url: string,
   init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: Uint8Array; signal: AbortSignal; redirect: 'error' },
-) => Promise<{ status: number; body: ReadableStream<Uint8Array> | null }>;
+) => Promise<{ status: number; body: ReadableStream<Uint8Array> | null; /** 선택: 있으면 2xx가 아닐 때 Retry-After(정수 초)만 읽는다 */ headers?: { get(name: string): string | null } }>;
 
 export type BoundedResult =
   | { readonly kind: 'ok'; readonly status: number; readonly text: string }
-  | { readonly kind: 'http'; readonly status: number }
+  | { readonly kind: 'http'; readonly status: number; readonly retryAfterSec?: number }
   | { readonly kind: 'error'; readonly code: 'TIMEOUT' | 'TOO_LARGE' | 'TRANSPORT_ERROR' | 'BAD_RESPONSE'; readonly sent: boolean };
 
 type Reader = ReadableStreamDefaultReader<Uint8Array>;
@@ -39,7 +39,7 @@ export async function boundedRequest(
   transport: BodyTransport,
   url: string,
   init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: Uint8Array },
-  limits: { deadlineAt: number; maxResponseBytes: number },
+  limits: { deadlineAt: number; maxResponseBytes: number; /** 선택: 바깥 취소 신호. 취소되면 진행 중 요청을 중단하고 TIMEOUT으로 끝낸다 */ signal?: AbortSignal },
 ): Promise<BoundedResult> {
   const remaining = limits.deadlineAt - Date.now();
   if (!(remaining > 0)) return E('TIMEOUT', false);
@@ -54,13 +54,20 @@ export async function boundedRequest(
     if (activeReader) cancelQuiet(activeReader);
     else cancelQuiet(ownedBody);
   };
+  const outer = limits.signal;
+  let onOuter: (() => void) | undefined;
   const deadline = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => {
+    const stop = () => {
       expired = true;
       ac.abort();
       cleanup();
       resolve('timeout');
-    }, remaining);
+    };
+    timer = setTimeout(stop, remaining);
+    if (outer) {
+      if (outer.aborted) stop();
+      else { onOuter = stop; outer.addEventListener('abort', stop, { once: true }); }
+    }
   });
 
   // 타이머는 abort·반환 보조일 뿐이다. 각 await 뒤에는 절대 시각을 직접 대조한다(이벤트 루프 지연으로 타이머가 늦어도 성공 불가)
@@ -112,8 +119,16 @@ export async function boundedRequest(
       return E('BAD_RESPONSE', true);
     }
     if (status < 200 || status >= 300) {
+      // Retry-After는 정수 초(1~3600)만 인정한다(날짜 형식·이상한 값은 무시). 본문은 읽지 않는다
+      let ra: number | undefined;
+      try {
+        const v = res.headers?.get('retry-after');
+        if (typeof v === 'string' && /^\d{1,4}$/.test(v.trim()) && Number(v) >= 1 && Number(v) <= 3600) ra = Number(v);
+      } catch {
+        /* 무시 */
+      }
       cleanup();
-      return Object.freeze({ kind: 'http', status });
+      return Object.freeze(ra === undefined ? { kind: 'http' as const, status } : { kind: 'http' as const, status, retryAfterSec: ra });
     }
     const body = ownedBody;
     if (!body || typeof body !== 'object') return E('BAD_RESPONSE', true);
@@ -159,6 +174,7 @@ export async function boundedRequest(
     return r;
   } finally {
     if (timer) clearTimeout(timer);
+    if (outer && onOuter) outer.removeEventListener('abort', onOuter);
   }
 }
 

@@ -13,7 +13,7 @@ export type SubmitResult = { ok: true; outcome: SubmitOutcome } | { ok: false; c
 const firstValue = (rows: unknown): unknown => { const r = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined; return r ? Object.values(r)[0] : undefined; };
 
 /** DB 게이트(api.notice_intake_gate)가 접수를 막을 때 돌려주는 오류 메시지(문구·개인정보 없음). 모두 503으로 닫는다 */
-const GATE_CODES = new Set(['NOTICE_INVALID', 'NOTICE_VERSION_MISMATCH', 'NOTICE_NOT_FOUND', 'NOTICE_KEYS_MISMATCH', 'NOTICE_HASH_MISMATCH', 'NOTICE_NOT_APPROVED', 'NOTICE_CHANGED', 'NOTICE_SELF_APPROVED']);
+const GATE_CODES = new Set(['NOTICE_INVALID', 'NOTICE_VERSION_MISMATCH', 'NOTICE_NOT_FOUND', 'NOTICE_KEYS_MISMATCH', 'NOTICE_HASH_MISMATCH', 'NOTICE_NOT_APPROVED', 'NOTICE_CHANGED', 'NOTICE_SELF_APPROVED', 'POLICY_UNVERIFIED']);
 
 export { noticeHashes };
 
@@ -27,6 +27,13 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
     let outcome: SubmitOutcome = 'created';
     await run(async (tx) => {
       await tx`select api.notice_intake_gate(${notices.version}, ${hashes}::text::jsonb)`;
+      // PM 11/24 B: 정책 검증 장애면 저장하지 않는다. DB 게이트가 정책 상태를 이 트랜잭션 끝까지 고정(공유 잠금)한 뒤 같은 상태로 서버가 다시 판정한다
+      if (ctx.policyFault) {
+        await tx`select api.policy_intake_gate()`;
+        const rows = (await tx`select api.policy_published() as p`) as unknown;
+        const list = Array.isArray(rows) ? rows.map((r) => (r as { p?: unknown } | null)?.p) : rows;
+        if (!Array.isArray(list) || await ctx.policyFault(list, new Date())) throw new LeadRejected('POLICY_UNVERIFIED');
+      }
       await tx`
       select api.create_lead(${a.token}, ${a.nameEnc}, ${a.nameMasked}, ${a.phoneEnc}, ${a.phoneHmac}, ${a.phoneLast4},
                              ${a.interest}, ${a.contactTime}, ${a.utmSource}, ${a.utmMedium}, ${a.utmCampaign},
@@ -49,7 +56,7 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
     });
     return { ok: true, outcome };
   } catch (e) {
-    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' || e.code === 'NOTICE_HASH_MISMATCH' ? 503 : 400);
+    if (e instanceof LeadRejected) return rejected(e.code, e.code === 'PRODUCT_NOT_ACTIVE' ? 403 : e.code === 'NOTICE_NOT_CONFIRMED' || e.code === 'NOTICE_HASH_MISMATCH' || e.code === 'POLICY_UNVERIFIED' ? 503 : 400);
     const code = (e as { code?: string }).code;
     if (code === '54000') return rejected('RATE_LIMITED', 429);
     const msg = String((e as { message?: unknown }).message ?? '').trim();

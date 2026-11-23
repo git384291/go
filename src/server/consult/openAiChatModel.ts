@@ -104,10 +104,10 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
         method: 'POST',
         headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
         body: enc.encode(bodyText),
-      }, { deadlineAt: Date.now() + config.timeoutMs, maxResponseBytes: config.maxResponseBytes });
+      }, { deadlineAt: Date.now() + config.timeoutMs, maxResponseBytes: config.maxResponseBytes, signal });
       if (r.kind === 'error' && !r.sent) throw new ModelNotCalledError(r.code);
       // 실패 종류만 구분한다(재시도 여부는 modelRecovery가 정한다): 429·5xx·timeout·네트워크 = 재시도 가능, 4xx·응답 형식·거절 = 불가
-      if (r.kind === 'http') throw new ModelCallError(r.status === 429 ? 'HTTP_RATE_LIMITED' : 'HTTP_ERROR', r.status === 429 ? 'rate_limited' : r.status >= 500 ? 'server' : 'client', r.status);
+      if (r.kind === 'http') throw new ModelCallError(r.status === 429 ? 'HTTP_RATE_LIMITED' : 'HTTP_ERROR', r.status === 429 ? 'rate_limited' : r.status >= 500 ? 'server' : 'client', r.status, r.retryAfterSec === undefined ? undefined : r.retryAfterSec * 1000);
       if (r.kind === 'error') throw new ModelCallError(r.code, r.code === 'TIMEOUT' ? 'timeout' : r.code === 'TRANSPORT_ERROR' ? 'network' : 'response');
       try { return parseChatReply(r.text); } catch (e) { throw new ModelCallError(e instanceof Error ? e.message : 'BAD_RESPONSE', 'response'); }
     },

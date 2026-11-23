@@ -72,6 +72,20 @@ run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 �
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0026)
+run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
+
+echo "== 정책 변경과 접수 동시 요청(0025): 접수 트랜잭션이 끝날 때까지 정책 쓰기는 대기"
+"${PSQL[@]}" -d "$DB" -c "begin; select api.policy_intake_gate(); select pg_sleep(3); commit;" >/dev/null &
+GATE_BG=$!
+sleep 1
+if "${PSQL[@]}" -d "$DB" -c "set lock_timeout = '500ms'; update core.feature_flags set enabled = enabled where key = 'policy_publish'" >/dev/null 2>"$LOG_DIR/policy_lock.err"; then
+  wait "$GATE_BG" || true
+  echo "FAIL | PG6 접수 트랜잭션 진행 중 게시 스위치 쓰기가 기다리지 않음" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+grep -q "lock timeout" "$LOG_DIR/policy_lock.err" || { wait "$GATE_BG" || true; echo "FAIL | PG6 예상 밖 오류: $(head -c 200 "$LOG_DIR/policy_lock.err")" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+wait "$GATE_BG"
+"${PSQL[@]}" -d "$DB" -c "set lock_timeout = '2s'; update core.feature_flags set enabled = enabled where key = 'policy_publish'" >/dev/null
+echo "NOTICE:  PASS | PG6 접수 트랜잭션 중 정책 쓰기 대기(lock timeout) → 접수 종료 뒤 쓰기 가능" >> "$LOG_DIR/db-test.log"
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)

@@ -15,6 +15,7 @@ import { answerChat } from '../../src/server/consult/chatAnswer';
 import { handleChat } from '../../src/server/consult/chatHandler';
 import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type ChatModel } from '../../src/server/consult/chatModel';
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
+import { policyFaultFromEnv } from '../../src/server/leads/policyFault';
 import { aiBudgetGet, aiBudgetSet } from '../../src/server/admin/aiBudget';
 import { issueSession } from '../../src/server/consult/consultSession';
 import { adFunnel, adRunAction } from '../../src/server/admin/adRun';
@@ -668,4 +669,21 @@ test('E16 대표 직접 연락 동의(PM 11/22 ② 7): 고객이 잘 모르면 �
   assert.equal((await items()).length, before);
   const [a] = await admin`select count(*)::int as n from core.audit_logs where action in ('followup.request', 'followup.done') and target_id = ${mine.leadId}::uuid`;
   assert.equal(a.n, 2);
+});
+
+test('E17 정책 검증 장애(B, PM 11/24): 실제 DB 게이트·재조회를 거쳐 장애면 리드·고객정보 0건 증가(롤백), 정상(정책 없음·스위치 OFF)은 접수', async () => {
+  const CUST = `select count(*)::int as n from pii.customers`;
+  const flag = async () => String(((await admin`select enabled::text as e from core.feature_flags where key = 'policy_publish'`)[0] as { e: string }).e);
+  const off = await flag();
+  const fault = policyFaultFromEnv({ QUOTE_SUPPLIER_ID: 'supplier-a', CONSULT_CHAT_CARRIER: 'carrier-x', CONSULT_CHAT_PRODUCT: 'net500-tv-basic', CONSULT_CHAT_REGION: 'region-1' });
+  const [l0, c0] = [await count(LEADS), await count(CUST)];
+  const blocked = await submitLead(body({ phone: '010-7777-9917', idempotencyKey: 'e2e-intake-policy-00000017' }), ctx({ clientIp: '203.0.113.217', policyFault: async () => true }), run);
+  assert.deepEqual(blocked, { ok: false, code: 'POLICY_UNVERIFIED', status: 503 });
+  assert.deepEqual([await count(LEADS), await count(CUST)], [l0, c0], '장애면 리드·고객정보 저장 없음(트랜잭션 롤백)');
+  let seen: unknown = null;
+  const ok = await submitLead(body({ phone: '010-7777-9918', idempotencyKey: 'e2e-intake-policy-00000018' }), ctx({ clientIp: '203.0.113.218', policyFault: async (rows, now) => { seen = rows; return fault(rows, now); } }), run);
+  assert.deepEqual(ok, { ok: true, outcome: 'created' }, '정상 상태는 기존대로 접수(실제 DB 게이트 함수·공개 역할 권한)');
+  assert.ok(Array.isArray(seen), '같은 트랜잭션에서 api.policy_published()를 읽어 판정');
+  assert.equal(await count(LEADS), l0 + 1);
+  assert.equal(await flag(), off, '게시 스위치 값 변경 없음');
 });

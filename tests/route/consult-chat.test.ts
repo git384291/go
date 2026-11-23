@@ -9,6 +9,8 @@ import type { ChatModel, ModelInput } from '../../src/server/consult/chatModel';
 import { maskPii } from '../../src/server/consult/piiMask';
 import { createLimiter, handleChat } from '../../src/server/consult/chatHandler';
 import { NEEDS_REVIEW_GUIDANCE } from '../../src/server/policies';
+import { POLICY_UNVERIFIED_GUIDANCE } from '../../src/content/consultGuidance';
+const dbDown = () => { throw new Error('db down'); };
 
 const NOW = new Date('2026-11-23T12:00:00+09:00');
 const K = <T,>(value: T) => ({ known: true as const, value });
@@ -244,10 +246,11 @@ test('BN4 표현만 바꾼 허위 혜택 BLOCK(사은품 없음·설치비 2,222
   }
 });
 test('BN5 정책 조회 실패·정책 없음이면 어떤 혜택 언급도 BLOCK(담당자 확인)', async () => {
-  for (const provider of [() => { throw new Error('db down'); }, () => []]) {
+  for (const provider of [dbDown, () => []]) {
     for (const t of ['상품권 드려요', '설치비 무료', '혜택 많아요']) {
       const a = await say(rec, t, provider as never);
-      assert.ok(a.ok && a.source === 'fallback' && a.text === NEEDS_REVIEW_GUIDANCE, t);
+      // PM 11/24: 조회 실패는 정책 검증 장애(B) → B 안내·접수 잠금, 정책 없음은 정상 '담당자 확인'
+      assert.ok(a.ok && a.source === 'fallback' && (provider === dbDown ? a.text === POLICY_UNVERIFIED_GUIDANCE && a.next === 'blocked' : a.text === NEEDS_REVIEW_GUIDANCE), t);
     }
   }
 });
@@ -272,10 +275,11 @@ test('MB3 할인율: 승인 문장에 없는 %·퍼센트·할·한글 수사는
   }
 });
 test('MB4 정책값 확인 불가(조회 실패·정책 없음)면 금액·할인율·혜택 모두 담당자 확인으로 전환', async () => {
-  for (const provider of [() => { throw new Error('db down'); }, () => []]) {
+  for (const provider of [dbDown, () => []]) {
     for (const t of ['월 11,111원입니다', '10% 할인', '36개월 약정이고 3만원 드려요']) {
       const a = await say(rec, t, provider as never);
-      assert.ok(a.ok && a.source === 'fallback' && a.text === NEEDS_REVIEW_GUIDANCE, t);
+      // PM 11/24: 조회 실패는 정책 검증 장애(B) → B 안내·접수 잠금, 정책 없음은 정상 '담당자 확인'
+      assert.ok(a.ok && a.source === 'fallback' && (provider === dbDown ? a.text === POLICY_UNVERIFIED_GUIDANCE && a.next === 'blocked' : a.text === NEEDS_REVIEW_GUIDANCE), t);
     }
   }
 });

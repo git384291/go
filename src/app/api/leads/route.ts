@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { leadIntakeGate } from '@/server/leads/intake';
 import { submitLead } from '@/server/leads/submitLead';
+import { policyFaultFromEnv } from '@/server/leads/policyFault';
 import { createPiiCrypto, piiKeysFromEnv } from '@/server/security/piiCrypto';
 import { signingKeyFromEnv } from '@/server/security/token';
 import { verifyTurnstile } from '@/server/leads/turnstile';
@@ -56,6 +57,7 @@ export async function POST(req: Request) {
         signingKey: signingKeyFromEnv('lead'),
         currentPrivacyVersion: process.env.PRIVACY_POLICY_VERSION ?? '',
         clientIp: ip,
+        policyFault: policyFaultFromEnv(process.env), // PM 11/24 B: 정책 검증 장애면 서버·DB에서 접수 차단
       },
       (fn) => withRole('public', (tx) => fn(tx as never) as Promise<unknown>),
     );
