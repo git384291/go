@@ -48,7 +48,7 @@ function fake(over: Partial<Record<Key, Resp>> = {}) {
 }
 const mk = (t: BodyTransport, o: Record<string, unknown> = {}) =>
   createGoogleAdsPlatform({ transport: t, clientId: 'cid-SECRET', clientSecret: 'cs-SECRET', refreshToken: 'rt-SECRET', customerId: CID, creative: approvedRsaCreative(), keywords: KWS, landingUrl: LANDING, ...o } as Parameters<typeof createGoogleAdsPlatform>[0]);
-const req = () => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: 'req-0123456789abcdef', platformDailyBudgetKrw: 2500, endDate: '2026-11-30', deadlineAt: Date.now() + 5000 });
+const req = () => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: 'req-keyword-test-0001', platformDailyBudgetKrw: 2500, endDate: '2026-11-30', deadlineAt: Date.now() + 5000 });
 const err = async (f: () => Promise<unknown>) => { try { await f(); return null; } catch (e) { return e as PlatformError; } };
 const seq = (c: { key: Key }[]) => c.map((x) => x.key);
 
