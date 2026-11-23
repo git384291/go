@@ -37,6 +37,11 @@ try {
     if (u.pathname === '/api/consult/chat') {
       seen.api.push(JSON.parse(req.postData() ?? '{}'));
       if (mode === 'ok') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, kind: 'quote', source: 'model', next: 'signup', text: '월 11,111원(가상 승인 안내)\n- 사은품: 3,333원 상품권', session: TOKEN }) });
+      if (mode === 'busy') return route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'BUSY' }) });
+      if (mode === 'err500') return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'INTERNAL_SECRET' }) });
+      if (mode === 'neterr') return route.abort('failed');
+      if (mode === 'hang') return new Promise(() => {});
+      if (mode === 'slowok') { await new Promise((r) => setTimeout(r, 300)); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, kind: 'quote', source: 'model', next: 'signup', text: '월 11,111원(가상 승인 안내)', session: TOKEN }) }); }
       if (mode === 'down') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'DISABLED' }) });
       return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"text":123}' });
     }
@@ -97,6 +102,46 @@ try {
     await p2.waitForFunction(() => !document.querySelector('button[disabled]'));
     check('BT4 만료 후 재시도로 복구, 안내 사라짐', (await p2.locator('[data-bot-status]').count()) === 0 && !(await s2.isDisabled()));
     await p2.close();
+  }
+  // RB: 장애·복구(PM 11/24). 429(BUSY)·5xx·네트워크 단절·무응답(브라우저 timeout)은 모두 안전 안내문, 내부 코드 노출 없음, 보내기 다시 열림(상담 재개), 연타해도 요청 1회
+  {
+    mode = 'ok';
+    const p3 = await ctx.newPage();
+    await p3.clock.install();
+    await p3.goto(`${ORIGIN}/`);
+    await p3.waitForSelector('textarea');
+    await p3.clock.fastForward(100);
+    await p3.waitForFunction(() => window.__ts && window.__ts.issued >= 1);
+    const s3 = p3.getByRole('button', { name: '보내기' });
+    const b3 = p3.locator('textarea[aria-label="상담 내용"]');
+    const bubbles = () => p3.locator('[data-from="ai"]');
+    const ask = async (text) => { const n = await bubbles().count(); await b3.fill(text); await p3.waitForFunction(() => !document.querySelector('button[disabled]')); await s3.click(); return n; };
+    const answered = async (n) => { await p3.waitForFunction((k) => document.querySelectorAll('[data-from="ai"]').length > k, n); return bubbles().nth(n).innerText(); };
+    let n = await ask('정상 질문'); check('RB0 정상 응답으로 세션 시작', (await answered(n)).includes('11,111원'));
+    for (const [id, m, leak] of [['RB1 429 BUSY', 'busy', 'BUSY'], ['RB2 5xx', 'err500', 'INTERNAL_SECRET'], ['RB3 네트워크 단절', 'neterr', 'failed']]) {
+      mode = m; n = await ask(`${id} 질문`);
+      const t = await answered(n);
+      check(`${id}: 안전 안내문, 내부 코드 노출 없음, 요금·약속 문구 없음`, t.includes('자동 안내를 불러오지 못했습니다') && !t.includes(leak) && !t.includes('담당자가') && !/\d{3,}원/.test(t));
+      await b3.fill('다시 보낼 글');
+      check(`${id} 뒤 글을 쓰면 보내기가 다시 열림(상담 재개 가능)`, await s3.isEnabled());
+    }
+    // 무응답: 브라우저가 13초 뒤 기다리기를 멈추고 안전 안내문(자동 재시도 없음 = 요청 1회)
+    mode = 'hang'; const before = seen.api.length; n = await ask('무응답 질문');
+    await p3.clock.fastForward(14000);
+    const th = await answered(n);
+    check('RB4 무응답: 13초 뒤 안전 안내문, 요청 1회(브라우저 자동 재시도 없음)', th.includes('자동 안내를 불러오지 못했습니다') && seen.api.length - before === 1);
+    // 복구: 서버가 정상으로 돌아오면 같은 화면에서 정상 상담 재개
+    mode = 'ok'; n = await ask('복구 뒤 질문');
+    const tr = await answered(n);
+    check('RB5 복구 뒤 같은 화면에서 정상 답변 재개(서버 세션 토큰 유지)', tr.includes('11,111원') && seen.api[seen.api.length - 1].session === TOKEN);
+    // 연타: 같은 순간 두 번 눌러도 요청 1회
+    mode = 'slowok'; const b4 = seen.api.length; await b3.fill('연타 질문'); await p3.waitForFunction(() => !document.querySelector('button[disabled]'));
+    await p3.evaluate(() => { const bt = [...document.querySelectorAll('button')].find((x) => x.textContent === '보내기'); bt.click(); bt.click(); });
+    n = (await bubbles().count());
+    await p3.waitForFunction((k) => document.querySelectorAll('[data-from="ai"]').length > k, n);
+    check('RB6 같은 순간 연타해도 요청 1회·답변 1개', seen.api.length - b4 === 1 && (await bubbles().count()) === n + 1);
+    check('RB7 장애 시험 중 예외 0·외부 요청 0', seen.errors.length === 0 && seen.external.length === 0);
+    await p3.close();
   }
   await ctx.close();
 } catch (e) { check('실행 중 예외 없음', false, String(e.message).split('\n')[0]); } finally { await browser.close(); }

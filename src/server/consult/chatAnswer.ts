@@ -4,7 +4,7 @@ import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
 import { maskPii } from './piiMask';
 import { SYSTEM_PROMPT } from './chatModel';
 import { ModelNotCalledError } from './chatModel';
-import type { AiBudget, ChatModel } from './chatModel';
+import type { AiBudget, CallMeter, ChatModel } from './chatModel';
 
 /**
  * AI 24시간 상담 답변(PM 11/21 ②). 요금·사은품은 승인된 정책 견적 문장에서만 나온다.
@@ -56,6 +56,13 @@ export function benefitClaimsAllowed(reply: string, approved: QuoteAnswer): bool
   return true;
 }
 
+/** 상담 1회 전체 시간 상한: 기본 8초, 어떤 설정도 10초를 넘을 수 없다(복구 재시도 포함 모든 시도가 이 안에서 끝난다) */
+export const CHAT_TIMEOUT_DEFAULT_MS = 8000;
+export const CHAT_TIMEOUT_MAX_MS = 10_000;
+export function chatTimeoutMs(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CHAT_TIMEOUT_MAX_MS, Math.trunc(v)) : CHAT_TIMEOUT_DEFAULT_MS;
+}
+
 export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): Promise<ChatReply> {
   const m = input.message;
   if (typeof m !== 'string' || m.trim().length < 1 || m.length > 300) return { ok: false, code: 'INVALID_INPUT' };
@@ -68,20 +75,23 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const hold = await deps.budget.reserve(model.costPerCallKrw);
   if (!hold) return fallback();
   const ctl = new AbortController();
+  const meter: CallMeter = { sent: 0 };
+  // 확정 비용: 재시도 래퍼가 센 전송 횟수만큼(예약 이하). 세지 않는 모델은 예약 전액(보수적)
+  const spent = () => (model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const reply = await Promise.race([
-      model.generate({ system: SYSTEM_PROMPT, user: maskPii(m), approved: approved.text }, ctl.signal),
-      new Promise<never>((_, rej) => { timer = setTimeout(() => { rej(new Error('TIMEOUT')); ctl.abort(); }, deps.timeoutMs ?? 8000); }),
+      model.generate({ system: SYSTEM_PROMPT, user: maskPii(m), approved: approved.text }, ctl.signal, meter),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => { rej(new Error('TIMEOUT')); ctl.abort(); }, chatTimeoutMs(deps.timeoutMs)); }),
     ]);
-    await hold.confirm(model.costPerCallKrw);
+    await hold.confirm(spent());
     const guarded = guardAiReply(reply, approved);
     if (guarded.text !== reply) return fallback();
     if (!benefitClaimsAllowed(reply, approved)) return fallback();
     return withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m);
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
-    if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(model.costPerCallKrw);
+    if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(spent());
     return fallback();
   } finally {
     if (timer) clearTimeout(timer);

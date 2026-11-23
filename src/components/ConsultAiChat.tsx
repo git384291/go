@@ -10,6 +10,8 @@ import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './T
 // 개인정보는 여기 쓰지 않도록 안내하고(서버도 가림), 신청은 기존 접수 양식(/consult)으로 이어진다. 모델·키·비용 정보는 화면에 없다.
 // 상담창에는 연락처가 없으므로 '담당자가 연락' 같은 약속을 하지 않는다. 다시 보내기 또는 신청 양식(대표 직접 연락 동의 포함)으로 안내한다
 export const SAFE = '지금은 자동 안내를 불러오지 못했습니다. 잠시 후 다시 보내 주시거나, 아래 가입 상담 신청 양식에 남겨 주세요.';
+/** 서버 응답이 이 시간 안에 안 오면(서버 상담 상한 8~10초 + 여유) 기다리기를 멈추고 안전 안내문으로 전환한다. 브라우저는 자동 재시도하지 않는다(재시도는 서버가 상한 안에서만) */
+export const CLIENT_TIMEOUT_MS = 13000;
 export type ChatChoice = { carrier: string; productId: string; regionCode: string };
 type Msg = { from: 'me' | 'ai' | 'assist'; text: string };
 const TURNSTILE_SITE_KEY = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim();
@@ -27,6 +29,8 @@ export function ConsultAiChat({ choice, application, intakeOpen = false }: { cho
   const [text, setText] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
+  // 상태 갱신 전에 두 번 눌러도 요청이 한 번만 나가도록 막는 동기 잠금
+  const sending = useRef(false);
   // 서버가 첫 응답에서 내려 주는 서명 세션 토큰(상담 시작 건수 집계용, 개인정보 아님). 브라우저가 직접 만들지 않는다
   const [session, setSession] = useState<string | null>(null);
   // 새 상담 세션은 서버 측 봇 확인(PM 11/22 F1)을 통과해야 열린다. 토큰은 1회용: 보낸 뒤 비우고 위젯을 다시 받는다
@@ -43,22 +47,27 @@ export function ConsultAiChat({ choice, application, intakeOpen = false }: { cho
   intakeOpenRef.current = intakeOpen;
   const ready = text.trim().length > 0 && text.length <= 300 && !busy && (session !== null || botReady);
   async function send() {
+    if (sending.current) return;
+    sending.current = true;
     const message = text.trim();
     setBusy(true);
     setMsgs((m) => [...m, { from: 'me', text: message }]);
     setText('');
     let reply = SAFE;
     let ask: string | null = null; // 대표 직접 연락 동의 질문(서버가 정한 고정 문구만)
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), CLIENT_TIMEOUT_MS);
     try {
-      const res = await fetch('/api/consult/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message, ...(session ? { session } : botRef.current ? { turnstileToken: botRef.current } : {}), ...campaignOf() }) });
+      const res = await fetch('/api/consult/chat', { method: 'POST', signal: ac.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...choice, message, ...(session ? { session } : botRef.current ? { turnstileToken: botRef.current } : {}), ...campaignOf() }) });
       const j = (await res.json()) as { ok?: boolean; text?: unknown; session?: unknown; next?: unknown; callbackPrompt?: unknown };
       if (res.ok && j.ok === true && typeof j.text === 'string') reply = j.text;
       if (res.ok && j.ok === true && j.next === 'callback' && typeof j.callbackPrompt === 'string' && j.callbackPrompt.length <= 200) ask = j.callbackPrompt;
       if (typeof j.session === 'string' && j.session.length <= 200) setSession(j.session);
-    } catch { /* 안전 안내문 유지 */ }
+    } catch { /* 안전 안내문 유지 */ } finally { clearTimeout(timer); }
     if (!session) { botRef.current = null; setBotReady(false); widget.current?.reset(); }
     setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(ask ? [{ from: 'ai' as const, text: ask }] : []), ...(appRef.current ? [{ from: 'assist' as const, text: assistFollowUp(appRef.current, intakeOpenRef.current) }] : [])]);
     setBusy(false);
+    sending.current = false;
   }
   return (
     <section aria-label="AI 상담" className="admin-card">

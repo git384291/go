@@ -5,10 +5,15 @@
  * - 사용료는 DB에 집계한다(core.ai_budget_config 월 한도 기본 0원 + 추가 전용 원장, 호출 '전에' 예약). 비용 0원인 모의 모델만 한도 0에서 돈다. CONSULT_AI_MONTHLY_BUDGET_KRW는 시험용 메모리 집계 전용.
  */
 export type ModelInput = { readonly system: string; readonly user: string; readonly approved: string };
+/** 재시도 포함 호출에서 실제로 보낸 횟수(복구 래퍼가 올린다). 모델이 세지 않으면 0이고, 그때는 예약 비용 전액을 확정한다 */
+export type CallMeter = { sent: number };
 export type ChatModel = {
   readonly name: string;
+  /** 1회 상담 답변에 예약하는 최대 비용(재시도 포함) */
   readonly costPerCallKrw: number;
-  generate(input: ModelInput, signal: AbortSignal): Promise<string>;
+  /** 1회 전송당 비용(재시도 복구 래퍼만 채운다). 확정 비용 = attemptCostKrw × 실제 전송 횟수(예약 이하) */
+  readonly attemptCostKrw?: number;
+  generate(input: ModelInput, signal: AbortSignal, meter?: CallMeter): Promise<string>;
 };
 
 export const SYSTEM_PROMPT = '승인된 안내문 안의 금액·사은품 외에는 어떤 금액·혜택도 말하지 않는다. 모르면 담당자 확인으로 안내한다.';

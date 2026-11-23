@@ -7,9 +7,10 @@ import 'server-only';
 // - transport·키·모델·실행 허용은 모두 명시 주입(환경변수·기본 클라이언트 없음). 설정이 없거나 허용이 아니면 ModelNotCalledError(전송 0회 → 예약 취소).
 // - 입력은 chatAnswer가 이미 가린 고객 글(maskPii)과 서버가 만든 승인 안내문뿐이다. 이 어댑터는 다른 고객 정보를 받지 않는다.
 // - 출력은 그대로 믿지 않는다: chatAnswer가 금액·혜택 가드(guardAiReply·benefitClaimsAllowed)로 다시 검사하고, 실패하면 승인 안내문으로 대체한다.
-// - 1요청 1호출, 재시도 없음, 응답 크기 상한, 마감 시각 초과 시 중단. 오류 본문·헤더·키는 반사하지 않는다.
+// - 1요청 1호출(재시도는 이 어댑터 밖의 modelRecovery.withRecovery가 하드 상한 안에서만), 응답 크기 상한, 마감 시각 초과 시 중단. 오류 본문·헤더·키는 반사하지 않는다.
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
 import { ModelNotCalledError, type ChatModel, type ModelInput } from './chatModel';
+import { ModelCallError } from './modelRecovery';
 
 export const MAX_REPLY_CHARS = 600;
 
@@ -88,8 +89,10 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
         body: enc.encode(buildChatBody(config.model, input, config.maxOutputTokens)),
       }, { deadlineAt: Date.now() + config.timeoutMs, maxResponseBytes: config.maxResponseBytes });
       if (r.kind === 'error' && !r.sent) throw new ModelNotCalledError(r.code);
-      if (r.kind !== 'ok') throw new Error(r.kind === 'http' ? `HTTP_${r.status === 429 ? 'RATE_LIMITED' : 'ERROR'}` : r.code);
-      return parseChatReply(r.text);
+      // 실패 종류만 구분한다(재시도 여부는 modelRecovery가 정한다): 429·5xx·timeout·네트워크 = 재시도 가능, 4xx·응답 형식·거절 = 불가
+      if (r.kind === 'http') throw new ModelCallError(r.status === 429 ? 'HTTP_RATE_LIMITED' : 'HTTP_ERROR', r.status === 429 ? 'rate_limited' : r.status >= 500 ? 'server' : 'client', r.status);
+      if (r.kind === 'error') throw new ModelCallError(r.code, r.code === 'TIMEOUT' ? 'timeout' : r.code === 'TRANSPORT_ERROR' ? 'network' : 'response');
+      try { return parseChatReply(r.text); } catch (e) { throw new ModelCallError(e instanceof Error ? e.message : 'BAD_RESPONSE', 'response'); }
     },
   });
 }

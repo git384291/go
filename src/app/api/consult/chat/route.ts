@@ -1,6 +1,7 @@
 import { clientIpFrom } from '@/server/http/clientIp';
 import { createLimiter, handleChat } from '@/server/consult/chatHandler';
 import { createDbAiBudget, createModel } from '@/server/consult/chatModel';
+import { recoveringModelFor } from '@/server/consult/modelRecovery';
 import { sessionKeyFromEnv } from '@/server/consult/consultSession';
 import { dbPolicyProvider } from '@/server/consult/publishedPolicies';
 import { withRole } from '@/server/db/client';
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
   return handleChat(req, {
     enabled: process.env.CONSULT_CHAT_ENABLED === 'true',
     chat: {
-      supplierId, model: createModel(process.env), budget,
+      supplierId, model: recoveringModelFor(createModel(process.env)), budget,
       provider: dbPolicyProvider(async () => {
         const rows = await withRole('public', (tx) => tx`select api.policy_published() as p`);
         return (rows as unknown as { p: unknown }[]).map((r) => r.p);
