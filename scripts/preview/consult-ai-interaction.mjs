@@ -65,10 +65,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('[data-from="ai"]').length === 2);
   check('C6b 두 번째 요청은 서버가 내려 준 세션 토큰을 그대로 보냄(브라우저가 만들지 않음)', seen.api[1]?.session === TOKEN);
   const safe = await page.locator('[data-from="ai"]').nth(1).innerText();
-  check('C7 서버 장애(503)는 안전 안내문, 내부 코드 노출 없음', safe.includes('담당자가 확인한 뒤') && !safe.includes('DISABLED'));
+  check('C7 서버 장애(503)는 안전 안내문, 내부 코드 노출 없음', safe.includes('자동 안내를 불러오지 못했습니다') && !safe.includes('담당자가') && !safe.includes('DISABLED'));
   mode = 'bad'; await box.fill('형식 밖'); await send.click();
   await page.waitForFunction(() => document.querySelectorAll('[data-from="ai"]').length === 3);
-  check('C8 형식 밖 응답도 안전 안내문', (await page.locator('[data-from="ai"]').nth(2).innerText()).includes('담당자가 확인한 뒤'));
+  check('C8 형식 밖 응답도 안전 안내문', (await page.locator('[data-from="ai"]').nth(2).innerText()).includes('자동 안내를 불러오지 못했습니다'));
   await page.screenshot({ path: `${OUT}/24-consult-ai-fallback-w390.png`, fullPage: true });
   check('C9 신청 링크는 같은 화면의 접수 양식으로 이동', (await page.getByRole('link', { name: '가입 상담 신청하기' }).getAttribute('href')) === '#apply');
   check('C10 외부 요청 0·예외 0·가로 넘침 없음', seen.external.length === 0 && seen.errors.length === 0 && (await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)));
