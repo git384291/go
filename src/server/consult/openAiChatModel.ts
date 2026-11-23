@@ -11,6 +11,7 @@ import 'server-only';
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
 import { ModelNotCalledError, type ChatModel, type ModelInput } from './chatModel';
 import { ModelCallError } from './modelRecovery';
+import { isSafeModelInput } from './piiBoundary';
 
 export const MAX_REPLY_CHARS = 600;
 
@@ -83,6 +84,8 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
     async generate(input: ModelInput, signal: AbortSignal): Promise<string> {
       if (!valid(config)) throw new ModelNotCalledError('NOT_CONFIGURED');
       if (signal.aborted) throw new ModelNotCalledError('ABORTED');
+      // P0 외부 전송 직전 최종 검사: 개인정보 모양이 남아 있으면 보내지 않는다(전송 0회 → 예약 취소)
+      if (!isSafeModelInput(input)) throw new ModelNotCalledError('PII_BLOCKED');
       const r = await boundedRequest(config.transport, config.endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
