@@ -42,7 +42,7 @@ exec_allow(rolname, proname) as (
     -- 0028 AI 하드 한도: 일·사용자 한도·긴급 차단·조정(대표)
     ('app_staff', 'ai_budget_limits_set'), ('app_staff', 'ai_budget_pause_set'), ('app_staff', 'ai_budget_adjust'),
     -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
-    ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'),
+    ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'lead_gclid_attach'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),

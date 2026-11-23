@@ -90,6 +90,7 @@ grant execute on function
   api.notice_intake_gate(text, jsonb),    -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
   api.policy_intake_gate(text, text, text),  -- 0025·0026: 접수 직전 정책 상태 잠금·게시 스위치·유효 정책 게이트(오류 코드만)
   api.application_save(text, text, text, text),  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
+  api.lead_gclid_attach(text, text, text, text),  -- 0027: 서버 서명이 있어야 기록되는 광고 클릭 식별값(gclid) 귀속
   api.followup_request(text, text, text, text),  -- 0023: 서버 서명이 있어야 기록되는 대표 직접 연락 동의
   api.consult_rate_hit(text, text),  -- 0024: 상담 채팅 공용 횟수 제한(IP HMAC만)
   api.application_amend(text, text, text, text, text, text)  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
