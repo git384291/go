@@ -15,7 +15,8 @@ import { answerChat } from '../../src/server/consult/chatAnswer';
 import { handleChat } from '../../src/server/consult/chatHandler';
 import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type ChatModel } from '../../src/server/consult/chatModel';
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
-import { policyFaultFromEnv } from '../../src/server/leads/policyFault';
+import { intakePolicyFromEnv } from '../../src/server/leads/policyFault';
+import { AI_UNAVAILABLE_GUIDANCE } from '../../src/content/consultGuidance';
 import { aiBudgetGet, aiBudgetSet } from '../../src/server/admin/aiBudget';
 import { issueSession } from '../../src/server/consult/consultSession';
 import { adFunnel, adRunAction } from '../../src/server/admin/adRun';
@@ -671,19 +672,41 @@ test('E16 대표 직접 연락 동의(PM 11/22 ② 7): 고객이 잘 모르면 �
   assert.equal(a.n, 2);
 });
 
-test('E17 정책 검증 장애(B, PM 11/24): 실제 DB 게이트·재조회를 거쳐 장애면 리드·고객정보 0건 증가(롤백), 정상(정책 없음·스위치 OFF)은 접수', async () => {
+test('E17 [PM 11/24 결정] 실제 DB: 정책 없음·스위치 OFF → 접수 거부(저장 0), AI 장애 + 유효 게시 정책 → A 안내·접수 허용, 스위치 복원(순서 독립)', async () => {
   const CUST = `select count(*)::int as n from pii.customers`;
-  const flag = async () => String(((await admin`select enabled::text as e from core.feature_flags where key = 'policy_publish'`)[0] as { e: string }).e);
-  const off = await flag();
-  const fault = policyFaultFromEnv({ QUOTE_SUPPLIER_ID: 'supplier-a', CONSULT_CHAT_CARRIER: 'carrier-x', CONSULT_CHAT_PRODUCT: 'net500-tv-basic', CONSULT_CHAT_REGION: 'region-1' });
-  const [l0, c0] = [await count(LEADS), await count(CUST)];
-  const blocked = await submitLead(body({ phone: '010-7777-9917', idempotencyKey: 'e2e-intake-policy-00000017' }), ctx({ clientIp: '203.0.113.217', policyFault: async () => true }), run);
-  assert.deepEqual(blocked, { ok: false, code: 'POLICY_UNVERIFIED', status: 503 });
-  assert.deepEqual([await count(LEADS), await count(CUST)], [l0, c0], '장애면 리드·고객정보 저장 없음(트랜잭션 롤백)');
-  let seen: unknown = null;
-  const ok = await submitLead(body({ phone: '010-7777-9918', idempotencyKey: 'e2e-intake-policy-00000018' }), ctx({ clientIp: '203.0.113.218', policyFault: async (rows, now) => { seen = rows; return fault(rows, now); } }), run);
-  assert.deepEqual(ok, { ok: true, outcome: 'created' }, '정상 상태는 기존대로 접수(실제 DB 게이트 함수·공개 역할 권한)');
-  assert.ok(Array.isArray(seen), '같은 트랜잭션에서 api.policy_published()를 읽어 판정');
-  assert.equal(await count(LEADS), l0 + 1);
-  assert.equal(await flag(), off, '게시 스위치 값 변경 없음');
+  const flag = async () => Boolean(((await admin`select enabled from core.feature_flags where key = 'policy_publish'`)[0] as { enabled: boolean }).enabled);
+  const setFlag = (v: boolean) => admin`update core.feature_flags set enabled = ${v} where key = 'policy_publish'`;
+  const original = await flag();
+  const policy = intakePolicyFromEnv({ QUOTE_SUPPLIER_ID: 'supplier-a', CONSULT_CHAT_CARRIER: 'carrier-x', CONSULT_CHAT_PRODUCT: 'e17-p1', CONSULT_CHAT_REGION: 'region-1' });
+  const submit = (n: number) => submitLead(body({ phone: `010-7717-${String(1000 + n)}`, idempotencyKey: `e2e-intake-policy-e17-000${n}` }), ctx({ clientIp: `203.0.113.${170 + n}`, policy }), run);
+  const snap = async () => [await count(LEADS), await count(CUST)];
+  try {
+    // 1) 스위치 ON이어도 이 상품 키의 게시 정책이 없으면 거부(DB 게이트), 저장 0
+    await setFlag(true);
+    const s1 = await snap();
+    assert.deepEqual(await submit(1), { ok: false, code: 'POLICY_NOT_PUBLISHED', status: 503 });
+    assert.deepEqual(await snap(), s1, '정책 없음: 리드·고객정보 저장 없음(롤백)');
+    // 시험 전용 키(e17-p1) 정책을 만들고 승인(편집자 작성·제출 → 대표 승인)
+    const created = await createPolicyDraft(pdeps(editor), { ...uploadBody(), productId: 'e17-p1' });
+    const { id } = (await created.json()) as { id: string };
+    await policyAction(pdeps(editor), id, { action: 'submit' });
+    await policyAction(pdeps(owner), id, { action: 'approve', reason: 'E17 정책표 대조 완료', checks: ALL });
+    assert.equal(await stateOf(id), 'approved');
+    // 2) 승인 정책이 있어도 게시 스위치 OFF면 거부(DB 게이트 POLICY_PUBLISH_OFF), 저장 0
+    await setFlag(false);
+    const s2 = await snap();
+    assert.deepEqual(await submit(2), { ok: false, code: 'POLICY_PUBLISH_OFF', status: 503 });
+    assert.deepEqual(await snap(), s2, '스위치 OFF: 저장 없음');
+    // 3) AI 장애(모델 없음) + 유효 게시 정책 + 필수 고지 정상 → A 안내·접수 허용
+    await setFlag(true);
+    const provider = dbPolicyProvider(async () => ((await withRoleOn(app, 'public', (tx) => tx`select api.policy_published() as p`)) as unknown as { p: unknown }[]).map((r) => r.p));
+    const chat = await answerChat({ provider, supplierId: 'supplier-a', model: null, budget: createAiBudget({}) }, { message: '요금 알려주세요', carrier: 'carrier-x', productId: 'e17-p1', regionCode: 'region-1' }, new Date());
+    assert.ok(chat.ok && chat.text.startsWith(AI_UNAVAILABLE_GUIDANCE) && chat.text.includes('11,111') && chat.next !== 'blocked', JSON.stringify(chat));
+    const s3 = await snap();
+    assert.deepEqual(await submit(3), { ok: true, outcome: 'created' });
+    assert.deepEqual(await snap(), [s3[0] + 1, s3[1] + 1]);
+  } finally {
+    await setFlag(original);
+  }
+  assert.equal(await flag(), original, '[필수8] 게시 스위치 시작 값 복원');
 });

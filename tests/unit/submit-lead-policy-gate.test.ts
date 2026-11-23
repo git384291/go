@@ -1,4 +1,4 @@
-// PM 11/24 추가 지시: 정책 검증 장애(B)면 서버가 접수 트랜잭션 안에서 저장 전에 취소하는지 시험(가짜 실행기, 실제 DB는 db/tests/99_policy_intake_gate.sql·db-test.sh PG6).
+// PM 11/24 결정: 유효한 게시 정책이 없거나 정책 검증 장애(B)면 서버가 접수 트랜잭션 안에서 저장 전에 취소하는지 시험(가짜 실행기, 실제 DB는 db/tests/99_policy_intake_gate.sql·db-test.sh PG6).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { noticeHashes, submitLead } from '../../src/server/leads/submitLead';
@@ -32,60 +32,67 @@ function runner(rowsOf: () => unknown[] = () => [], failOn?: { sql: RegExp; err:
 }
 const kinds = (calls: Call[]) => calls.map((c) => /notice_intake_gate/.test(c.q) ? 'notice' : /policy_intake_gate/.test(c.q) ? 'pgate' : /policy_published/.test(c.q) ? 'policy' : /create_lead/.test(c.q) ? 'lead' : /application_save/.test(c.q) ? 'app' : /application_amend/.test(c.q) ? 'amend' : /followup_request/.test(c.q) ? 'followup' : '?');
 const SAVES = new Set(['lead', 'app', 'amend', 'followup']);
+const KEY = { supplierId: 'supplier-a', carrier: 'carrier-x', productId: 'net500-tv-basic' };
+const pol = (verdict: (rows: readonly unknown[]) => Promise<string | null>, key: typeof KEY | null = KEY) => ({ policy: { key, verdict } });
 
-test('PI1 정책 검증 장애면 고지 게이트 → 정책 게이트 → 정책 재조회 뒤 저장 호출 0, 503 POLICY_UNVERIFIED', async () => {
-  for (const body of [lead, { ...lead, application: APP }]) {
-    const r = runner(() => [{ any: 1 }]);
-    const seen: unknown[][] = [];
-    const res = await submitLead(body, { ...ctx, policyFault: async (rows) => { seen.push([...rows]); return true; } }, r.run);
-    assert.deepEqual(res, { ok: false, code: 'POLICY_UNVERIFIED', status: 503 });
-    assert.deepEqual(kinds(r.calls), ['notice', 'pgate', 'policy']);
-    assert.equal(r.runs(), 1, '한 트랜잭션');
-    assert.ok(!kinds(r.calls).some((k) => SAVES.has(k)), '리드·신청서·변경요청·연락동의 저장 없음');
-    assert.deepEqual(seen, [[{ any: 1 }]], '판정기는 같은 트랜잭션에서 읽은 행을 받는다');
+test('PI1 [필수1·2·6] 정책 없음(스위치 OFF 포함)·검증 장애면 고지 게이트 → 정책 게이트 → 재조회 뒤 저장 호출 0, 503', async () => {
+  for (const code of ['POLICY_NOT_PUBLISHED', 'POLICY_UNVERIFIED']) {
+    for (const body of [lead, { ...lead, application: APP }]) {
+      const r = runner(() => [{ any: 1 }]);
+      const seen: unknown[][] = [];
+      const res = await submitLead(body, { ...ctx, ...pol(async (rows) => { seen.push([...rows]); return code; }) }, r.run);
+      assert.deepEqual(res, { ok: false, code, status: 503 });
+      assert.deepEqual(kinds(r.calls), ['notice', 'pgate', 'policy']);
+      assert.deepEqual(r.calls[1].v, ['supplier-a', 'carrier-x', 'net500-tv-basic'], 'DB 게이트에는 서버 설정 키');
+      assert.equal(r.runs(), 1, '한 트랜잭션');
+      assert.ok(!kinds(r.calls).some((k) => SAVES.has(k)), '리드·신청서·변경요청·연락동의 저장 없음');
+      assert.deepEqual(seen, [[{ any: 1 }]], '판정은 같은 트랜잭션에서 읽은 행으로');
+    }
   }
 });
 
-test('PI2 정상(장애 아님)이면 기존 순서 그대로 저장, 판정기 없으면 정책 호출 자체가 없다(기존 동작 유지)', async () => {
+test('PI2 [필수3] 유효 정책(판정 null)이면 기존 순서로 저장, 정책 검사 미설정 경로는 기존 동작 그대로', async () => {
   const ok = runner();
-  assert.deepEqual(await submitLead({ ...lead, application: APP }, { ...ctx, policyFault: async () => false }, ok.run), { ok: true, outcome: 'created' });
+  assert.deepEqual(await submitLead({ ...lead, application: APP }, { ...ctx, ...pol(async () => null) }, ok.run), { ok: true, outcome: 'created' });
   assert.deepEqual(kinds(ok.calls), ['notice', 'pgate', 'policy', 'lead', 'app']);
   const legacy = runner();
   assert.deepEqual(await submitLead(lead, ctx, legacy.run), { ok: true, outcome: 'created' });
   assert.deepEqual(kinds(legacy.calls), ['notice', 'lead']);
 });
 
-test('PI3 DB 정책 게이트 거절(충돌 POLICY_UNVERIFIED)·조회 실패·비배열 응답은 모두 저장 없이 닫힌다', async () => {
-  const conflict = runner(() => [], { sql: /policy_intake_gate/, err: Object.assign(new Error('POLICY_UNVERIFIED'), { code: '55000' }) });
-  assert.deepEqual(await submitLead(lead, { ...ctx, policyFault: async () => false }, conflict.run), { ok: false, code: 'POLICY_UNVERIFIED', status: 503 });
-  assert.ok(!kinds(conflict.calls).some((k) => SAVES.has(k)));
+test('PI3 [필수5] DB 게이트 거절(스위치 OFF·정책 없음·충돌)·조회 실패·판정 예외·키 미설정은 모두 저장 없이 닫힌다', async () => {
+  for (const code of ['POLICY_PUBLISH_OFF', 'POLICY_NOT_PUBLISHED', 'POLICY_UNVERIFIED']) {
+    const g = runner(() => [], { sql: /policy_intake_gate/, err: Object.assign(new Error(code), { code: '55000' }) });
+    assert.deepEqual(await submitLead(lead, { ...ctx, ...pol(async () => null) }, g.run), { ok: false, code, status: 503 }, code);
+    assert.ok(!kinds(g.calls).some((k) => SAVES.has(k)), code);
+  }
   const down = runner(() => [], { sql: /policy_published/, err: Object.assign(new Error('connection refused'), { code: '08006' }) });
-  const d = await submitLead(lead, { ...ctx, policyFault: async () => false }, down.run);
-  assert.equal(d.ok, false);
+  assert.equal((await submitLead(lead, { ...ctx, ...pol(async () => null) }, down.run)).ok, false);
   assert.ok(!kinds(down.calls).some((k) => SAVES.has(k)));
-  // 판정기 자체가 예외면 저장하지 않는다(fail-closed)
   const thrower = runner();
-  const t = await submitLead(lead, { ...ctx, policyFault: async () => { throw new Error('x'); } }, thrower.run);
-  assert.equal(t.ok, false);
+  assert.equal((await submitLead(lead, { ...ctx, ...pol(async () => { throw new Error('x'); }) }, thrower.run)).ok, false);
   assert.ok(!kinds(thrower.calls).some((k) => SAVES.has(k)));
+  const nokey = runner();
+  assert.deepEqual(await submitLead(lead, { ...ctx, ...pol(async () => null, null) }, nokey.run), { ok: false, code: 'POLICY_NOT_PUBLISHED', status: 503 });
+  assert.ok(!kinds(nokey.calls).some((k) => SAVES.has(k)), '키 미설정: 저장 없음');
 });
 
-test('PI4 정책 변경과 접수 동시 요청: 판정은 게이트(공유 잠금) 뒤 같은 트랜잭션에서 읽은 상태로만 한다', async () => {
-  // 트랜잭션 밖에서 정책이 바뀌어도(게이트 뒤 읽은 순간의 값) 그 값으로 판정. 장애 상태로 바뀐 직후의 접수는 저장 없이 닫힌다
-  let state: 'ok' | 'conflict' = 'ok';
-  const r = runner(() => (state === 'conflict' ? [{ v: 1 }, { v: 2 }] : [{ v: 1 }]));
-  const fault = async (rows: readonly unknown[]) => rows.length > 1;
-  assert.equal((await submitLead(lead, { ...ctx, policyFault: fault }, r.run)).ok, true);
-  state = 'conflict';
-  const r2 = runner(() => (state === 'conflict' ? [{ v: 1 }, { v: 2 }] : [{ v: 1 }]));
-  assert.deepEqual(await submitLead(lead, { ...ctx, policyFault: fault }, r2.run), { ok: false, code: 'POLICY_UNVERIFIED', status: 503 });
-  const order = kinds(r2.calls);
+test('PI4 [필수4] 정책 변경과 접수 동시 요청: 게이트(공유 잠금) 뒤 같은 트랜잭션에서 읽은 상태로만 판정', async () => {
+  const st: { v: 'ok' | 'gone' } = { v: 'ok' };
+  const verdict = async (rows: readonly unknown[]) => (rows.length === 1 ? null : 'POLICY_NOT_PUBLISHED');
+  const a = runner(() => (st.v === 'ok' ? [{ v: 1 }] : []));
+  assert.equal((await submitLead(lead, { ...ctx, ...pol(verdict) }, a.run)).ok, true);
+  st.v = 'gone';
+  const b = runner(() => (st.v === 'ok' ? [{ v: 1 }] : []));
+  assert.deepEqual(await submitLead(lead, { ...ctx, ...pol(verdict) }, b.run), { ok: false, code: 'POLICY_NOT_PUBLISHED', status: 503 });
+  const order = kinds(b.calls);
   assert.ok(order.indexOf('pgate') < order.indexOf('policy'), '잠금 게이트가 재조회보다 먼저');
 });
 
-test('PI5 화면: 서버 POLICY_UNVERIFIED는 B 안내(재시도 없음), 과장 약속 없음', () => {
-  const o = classifyResponse(503, { ok: false, code: 'POLICY_UNVERIFIED' });
-  assert.deepEqual(o, { kind: 'policy', message: POLICY_UNVERIFIED_GUIDANCE, retryable: false });
+test('PI5 화면: 서버 정책 차단 코드 3종은 모두 B 안내(재시도 없음), 과장 약속·숫자 없음', () => {
+  for (const code of ['POLICY_UNVERIFIED', 'POLICY_NOT_PUBLISHED', 'POLICY_PUBLISH_OFF']) {
+    assert.deepEqual(classifyResponse(503, { ok: false, code }), { kind: 'policy', message: POLICY_UNVERIFIED_GUIDANCE, retryable: false }, code);
+  }
   assert.equal(OUTCOME_MESSAGES.policy, POLICY_UNVERIFIED_GUIDANCE);
   assert.ok(!/\d/.test(POLICY_UNVERIFIED_GUIDANCE));
 });

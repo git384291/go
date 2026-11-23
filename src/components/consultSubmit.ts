@@ -122,6 +122,8 @@ const CODE_KIND: Readonly<Record<string, { kind: OutcomeKind; field?: ConsultFie
   PRODUCT_NOT_ACTIVE: { kind: 'not_ready' },
   SERVICE_NOT_READY: { kind: 'not_ready' },
   POLICY_UNVERIFIED: { kind: 'policy' },
+  POLICY_NOT_PUBLISHED: { kind: 'policy' },
+  POLICY_PUBLISH_OFF: { kind: 'policy' },
   LEAD_INTAKE_DISABLED: { kind: 'not_ready' },
   LOCAL_MODE_NOT_ALLOWED_ON_VERCEL: { kind: 'not_ready' },
   DATABASE_URL_INVALID: { kind: 'not_ready' },

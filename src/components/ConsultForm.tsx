@@ -21,6 +21,7 @@ import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './T
 import { KAKAO_INQUIRY_LABEL, KAKAO_INQUIRY_NOTES } from '../content/channels';
 import { resolveAttribution } from '../content/attribution';
 import { noticeReadiness, REQUIRED_NOTICES } from '../content/requiredNotices';
+import { POLICY_UNVERIFIED_GUIDANCE } from '../content/consultGuidance';
 import { ApplicationAssistant } from './ApplicationAssistant';
 import { labelOf, missingApplication, type Application } from '../content/applicationForm';
 
@@ -64,6 +65,19 @@ export function ConsultForm({ options, kakaoUrl, choice, app, blocked = false }:
   const [ownAnswers, setAppAnswers] = useState<Application>({});
   const appAnswers = app ?? ownAnswers;
   const hasOption = options.length > 0;
+  // PM 11/24 결정: 화면도 서버와 같은 규칙으로 잠근다. 현재 정책 상태는 서버(/api/leads/status)가 판정한다(고객 값·이전 상담 결과로 정하지 않음).
+  // 명시적 open:false일 때만 잠근다(조회 실패는 화면 판정 보류 — 실제 차단은 접수 API·DB가 다시 한다)
+  const [policyClosed, setPolicyClosed] = useState(false);
+  useEffect(() => {
+    if (!FORM_ENABLED) return;
+    let live = true;
+    fetch('/api/leads/status', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: unknown) => { if (live && j !== null && typeof j === 'object' && (j as { open?: unknown }).open === false) setPolicyClosed(true); })
+      .catch(() => { /* 판정 보류 */ });
+    return () => { live = false; };
+  }, []);
+  const isBlocked = blocked || policyClosed;
   // 공개 준비값(사이트 키·처리방침 버전)이 하나라도 비면 위젯 외부 요청과 접수 요청을 모두 만들지 않는다
   const noticeReady = noticeReadiness(REQUIRED_NOTICES, PRIVACY_VERSION).ready;
   const botEnabled = FORM_ENABLED && hasOption && TURNSTILE_SITE_KEY !== '' && PRIVACY_VERSION !== '' && noticeReady;
@@ -145,7 +159,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app, blocked = false }:
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (inFlight.current || accepted.current) return;
-    if (!FORM_ENABLED || !hasOption || blocked) return;
+    if (!FORM_ENABLED || !hasOption || isBlocked) return;
     inFlight.current = true;
     try {
       const f = new FormData(e.currentTarget);
@@ -254,7 +268,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app, blocked = false }:
     }
   }
 
-  const locked = !FORM_ENABLED || blocked || phase === 'sending' || phase === 'done';
+  const locked = !FORM_ENABLED || isBlocked || phase === 'sending' || phase === 'done';
   const errId = (f: ConsultField) => `consult-err-${f}`;
 
   return (
@@ -411,8 +425,9 @@ export function ConsultForm({ options, kakaoUrl, choice, app, blocked = false }:
           </div>
         )}
 
-        <button className="btn btn-primary btn-block" type="submit" disabled={!hasOption || blocked}>
-          {!FORM_ENABLED ? '온라인 상담 서비스 준비 중' : blocked ? '가입 접수 일시 제한' : phase === 'sending' ? '보내는 중…' : phase === 'done' ? '접수 완료' : '상담 신청하기'}
+        {isBlocked ? <p className="form-banner" role="status" data-field="policy-blocked">{POLICY_UNVERIFIED_GUIDANCE}</p> : null}
+        <button className="btn btn-primary btn-block" type="submit" disabled={!hasOption || isBlocked}>
+          {!FORM_ENABLED ? '온라인 상담 서비스 준비 중' : isBlocked ? '가입 접수 일시 제한' : phase === 'sending' ? '보내는 중…' : phase === 'done' ? '접수 완료' : '상담 신청하기'}
         </button>
       </fieldset>
 
