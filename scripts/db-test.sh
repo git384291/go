@@ -73,6 +73,7 @@ run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·�
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 run db/tests/99_ad_precheck.sql >/dev/null   # 광고 사전검증 10: 예약 시작 전 집행 차단·대조군·1회 실행
+run db/tests/99_lead_gclid.sql >/dev/null   # 광고 사전검증 8: gclid 접수 귀속·첫 값 보존·형식·변조·보존기간(0027)
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
