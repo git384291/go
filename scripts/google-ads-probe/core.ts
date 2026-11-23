@@ -31,7 +31,7 @@ export function googleErrorCodes(text: string): string[] {
   return [...new Set(out)].slice(0, 10);
 }
 
-/** 종료 코드: 0 검증 통과, 2 설정 없음, 3 인증·조회 실패, 4 테스트 계정 아님(변경 호출 안 함), 5 validateOnly 거부 */
+/** 종료 코드: 0 검증 통과(읽기 전용 모드면 ③ 계정 읽기 성공까지), 2 설정 없음, 3 인증·조회 실패, 4 테스트 계정 아님(변경 호출 안 함), 5 validateOnly 거부 */
 export async function runProbe(env: Readonly<Record<string, string | undefined>>, transport: ProbeTransport, log: (l: ProbeLine) => void): Promise<number> {
   const v = (k: string) => (typeof env[k] === 'string' && env[k]!.trim() !== '' ? env[k]!.trim() : null);
   const missing = GOOGLE_ADS_ENV_NAMES.filter((k) => v(k) === null);
@@ -67,6 +67,11 @@ export async function runProbe(env: Readonly<Record<string, string | undefined>>
   const manager = row?.manager === true;
   log({ step: 'account_read', ok: rd.status === 200 && isObj(row), http: rd.status, googleErrorCodes: rd.status === 200 ? [] : googleErrorCodes(rd.text), currency, krw: currency === 'KRW', testAccount, manager });
   if (rd.status !== 200 || !isObj(row)) return 3;
+  // 읽기 전용 모드(PM 11/23: 실계정 연결 확인은 읽기만): ④ validateOnly도 보내지 않고 여기서 끝낸다(변경 API 0회)
+  if (v('GOOGLE_ADS_PROBE_READ_ONLY') === 'true') {
+    log({ step: 'validate_only', skipped: true, reason: 'READ_ONLY' });
+    return 0;
+  }
   if (!testAccount || manager) {
     log({ step: 'validate_only', skipped: true, reason: !testAccount ? 'NOT_TEST_ACCOUNT' : 'MANAGER_ACCOUNT' });
     return 4;

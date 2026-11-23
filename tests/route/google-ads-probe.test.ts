@@ -83,3 +83,26 @@ test('GP6 인증정보·네트워크 없음: 전송 실패(status 0)면 조회·
   const n = fake({});
   assert.deepEqual([(await go({}, n)).code, n.calls.length], [2, 0]);
 });
+
+test('GP-RO 읽기 전용 모드: 토큰·계정 조회만, 테스트 계정이어도 변경 요청(validateOnly 포함) 0회, 종료 0', async () => {
+  const f = fake({});
+  const r = await go({ ...ENV, GOOGLE_ADS_PROBE_READ_ONLY: 'true' }, f);
+  assert.equal(r.code, 0);
+  assert.equal(mutates(f).length, 0);
+  assert.deepEqual(f.calls.map((c) => c.url.replace(/^.*\//, '')), ['token', 'googleAds:search']);
+  assert.equal(r.lines.at(-1)!.reason, 'READ_ONLY');
+  for (const s of ['SECRET', '1234567890']) assert.ok(!r.out.includes(s), s);
+  // 실패는 그대로 실패: 계정 읽기 403이면 종료 3, 변경 0회
+  const g = fake({ read: { status: 403, text: '{}' } });
+  assert.equal((await go({ ...ENV, GOOGLE_ADS_PROBE_READ_ONLY: 'true' }, g)).code, 3);
+  assert.equal(mutates(g).length, 0);
+});
+
+test('GP-ASK 정적: 대화형 실행기는 입력값을 출력·파일·환경변수에 쓰지 않고, 읽기 주소 2곳만 허용, 읽기 전용 고정', () => {
+  const src = readFileSync('scripts/google-ads-probe/ask.mts', 'utf8');
+  const code = src.replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/process\.env|writeFile|appendFile|console\.(log|error)\((?!JSON\.stringify\(l\))/.test(code));
+  assert.match(code, /GOOGLE_ADS_PROBE_READ_ONLY: 'true'/);
+  assert.match(code, /googleAds:search\)\$/);
+  assert.ok(!/:mutate/.test(code));
+});
