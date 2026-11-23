@@ -45,7 +45,7 @@ select test.expect_error(test.adcall('owner', 'ad_funnel_full', $$current_date, 
 reset role;
 
 -- 정산 시험: 월 한도 100원
-update core.ai_budget_config set monthly_limit_krw = (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger where month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')) + 100, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000 where singleton;  -- 0025
+update core.ai_budget_config set monthly_limit_krw = (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger where month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')) + 100, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000 where singleton;  -- 0026
 create temp table t_base as select (select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0) from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id) as used;
 create function test.used() returns text language sql security definer set search_path = pg_catalog as $$
   select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0)::text

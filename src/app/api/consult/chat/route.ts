@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     limiter, ip, now: () => new Date(),
     // F1: 새 세션은 서버 측 봇 확인(Turnstile), 메시지·세션은 DB 공용 한도(IP HMAC만, 원문 IP 미저장). 키·DB 오류는 막는다(503)
     botCheck: (token, from) => verifyTurnstile(token, from),
-    // 0025: 사용자별 AI 비용 한도 키 = 같은 IP HMAC(원문 IP 아님). 키 설정 오류면 예외 → 예약 거부(호출 금지)
+    // 0026: 사용자별 AI 비용 한도 키 = 같은 IP HMAC(원문 IP 아님). 키 설정 오류면 예외 → 예약 거부(호출 금지)
     budgetScope: () => createPiiCrypto(piiKeysFromEnv(process.env)).ipHash(ip),
     rateLimit: async (kind) => {
       const h = createPiiCrypto(piiKeysFromEnv(process.env)).ipHash(ip);

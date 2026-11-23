@@ -55,7 +55,7 @@ set role app_ai;
 select test.expect_eq($$select (api.ai_budget_hold(3, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'false', 'U1 기본 한도 0원이면 예약 거부(호출 금지)');
 reset role;
 select test.expect_eq($$select count(*)::text from core.ai_usage_ledger$$, '0', 'U1b 거부는 원장에 쓰지 않음');
-update core.ai_budget_config set monthly_limit_krw = 5, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000 where singleton;  -- 0025: 일·사용자 한도는 넉넉히(월 한도만 시험)
+update core.ai_budget_config set monthly_limit_krw = 5, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000 where singleton;  -- 0026: 일·사용자 한도는 넉넉히(월 한도만 시험)
 set role app_ai;
 select test.expect_eq($$select (api.ai_budget_hold(3, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'true', 'U2 한도 안 예약');
 select test.expect_eq($$select (api.ai_budget_hold(2, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'true', 'U2b 한도 딱 맞게 예약');

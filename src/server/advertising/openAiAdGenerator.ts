@@ -43,7 +43,7 @@ export type OpenAiAdGeneratorConfig = {
   readonly maxOutputTokens: number;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
-  /** 0025·TEST-14: 공통 비용 게이트(필수). 없으면 호출 금지. 호출마다 '전에' 예약하고, 결과에 따라 확정·취소·불확실로 닫는다 */
+  /** 0026·TEST-14: 공통 비용 게이트(필수). 없으면 호출 금지. 호출마다 '전에' 예약하고, 결과에 따라 확정·취소·불확실로 닫는다 */
   readonly budget: AiBudget | null;
   /** 1회 예약 비용(원, 1~1,000 정수). 가격표 예상 최대 비용 이상이어야 한다 */
   readonly costPerCallKrw: number;

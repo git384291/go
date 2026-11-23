@@ -39,7 +39,7 @@ exec_allow(rolname, proname) as (
     -- 0018 광고 launch 상태
     ('app_staff', 'ad_launch_begin'), ('app_staff', 'ad_launch_finish'), ('app_staff', 'ad_launch_active'), ('app_staff', 'ad_launch_paused'), ('app_staff', 'ad_launch_resolve'), ('app_public', 'application_amend'), ('app_staff', 'application_amendments'),
     ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'), ('app_ai', 'ai_budget_uncertain'),
-    -- 0025 AI 하드 한도: 일·사용자 한도·긴급 차단·조정(대표)
+    -- 0026 AI 하드 한도: 일·사용자 한도·긴급 차단·조정(대표)
     ('app_staff', 'ai_budget_limits_set'), ('app_staff', 'ai_budget_pause_set'), ('app_staff', 'ai_budget_adjust'),
     -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
     ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'consult_rate_hit'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'),

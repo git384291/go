@@ -28,7 +28,7 @@ export type OpenAiChatModelConfig = {
   readonly maxOutputTokens: number;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
-  /** 0025·TEST-10: 승인된 가격표(주입, 코드에 실제 가격 없음). 모델이 없거나 KRW가 아니면 호출 금지 */
+  /** 0026·TEST-10: 승인된 가격표(주입, 코드에 실제 가격 없음). 모델이 없거나 KRW가 아니면 호출 금지 */
   readonly prices: readonly ModelPrice[] | null;
   /** 요청당 입력 토큰 상한(가정: 토큰 ≤ UTF-8 바이트). 넘으면 전송 0회 */
   readonly maxInputTokens: number;

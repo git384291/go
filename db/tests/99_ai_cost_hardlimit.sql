@@ -1,4 +1,4 @@
--- 0025 AI 사용료 하드 한도: 일·사용자 한도, 긴급 차단, 멱등 요청 ID, 확정 1원 하한, 불확실 정산·조정, 권한. 가상 데이터만.
+-- 0026 AI 사용료 하드 한도: 일·사용자 한도, 긴급 차단, 멱등 요청 ID, 확정 1원 하한, 불확실 정산·조정, 권한. 가상 데이터만.
 -- 시험 전 원장·정산 기준을 비우지 않는다(추가 전용). 대신 시험 전용 scope와 '오늘 사용액 기준값'을 잡고 그 위에 한도를 얹는다.
 create function test.spent_now(p_scope text) returns text language sql security definer set search_path = pg_catalog as $$
   select (x.month_all || '|' || x.day_all || '|' || x.month_scope || '|' || x.day_scope)
@@ -14,7 +14,7 @@ create function test.set_limits(p_month_room int, p_day_room int, p_scope_day in
          monthly_limit_krw = test.base(1) + p_month_room, daily_limit_krw = test.base(2) + p_day_room,
          scope_daily_limit_krw = p_scope_day, scope_monthly_limit_krw = p_scope_month, max_inflight = 1000 where singleton $$;
 
--- H1 새 한도의 기본값 0원 = 호출 금지(0025 적용 직후 구성)
+-- H1 새 한도의 기본값 0원 = 호출 금지(0026 적용 직후 구성)
 update core.ai_budget_config set daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 1000, monthly_limit_krw = 1000000 where singleton;
 set role app_ai;
 select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h1-0000000000001', repeat('c', 64)) is null)::text$$, 'true', 'H1 일·사용자 한도 미설정(0원)이면 월 한도가 넉넉해도 거부');

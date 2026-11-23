@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P0 AI 비용 예약(0011·0012) 로컬 가상 DB 통합 검증 — 원자성·중복 정산·미정산 보수 계산·권한·추가 전용 + 0025(멱등·동시 상한·일 한도·확정 하한).
+# P0 AI 비용 예약(0011·0012) 로컬 가상 DB 통합 검증 — 원자성·중복 정산·미정산 보수 계산·권한·추가 전용 + 0026(멱등·동시 상한·일 한도·확정 하한).
 # 사용: 먼저 `bash scripts/db-test.sh`(또는 같은 마이그레이션이 적용된 로컬 가상 DB)를 준비한 뒤 `bash scripts/ai-cost-db-concurrency.sh`.
 # 안전: 유닉스 소켓(로컬)의 fideon_test DB에서만 동작한다. 그 외는 거부한다. 외부 AI 호출 없음. 운영 DB·고객정보 사용 안 함.
 # 주의: 로컬 가상 DB 결과는 운영(Supabase) 환경의 원자성·무과금을 실증하지 않는다. 운영 DB 통합 검증은 별도다.
@@ -8,7 +8,7 @@ SOCK="${PGHOST_TEST:-/tmp}"; PORT="${PGPORT_TEST:-54329}"; DB=fideon_test
 case "$SOCK" in /*) ;; *) echo "REFUSED: 로컬 유닉스 소켓만 허용"; exit 2;; esac
 SU=(psql -X -q -At -h "$SOCK" -p "$PORT" -U postgres -d "$DB" -v ON_ERROR_STOP=1)
 "${SU[@]}" -c "select 1" >/dev/null 2>&1 || { echo "BLOCKED: 로컬 가상 DB($SOCK:$PORT/$DB)에 연결할 수 없음 — scripts/db-test.sh를 먼저 실행"; exit 3; }
-"${SU[@]}" -c "select 1 from pg_proc where proname='ai_budget_hold' and pronargs = 3" | grep -q 1 || { echo "BLOCKED: 0012·0025 마이그레이션이 적용되지 않음"; exit 3; }
+"${SU[@]}" -c "select 1 from pg_proc where proname='ai_budget_hold' and pronargs = 3" | grep -q 1 || { echo "BLOCKED: 0012·0026 마이그레이션이 적용되지 않음"; exit 3; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -21,7 +21,7 @@ month()  { "${SU[@]}" -c "select to_char(now() at time zone 'Asia/Seoul','YYYY-M
 # 앱 경로와 같은 역할(app_server 로그인 → app_ai로 전환)로 실행
 as_ai()  { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_ai" -c "$1" -c "commit" 2>&1 | grep -v -E '^(BEGIN|SET|COMMIT)$'; }
 SCOPE=$(printf 'c%.0s' $(seq 1 64))
-# 0025 서명: (비용, 요청 ID, 사용자 키). 요청 ID를 안 주면 매번 새 ID
+# 0026 서명: (비용, 요청 ID, 사용자 키). 요청 ID를 안 주면 매번 새 ID
 hold()   { local req="${2:-$(cat /proc/sys/kernel/random/uuid)}"; as_ai "select api.ai_budget_hold($1, '$req', '$SCOPE')::text"; }
 used()   { "${SU[@]}" -c "select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end),0) from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id=u.id"; }
 reserved_sum() { "${SU[@]}" -c "select coalesce(sum(cost_krw),0) from core.ai_usage_ledger"; }
@@ -94,7 +94,7 @@ eq "D7 app_ai는 한도 설정 함수(관리자용) 실행 불가" "$(exec_as ap
 eq "D7 원장 수정은 추가 전용 트리거가 막는다(슈퍼유저도)" "$("${SU[@]}" -c "update core.ai_usage_ledger set cost_krw = 1" 2>&1 | grep -oE 'APPEND_ONLY' | head -1)" APPEND_ONLY
 eq "D7 정산 기록 삭제도 막는다" "$("${SU[@]}" -c "delete from core.ai_usage_closures" 2>&1 | grep -oE 'APPEND_ONLY' | head -1)" APPEND_ONLY
 
-echo "== D8 확정 하한(0025): 호출이 나간 뒤 0원 확정으로 사용액을 지울 수 없다"
+echo "== D8 확정 하한(0026): 호출이 나간 뒤 0원 확정으로 사용액을 지울 수 없다"
 reset 1000
 id=$(hold 600)
 eq "D8 0원 확정 거부" "$(as_ai "select api.ai_budget_confirm($id, 0)")" f

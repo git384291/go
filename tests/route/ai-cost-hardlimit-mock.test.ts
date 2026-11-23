@@ -1,4 +1,4 @@
-// P0 AI 사용량·비용 하드 한도 Mock 검증 (TEST-01~14) — 0025 보강 반영. 가짜 transport만 사용: 실제 AI API 호출 0회, 운영 DB·고객정보 미사용.
+// P0 AI 사용량·비용 하드 한도 Mock 검증 (TEST-01~14) — 0026 보강 반영. 가짜 transport만 사용: 실제 AI API 호출 0회, 운영 DB·고객정보 미사용.
 // - 앱 계층(answerChat·비용 게이트·어댑터·복구 래퍼·가격 계산)은 여기서 검증한다.
 // - DB 계층(일·사용자·동시 한도, 긴급 차단, 멱등, 불확실 정산·조정, KST 일 키, 권한)은 db/tests/99_ai_cost_hardlimit.sql(H*)과
 //   scripts/ai-cost-db-concurrency.sh(D*, 서로 다른 DB 세션 동시 실행)에서 검증한다. 메모리 예산의 동시성 통과는 원자성 증거로 쓰지 않는다.
@@ -82,7 +82,7 @@ const SRC = path.resolve(__dirname, '../../src');
 const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = path.join(d, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const srcFiles = walk(SRC).filter((f) => /\.(ts|tsx)$/.test(f));
 const grepSrc = (re: RegExp) => srcFiles.filter((f) => re.test(readFileSync(f, 'utf8'))).map((f) => path.relative(SRC, f)).sort();
-const MIG = readFileSync(path.resolve(__dirname, '../../db/migrations/0025_ai_cost_hardlimit.sql'), 'utf8');
+const MIG = readFileSync(path.resolve(__dirname, '../../db/migrations/0026_ai_cost_hardlimit.sql'), 'utf8');
 
 // ───────── 요청당 한도 ─────────
 test('L01 요청당 최대 입력: 300자 초과 입력 거부, 입력 토큰 상한(바이트 상한 가정) 초과는 전송 0회·예약 취소', async () => {
@@ -202,7 +202,7 @@ test('TEST-07 사용량 누락·형식 이상: 0원 처리 금지 — 확정은 
     assert.deepEqual(s.log, ['reserve(10)=ok', 'confirm(10)']);
   }
   for (const u of [undefined, null, {}, { inputTokens: 1 }, { inputTokens: -1, outputTokens: 1 }, { inputTokens: 1, outputTokens: 1, cachedInputTokens: 2 }]) assert.equal(settleKrw(PRICES[0]!, u), null, JSON.stringify(u));
-  // 메모리·DB 예산 모두 확정 0원을 1원 이상으로 올린다(DB 0025 H6·D8은 0원 확정 자체를 거부)
+  // 메모리·DB 예산 모두 확정 0원을 1원 이상으로 올린다(DB 0026 H6·D8은 0원 확정 자체를 거부)
   const b = mem('2'); const r = (await b.reserve(2))!; await r.confirm(0); assert.ok(await b.reserve(1)); assert.equal(await b.reserve(1), null);
 });
 test('TEST-08 긴급 차단: DB가 거부하면 Provider 0회(스위치 판정·감사·진행 중 기록은 DB H5)', async () => {

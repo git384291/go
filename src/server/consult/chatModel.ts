@@ -34,9 +34,9 @@ export function createModel(env: Record<string, string | undefined>): ChatModel 
 export class ModelNotCalledError extends Error {}
 
 /** 사용료 예약 → 호출 → 확정(실제 비용)/취소(호출 안 함). 정산이 오지 않은 예약은 DB가 예약 비용 전액으로 센다. */
-// - uncertain(): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 예약 전액으로 닫고 대표 조정 대기(0025). 없으면 확정으로 처리한다.
+// - uncertain(): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 예약 전액으로 닫고 대표 조정 대기(0026). 없으면 확정으로 처리한다.
 export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(): Promise<void> };
-/** 예약 문맥(0025): 요청 ID(멱등, 같은 ID는 다시 예약하지 않음)와 사용자 키(서버 HMAC 64자리, 사용자별 일·월 한도) */
+/** 예약 문맥(0026): 요청 ID(멱등, 같은 ID는 다시 예약하지 않음)와 사용자 키(서버 HMAC 64자리, 사용자별 일·월 한도) */
 export type ReserveContext = { readonly requestId: string; readonly scope: string };
 export const REQUEST_ID = /^[A-Za-z0-9-]{16,64}$/;
 export const SCOPE_KEY = /^[0-9a-f]{64}$/;
@@ -81,7 +81,7 @@ export function createAiBudget(env: Record<string, string | undefined>, log: Con
       used += cost;
       let done = false;
       const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
-      // 확정은 1원 이상(호출이 나간 뒤 0원으로 지우지 못함, DB 0025와 같음). 0원은 취소(호출 안 함)뿐
+      // 확정은 1원 이상(호출이 나간 뒤 0원으로 지우지 못함, DB 0026와 같음). 0원은 취소(호출 안 함)뿐
       return { async confirm(a) { settle(Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain() { settle(cost); } };
     },
   };
@@ -94,7 +94,7 @@ export function createDbAiBudget(run: RunAi): AiBudget {
     async reserve(cost, ctx) {
       if (!Number.isSafeInteger(cost) || cost < 0) return null;
       if (cost === 0) return NOOP;
-      // 0025: 요청 ID·사용자 키가 없거나 형식이 틀리면 DB가 거부한다(null). 여기서 지어내지 않는다
+      // 0026: 요청 ID·사용자 키가 없거나 형식이 틀리면 DB가 거부한다(null). 여기서 지어내지 않는다
       const req = ctx && REQUEST_ID.test(ctx.requestId) ? ctx.requestId : null;
       const scope = ctx && SCOPE_KEY.test(ctx.scope) ? ctx.scope : null;
       let id: unknown;
