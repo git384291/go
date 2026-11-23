@@ -440,8 +440,11 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
 test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확정/취소, 호출 전 실패만 취소·장애는 확정, 한도 안에서만(동시 포함), 전용 역할만 실행', async () => {
   const budget = withCtx(createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never))));
   await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0026 새 한도는 넉넉히(월 한도만 시험)
-  const used = async () => count(`select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0)::int as n
-    from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id`);
+  // 0026: DB 판정(core.ai_spent)과 같은 기준 — 이번 달(KST)만, 불확실 정산은 조정값 우선
+  const used = async () => count(`select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw
+      when 'uncertain' then coalesce(a.actual_cost_krw, s.actual_cost_krw) else u.cost_krw end), 0)::int as n
+    from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id left join core.ai_usage_adjustments a on a.reservation_id = u.id
+    where u.month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')`);
   const u0 = await used();
   const [cfg] = await admin`select monthly_limit_krw from core.ai_budget_config where singleton`;
   assert.equal(cfg.monthly_limit_krw, 0);
