@@ -71,7 +71,10 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
   }
   const u2 = adv.trim().split('\n').filter(Boolean);
   assert.deepEqual(u2.sort(), [
-    'src/server/advertising/boundedHttp.ts', 'src/server/advertising/openAiAdGenerator.ts',
+    'src/server/advertising/boundedHttp.ts',
+    // PM 11/23 B·C 승인: 반응형 검색광고 소재 조립이 기존 문구 검증기(validateAdCopy)를 재사용(새 사용처 1개)
+    'src/server/advertising/googleAdsCreative.ts',
+    'src/server/advertising/openAiAdGenerator.ts',
     'src/server/advertising/video/storyboard.ts',
     'src/server/advertising/youtubeAdPreparation.ts', 'src/server/advertising/youtubePrivatePublisher.ts',
     // PM 11/22 4c7f269 지시 9: 상담 AI 모델 어댑터(미연결 준비 코드)가 범용 HTTP 상한 모듈(boundedHttp)만 재사용(새 사용처 1개, 검수 필요)

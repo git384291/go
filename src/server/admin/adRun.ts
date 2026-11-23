@@ -1,6 +1,7 @@
 import 'server-only';
 import { AD_DAILY_CAP_KRW } from '../advertising/budgetGuard';
-import { callPlatform, createPlatform, platformDailyBudgetFor } from '../advertising/platform';
+import { callPlatform, platformDailyBudgetFor } from '../advertising/platform';
+import { selectAdPlatform } from '../advertising/platformSelect';
 import type { AdPlatform } from '../advertising/platform';
 import { adBlock, adDbError, adFail, adGate, adJson } from './adBudget';
 import type { AdBudgetDeps, SqlTag } from './adBudget';
@@ -14,8 +15,8 @@ import type { StaffIdentity } from '../auth/staffSession';
  *  초과가 감지되면 자동 중지한다: ① 승인 철회(이후 모든 지출 차단) ② 플랫폼 중지 요청. 철회가 먼저이고, 어느 쪽이 실패해도 다른 쪽은 진행하며 결과를 응답에 그대로 알린다.
  * 분석(funnel): 노출→클릭→상담 시작→접수 건수와 광고비만 센다(개인정보 읽기 없음).
  */
-/** 라우트가 광고 서버 모듈을 직접 import하지 않도록 이 모듈이 어댑터 선택을 감싼다(AD_PLATFORM=mock만) */
-export const adRunPlatform = (env: Readonly<Record<string, string | undefined>>): AdPlatform | null => createPlatform(env);
+/** 라우트가 광고 서버 모듈을 직접 import하지 않도록 이 모듈이 어댑터 선택을 감싼다(AD_PLATFORM=mock 또는 설정이 모두 갖춰진 google_ads, platformSelect) */
+export const adRunPlatform = (env: Readonly<Record<string, string | undefined>>): AdPlatform | null => selectAdPlatform(env);
 
 export type AdRunDeps = AdBudgetDeps & { platform: AdPlatform | null };
 

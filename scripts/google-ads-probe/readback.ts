@@ -2,10 +2,11 @@
 // 확인 항목: test_account · KRW · Asia/Seoul · end_date_time read-back · budget read-back · pause 응답.
 // - 실행 조건: GOOGLE_ADS_PROBE_READBACK=test-account-only 를 명시했을 때만. 계정이 test_account=true·manager 아님·KRW·Asia/Seoul일 때만 변경 호출.
 //   Google 공식: 테스트 계정은 "Can't serve ads" · "don't ... charge your account"(광고비 0원). 운영 계정이면 변경 호출 0회로 끝난다.
-// - 변경은 운영 어댑터(createGoogleAdsPlatform)의 launch(캠페인 PAUSED 생성, 광고 그룹·소재 없음) 1회 + pause 1회뿐. 재시도 없음.
+// - 변경은 운영 어댑터(createGoogleAdsPlatform)의 launch(캠페인·광고 그룹·반응형 검색광고 모두 PAUSED 생성, 키워드 없음) 1회 + pause 1회뿐. 재시도 없음.
 // - 출력은 단계·불리언·HTTP 상태뿐. credential·토큰·고객 ID·캠페인 ID·오류 원문은 출력하지 않는다. 만든 PAUSED 캠페인은 테스트 계정에 남는다.
 import { randomUUID } from 'node:crypto';
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '../../src/server/advertising/boundedHttp';
+import { approvedRsaCreative, landingUrlFrom } from '../../src/server/advertising/googleAdsCreative';
 import { ACCOUNT_TIME_ZONE, createGoogleAdsPlatform, GOOGLE_ADS_DEFAULT_API_VERSION, GOOGLE_ADS_ENV_NAMES, googleAdsConfigFromEnv } from '../../src/server/advertising/googleAdsPlatform';
 import { PlatformError } from '../../src/server/advertising/platform';
 
@@ -23,7 +24,8 @@ export async function runReadback(env: Readonly<Record<string, string | undefine
   const armed = v(READBACK_FLAG) === 'test-account-only';
   log({ step: 'env', ok: missing.length === 0 && armed, missing: [...missing], armed });
   if (missing.length > 0 || !armed) return 2;
-  const cfg = { ...googleAdsConfigFromEnv(env, transport), initialStatus: 'PAUSED' as const, validateOnly: false };
+  // 11/23 C: launch가 광고 그룹·반응형 검색광고(모두 PAUSED)까지 만들므로 검수 소재와 최종 URL(AD_LANDING_URL)이 필요하다
+  const cfg = { ...googleAdsConfigFromEnv(env, transport), initialStatus: 'PAUSED' as const, validateOnly: false, creative: approvedRsaCreative(), landingUrl: landingUrlFrom(env.AD_LANDING_URL) };
   const platform = createGoogleAdsPlatform(cfg);
   if (!platform || !cfg.customerId) { log({ step: 'config', ok: false }); return 2; }
   const deadline = () => Date.now() + 15_000; // 요청 시간 제한은 실제 시계(종료일 계산용 now와 분리)

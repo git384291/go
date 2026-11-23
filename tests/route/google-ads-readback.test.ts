@@ -6,7 +6,7 @@ import { kstTomorrow, runReadback, type ReadbackLine } from '../../scripts/googl
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 
 const NOW = new Date('2026-11-22T14:30:00Z'); // KST 23:30 → 내일 = 2026-11-23
-const ENV = { GOOGLE_ADS_CLIENT_ID: 'cid-SECRET', GOOGLE_ADS_CLIENT_SECRET: 'cs-SECRET', GOOGLE_ADS_REFRESH_TOKEN: 'rt-SECRET', GOOGLE_ADS_CUSTOMER_ID: '123-456-7890', GOOGLE_ADS_PROBE_READBACK: 'test-account-only' };
+const ENV = { AD_LANDING_URL: 'https://example.com/internet-tv', GOOGLE_ADS_CLIENT_ID: 'cid-SECRET', GOOGLE_ADS_CLIENT_SECRET: 'cs-SECRET', GOOGLE_ADS_REFRESH_TOKEN: 'rt-SECRET', GOOGLE_ADS_CUSTOMER_ID: '123-456-7890', GOOGLE_ADS_PROBE_READBACK: 'test-account-only' };
 const ACCT = { currencyCode: 'KRW', testAccount: true, manager: false, timeZone: 'Asia/Seoul' };
 type Over = { acct?: Record<string, unknown>; readEnd?: string; readMicros?: string; readTz?: string; pauseOk?: boolean; campStatus?: number };
 const body = (o: unknown) => new Response(JSON.stringify(o)).body;
@@ -16,6 +16,10 @@ function fake(o: Over = {}) {
     const b = init.body ? new TextDecoder().decode(init.body) : '';
     calls.push({ url, body: b });
     if (url.endsWith('/token')) return { status: 200, body: body({ access_token: 'ya29.access-SECRET-token' }) };
+    // 11/23 C: 광고 그룹·반응형 검색광고(PAUSED)와 상태 확인 조회
+    if (url.endsWith('adGroups:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/adGroups/66' }] }) };
+    if (url.endsWith('adGroupAds:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/adGroupAds/66~77' }] }) };
+    if (url.endsWith('googleAds:search') && b.includes('FROM ad_group_ad')) return { status: 200, body: body({ results: [{ campaign: { status: 'PAUSED' }, adGroup: { status: 'PAUSED' }, adGroupAd: { status: 'PAUSED' } }] }) };
     if (url.endsWith('googleAds:search') && b.includes('FROM customer')) return { status: 200, body: body({ results: [{ customer: o.acct ?? ACCT }] }) };
     if (url.endsWith('campaignBudgets:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/campaignBudgets/55' }] }) };
     if (url.endsWith('campaigns:mutate') && b.includes('"create"')) return { status: o.campStatus ?? 200, body: body({ results: [{ resourceName: 'customers/1234567890/campaigns/987654' }] }) };
@@ -47,8 +51,9 @@ test('RB3 정상: 예산 1,000원·PAUSED 캠페인·종료 KST 내일 23:59:59 
   assert.equal(create.operations[0].create.status, 'PAUSED');
   assert.equal(create.operations[0].create.endDateTime, '2026-11-23 23:59:59');
   assert.equal(JSON.parse(f.calls.find((c) => c.url.endsWith('campaignBudgets:mutate'))!.body).operations[0].create.amountMicros, '1000000000');
-  assert.ok(!mutates(f).some((c) => /adGroup|keyword|asset/i.test(c.body)));
-  assert.equal(mutates(f).length, 3); // 예산·캠페인 생성 + pause, 재시도 없음
+  assert.ok(!mutates(f).some((c) => /keyword|criterion|asset|ENABLED/i.test(c.body)));
+  // 11/23 C: 예산·캠페인·광고 그룹·반응형 검색광고 생성(모두 PAUSED) + pause, 재시도 없음
+  assert.deepEqual(mutates(f).map((c) => c.url.replace(/^.*\//, '')), ['campaignBudgets:mutate', 'campaigns:mutate', 'adGroups:mutate', 'adGroupAds:mutate', 'campaigns:mutate']);
   const launch = r.lines.find((l) => l.step === 'launch')!;
   assert.deepEqual([launch.budgetReadBack, launch.endDateTimeReadBack], [true, true]);
   assert.equal(r.lines.at(-1)!.ok, true);

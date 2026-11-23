@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { callPlatform, createPlatform, PlatformError } from '../../src/server/advertising/platform';
 import { createGoogleAdsPlatform, googleAdsConfigFromEnv, GOOGLE_ADS_ENV_NAMES, GOOGLE_ADS_OPTIONAL_ENV_NAMES, type GoogleAdsConfig } from '../../src/server/advertising/googleAdsPlatform';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
+import { approvedRsaCreative } from '../../src/server/advertising/googleAdsCreative';
 
 const ACCESS = 'ya29.fake_access_token_for_tests_0000';
 const SECRETS = ['dev-token-SECRET', 'client-id-SECRET', 'client-secret-SECRET', 'refresh-SECRET', ACCESS];
@@ -15,25 +16,33 @@ type Resp = { status: number; text?: string; throws?: boolean; hang?: boolean };
 type Call = { url: string; body: string; headers: Record<string, string> };
 const stream = (text: string) => new ReadableStream<Uint8Array>({ start(c) { c.enqueue(enc(text)); c.close(); } });
 /** 경로 끝(token·campaignBudgets:mutate·campaigns:mutate·search)별 응답 */
-const fake = (script: Partial<Record<'token' | 'budget' | 'campaign' | 'search', Resp>>) => {
+const fake = (script: Partial<Record<'token' | 'budget' | 'campaign' | 'adGroup' | 'ad' | 'status' | 'search', Resp>>) => {
   const calls: Call[] = [];
   const t: BodyTransport = async (url, init) => {
-    const key = url.endsWith('/token') ? 'token' : url.endsWith('campaignBudgets:mutate') ? 'budget' : url.endsWith('campaigns:mutate') ? 'campaign' : url.endsWith('googleAds:search') ? 'search' : null;
+    const body = init.body ? new TextDecoder().decode(init.body) : '';
+    const key = url.endsWith('/token') ? 'token' : url.endsWith('campaignBudgets:mutate') ? 'budget' : url.endsWith('campaigns:mutate') ? 'campaign'
+      : url.endsWith('adGroups:mutate') ? 'adGroup' : url.endsWith('adGroupAds:mutate') ? 'ad'
+      : url.endsWith('googleAds:search') ? (body.includes('FROM ad_group_ad') ? 'status' : 'search') : null;
     calls.push({ url, body: init.body ? new TextDecoder().decode(init.body) : '', headers: init.headers });
     if (!key) throw new Error('unexpected url');
-    const r = script[key] ?? { status: 200, text: '{}' };
+    const r = script[key] ?? DEFAULTS[key] ?? { status: 200, text: '{}' };
     if (r.hang) await new Promise(() => undefined);
     if (r.throws) throw new Error('ECONNRESET dev-token-SECRET');
     return { status: r.status, body: stream(r.text ?? '') };
   };
   return { t, calls };
 };
+const OK_GROUP: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: 'customers/1234567890/adGroups/555' }] }) };
+const OK_AD: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: 'customers/1234567890/adGroupAds/555~999' }] }) };
+const statusRow = (c = 'PAUSED', g = 'PAUSED', a = 'PAUSED'): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaign: { status: c }, adGroup: { status: g }, adGroupAd: { status: a } }] }) });
+const DEFAULTS: Partial<Record<string, Resp>> = { adGroup: OK_GROUP, ad: OK_AD, status: statusRow() };
+const LANDING = 'https://example.com/internet-tv';
 const OK_TOKEN: Resp = { status: 200, text: JSON.stringify({ access_token: ACCESS }) };
 const OK_BUDGET: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaignBudgets/777` }] }) };
 const OK_CAMP: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaigns/4242` }] }) };
 const searchBudget = (micros: string, end = '2026-11-23 23:59:59', tz = 'Asia/Seoul'): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaignBudget: { amountMicros: micros }, campaign: { endDateTime: end }, customer: { timeZone: tz } }] }) });
 const cfg = (t: BodyTransport | null, o: Partial<GoogleAdsConfig> = {}): GoogleAdsConfig => ({
-  transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, ...o,
+  transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, creative: approvedRsaCreative(), landingUrl: LANDING, ...o,
 });
 const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 2500, endDate: '2026-11-23', deadlineAt: Date.now() + 5000, ...o });
 const opts = () => ({ deadlineAt: Date.now() + 5000 });
@@ -43,7 +52,7 @@ const run = async (p: Plat, f: (p: NonNullable<Plat>) => Promise<unknown>) => { 
 test('GA1 설정이 하나라도 비면 어댑터 없음(닫힘), transport 0회. createPlatform은 google_ads를 선택하지 않는다', () => {
   const { t, calls } = fake({});
   assert.ok(createGoogleAdsPlatform(cfg(t)));
-  for (const bad of [{ transport: null }, { apiVersion: 'latest' }, { apiVersion: 'v26.2' }, { apiVersion: '26' }, { clientId: null }, { clientSecret: null }, { refreshToken: null }, { customerId: null }, { customerId: '12-34' }, { loginCustomerId: 'x' }]) assert.equal(createGoogleAdsPlatform({ ...cfg(t), ...bad } as GoogleAdsConfig), null);
+  for (const bad of [{ creative: null }, { landingUrl: null }, { landingUrl: 'http://example.com/' }, { transport: null }, { apiVersion: 'latest' }, { apiVersion: 'v26.2' }, { apiVersion: '26' }, { clientId: null }, { clientSecret: null }, { refreshToken: null }, { customerId: null }, { customerId: '12-34' }, { loginCustomerId: 'x' }]) assert.equal(createGoogleAdsPlatform({ ...cfg(t), ...bad } as GoogleAdsConfig), null);
   assert.equal(calls.length, 0);
   // developer token·API 버전 미지정은 정상(developer token 불필요, 버전 기본 v26)
   assert.ok(createGoogleAdsPlatform({ ...cfg(t), apiVersion: null, legacyDeveloperToken: null }));
@@ -58,7 +67,7 @@ test('GA2 환경변수 이름만 참조: 값은 읽어 설정으로 넘길 뿐, 
   assert.deepEqual([c.customerId, c.legacyDeveloperToken, c.apiVersion, c.transport], [CID, null, 'v26', null]);
   assert.equal(createGoogleAdsPlatform(c), null);
 });
-test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소재 없음, externalId·read-back 값 반환, 요청 이름에 requestKey', async () => {
+test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인·광고 그룹·광고 모두 PAUSED, externalId·read-back 값 반환, 요청 이름에 requestKey', async () => {
   const { t, calls } = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('2500000000') });
   const p = createGoogleAdsPlatform(cfg(t))!;
   const r = await p.launch(req({ amountKrw: 5000, platformDailyBudgetKrw: 2500 }));
@@ -69,7 +78,14 @@ test('GA3 launch 성공: 예산 ≤ 승인 금액(micros), 캠페인 PAUSED·소
   const camp = JSON.parse(calls.find((c) => c.url.endsWith('campaigns:mutate'))!.body);
   assert.equal(camp.operations[0].create.status, 'PAUSED');
   assert.ok(String(camp.operations[0].create.name).includes(KEY));
-  assert.ok(!/adGroup|ads?"|keyword|asset|image|video|creative/i.test(calls.map((c) => c.body).join('\n')), '광고 그룹·소재·이미지·영상 요청 없음');
+  // 순서: 토큰 → 예산 → 캠페인 → 광고 그룹 → 광고 → 확인 조회 2회. 키워드·이미지·영상 요청 없음
+  assert.deepEqual(calls.map((c) => c.url.replace(/^.*\//, '')), ['token', 'campaignBudgets:mutate', 'campaigns:mutate', 'adGroups:mutate', 'adGroupAds:mutate', 'googleAds:search', 'googleAds:search']);
+  const grp = JSON.parse(calls.find((c) => c.url.endsWith('adGroups:mutate'))!.body).operations[0].create;
+  assert.deepEqual([grp.status, grp.type, grp.campaign, 'cpcBidMicros' in grp], ['PAUSED', 'SEARCH_STANDARD', `customers/${CID}/campaigns/4242`, false]);
+  const ad = JSON.parse(calls.find((c) => c.url.endsWith('adGroupAds:mutate'))!.body).operations[0].create;
+  assert.deepEqual([ad.status, ad.adGroup, ad.ad.finalUrls, ad.ad.finalUrlSuffix], ['PAUSED', `customers/${CID}/adGroups/555`, [LANDING], 'utm_source=google&utm_medium=cpc&utm_campaign=camp-a']);
+  assert.ok(ad.ad.responsiveSearchAd.headlines.length >= 3 && ad.ad.responsiveSearchAd.descriptions.length >= 2);
+  assert.ok(!/keyword|criterion|asset|image|video|ENABLED/i.test(calls.map((c) => c.body).join('\n')), '키워드·이미지·영상·활성화 요청 없음');
   assert.ok(calls.every((c) => c.url.startsWith('https://googleads.googleapis.com/v26/customers/1234567890/') || c.url === 'https://oauth2.googleapis.com/token'));
   const api = calls.find((c) => c.url.includes('googleads'))!;
   // developer token 없이 동작: 헤더에 developer-token이 없다. legacy 토큰을 주입한 때만 보낸다
@@ -164,13 +180,16 @@ test('GA11 API 버전: 기본 major v26, 지정은 major만(v26.2 같은 minor �
   assert.ok(g.calls.some((c) => c.url.startsWith('https://googleads.googleapis.com/v27/')));
   for (const bad of ['v26.2', 'v26.1', 'V26', '26', 'v2', 'latest']) assert.equal(createGoogleAdsPlatform(cfg(g.t, { apiVersion: bad })), null, bad);
 });
-test('GA10 정적: 어댑터는 process.env·기본 fetch·SDK·console·재시도 없음, 고정 주소 2곳뿐, createPlatform·서버 경로에서 불러 쓰지 않음', () => {
+test('GA10 정적: 어댑터는 process.env·기본 fetch·SDK·console·재시도 없음, 고정 주소 2곳뿐, 서버 연결은 platformSelect 한 곳', () => {
   const src = readFileSync('src/server/advertising/googleAdsPlatform.ts', 'utf8');
   const code = src.replace(/^\s*\/\/.*$/gm, '');
   assert.match(src, /^import 'server-only';/);
   assert.ok(!/process\.env|fetch\(|console\.|localStorage|setInterval|require\(|import\(|from 'google-ads|retry|while \(/i.test(code));
   assert.deepEqual((code.match(/https:\/\/[^'`$\s]+/g) ?? []).sort(), ['https://googleads.googleapis.com', 'https://oauth2.googleapis.com/token']);
-  for (const f of ['src/server/advertising/platform.ts', 'src/server/admin/adRun.ts', 'src/app/api/admin/ads/run/route.ts']) assert.ok(!/googleAdsPlatform/.test(readFileSync(f, 'utf8')), `${f}: 아직 연결 안 함`);
+  // 11/23 B 승인: 서버 연결은 platformSelect 한 곳뿐(adRun → selectAdPlatform). 라우트·platform.ts는 어댑터를 직접 모른다
+  for (const f of ['src/server/advertising/platform.ts', 'src/server/admin/adRun.ts', 'src/app/api/admin/ads/run/route.ts']) assert.ok(!/googleAdsPlatform/.test(readFileSync(f, 'utf8')), `${f}: 어댑터 직접 참조 금지`);
+  assert.match(readFileSync('src/server/admin/adRun.ts', 'utf8'), /from '\.\.\/advertising\/platformSelect'/);
+  assert.match(readFileSync('src/server/advertising/platformSelect.ts', 'utf8'), /from '\.\/googleAdsPlatform'/);
 });
 
 test('GA10 종료일(end_date_time, PM 11/22 P0): 캠페인 생성 본문에 종료일 23:59:59, read-back 종료일·계정 시간대가 정확히 같을 때만 endVerified', async () => {
