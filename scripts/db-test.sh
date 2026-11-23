@@ -72,6 +72,7 @@ run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 �
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
+run db/tests/99_ad_precheck.sql >/dev/null   # 광고 사전검증 10: 예약 시작 전 집행 차단·대조군·1회 실행
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
@@ -186,6 +187,32 @@ if [ "$ok" = 5 ] && [ "$leads" = 1 ] && [ "$repeat" = 0 ]; then
   echo "NOTICE:  PASS | C4 같은 요청 동시 5건 → 응답 5건 accepted, 리드 1건, 재문의 0건" >> "$LOG_DIR/db-test.log"
 else
   echo "FAIL | C4 accepted=$ok leads=$leads repeat=$repeat" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+# 9. 전환 중복 방지(광고 사전검증): 응답 유실(timeout) 뒤 같은 요청 키로 재시도 — 새 연결(서버 재시작·재처리 모사)에서 3회
+for i in 1 2 3; do
+  psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+    -c "begin" -c "set local role app_public" -f "$LOG_DIR/conc-same.sql" -c "commit" | grep -v '^$' > "$LOG_DIR/conc-retry-$i.out" 2>&1 || true
+done
+ok=$(cat "$LOG_DIR"/conc-retry-*.out | grep -c '^accepted$' || true)
+leads=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads where idempotency_key = 'idem-double-0000000001'")
+repeat=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.lead_status_history h join core.leads l on l.id = h.lead_id where l.idempotency_key = 'idem-double-0000000001' and h.reason = 'repeat_inquiry'")
+if [ "$ok" = 3 ] && [ "$leads" = 1 ] && [ "$repeat" = 0 ]; then
+  echo "NOTICE:  PASS | C4b 확정 뒤 같은 요청 키 재시도 3회(새 연결) → 모두 accepted, 리드(=전환) 1건 유지, 재문의 0건" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C4b accepted=$ok leads=$leads repeat=$repeat" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+# 상담 시작(전환 퍼널 1단계): 같은 세션 키 8건 동시(서로 다른 연결) → 1건만
+for i in $(seq 1 8); do
+  ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+      -c "begin" -c "set local role app_public" -c "select api.consult_event_record('sess-conv-dup-000000001', 'conv-dup')" -c "commit" > "$LOG_DIR/conc-ev-$i.out" 2>&1 ) &
+done
+wait
+evfail=$(cat "$LOG_DIR"/conc-ev-*.out | grep -ci 'error' || true)
+events=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.consult_events where session_key = 'sess-conv-dup-000000001'")
+if [ "$events" = 1 ] && [ "$evfail" = 0 ]; then
+  echo "NOTICE:  PASS | C4c 같은 상담 세션 동시 8건(서로 다른 연결) → 상담 시작 1건, 오류 0건" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C4c events=$events errors=$evfail" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
 rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out "$LOG_DIR/app_server.err"
 
