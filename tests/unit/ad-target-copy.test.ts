@@ -27,8 +27,8 @@ test('AT2 금지 주장·금액·숫자 금액·브랜드명 없음, 문안끼�
   assert.equal(new Set(all.map((d) => d.description)).size, 5);
   assert.ok(Object.isFrozen(AD_TARGET_COPY) && Object.isFrozen(AD_TARGET_COPY.moving.keywords));
 });
-test('AT3 미연결: src에서 이 파일을 가져다 쓰는 곳 없음(광고 계정·화면 연결은 별도 승인)', () => {
+test('AT3 연결은 한 곳뿐: 반응형 검색광고 소재 조립(PM 11/23 B·C 승인)만 이 문안을 읽는다. 화면·API·라우트 연결 없음', () => {
   let hits = '';
   try { hits = execFileSync('git', ['grep', '-l', '-e', 'adTargetCopy', '-e', 'AD_TARGET_COPY', '--', 'src'], { encoding: 'utf8' }); } catch (e) { if ((e as { status?: number }).status !== 1) throw e; } // 1 = 일치 없음
-  assert.deepEqual(hits.trim().split('\n').filter(Boolean), ['src/content/adTargetCopy.ts']);
+  assert.deepEqual(hits.trim().split('\n').filter(Boolean).sort(), ['src/content/adTargetCopy.ts', 'src/server/advertising/googleAdsCreative.ts']);
 });
