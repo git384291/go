@@ -350,3 +350,54 @@ test('RC13 정적: 서버 상한·클라이언트 timeout·중복 잠금·무한
   const meter: CallMeter = { sent: 0 };
   void meter;
 });
+
+const cfgR = (t: BodyTransport, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, ...over });
+const okBody = (approved = '월 11,111원') => JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '현재 확인된 안내입니다.\n' + approved }] }] });
+
+test('RC14 Retry-After: 정수 초만 인정, 우리 대기 상한(2초) 안이면 그만큼 기다리고, 넘으면 재시도 없이 즉시 안내문', async () => {
+  const tr = (calls: { n: number }, ra: string | null, then: 'ok' | 'again'): BodyTransport => async () => {
+    calls.n++;
+    if (calls.n === 1 || then === 'again') return { status: 429, body: null, headers: new Headers(ra === null ? {} : { 'retry-after': ra }) };
+    return { status: 200, body: new Response(okBody()).body };
+  };
+  const run = async (ra: string | null, then: 'ok' | 'again' = 'ok') => {
+    const calls = { n: 0 }; const s = noSleep();
+    const w = withRecovery(createOpenAiChatModel(cfgR(tr(calls, ra, then))), { ...s, baseDelayMs: 100, maxDelayMs: 2000, maxAttempts: 2 });
+    const out = await w.generate(IN, sig()).catch((e: unknown) => e);
+    return { out, calls: calls.n, delays: s.delays };
+  };
+  const a = await run('1'); // 1초 → 대기 1000ms 후 재시도 성공
+  assert.ok(typeof a.out === 'string' && a.calls === 2 && a.delays[0] === 1000, JSON.stringify(a));
+  const b = await run('30', 'again'); // 30초 > 2초 상한 → 재시도 없이 실패(호출 1회)
+  assert.ok(b.out instanceof ModelCallError && b.out.retryAfterMs === 30_000 && b.calls === 1 && b.delays.length === 0);
+  for (const bad of ['Wed, 21 Oct 2026 07:28:00 GMT', '-5', '0', '1.5', '99999', 'abc', '']) {
+    const r = await run(bad); // 형식 밖은 무시: 기본 대기(100ms)로 재시도
+    assert.ok(typeof r.out === 'string' && r.delays[0] === 100, bad);
+  }
+  const none = await run(null);
+  assert.ok(typeof none.out === 'string' && none.delays[0] === 100);
+  // 429가 아닌 5xx의 Retry-After도 같은 규칙, 2xx의 Retry-After는 읽지 않는다(오류 어댑터 경로 아님)
+  const e = await createOpenAiChatModel(cfgR(async () => ({ status: 503, body: null, headers: new Headers({ 'retry-after': '2' }) }))).generate(IN, sig()).catch((x: unknown) => x);
+  assert.ok(e instanceof ModelCallError && e.kind === 'server' && e.retryAfterMs === 2000 && !e.message.includes('2'));
+});
+
+test('RC15 실제 취소: 시도 시간 초과·바깥 취소 때 진행 중인 HTTP 요청의 신호가 취소된다(마감까지 붙들지 않음)', async () => {
+  const signals: AbortSignal[] = [];
+  const hang: BodyTransport = (_u, init) => { signals.push(init.signal); return new Promise(() => {}); };
+  const w = withRecovery(createOpenAiChatModel(cfgR(hang, { timeoutMs: 15000 })), { maxAttempts: 2, attemptMs: 40, baseDelayMs: 1, sleep: async () => {} });
+  const t0 = Date.now();
+  await assert.rejects(w.generate(IN, sig()), ModelCallError);
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every((s) => s.aborted), '시도 제한 뒤 요청 신호 취소');
+  assert.ok(Date.now() - t0 < 1500); // 15초 마감을 기다리지 않음
+  // 바깥(상담 전체) 취소
+  signals.length = 0;
+  const ac = new AbortController();
+  const w2 = withRecovery(createOpenAiChatModel(cfgR(hang, { timeoutMs: 15000 })), { attemptMs: 5000, sleep: async () => {} });
+  const p = w2.generate(IN, ac.signal).catch((x: unknown) => x);
+  await new Promise((r) => setTimeout(r, 30));
+  ac.abort();
+  assert.ok((await p) instanceof ModelCallError);
+  assert.equal(signals.length, 1);
+  assert.ok(signals[0]!.aborted);
+});
