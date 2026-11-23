@@ -40,7 +40,7 @@ exec_allow(rolname, proname) as (
     ('app_staff', 'ad_launch_begin'), ('app_staff', 'ad_launch_finish'), ('app_staff', 'ad_launch_active'), ('app_staff', 'ad_launch_paused'), ('app_staff', 'ad_launch_resolve'), ('app_public', 'application_amend'), ('app_staff', 'application_amendments'),
     ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'),
     -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
-    ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'consult_rate_hit'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'),
+    ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),
