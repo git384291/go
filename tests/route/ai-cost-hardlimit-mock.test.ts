@@ -9,6 +9,8 @@ import path from 'node:path';
 import { answerChat } from '../../src/server/consult/chatAnswer';
 import { createAiBudget, type AiBudget, type Reservation } from '../../src/server/consult/chatModel';
 import { createOpenAiChatModel, type OpenAiChatModelConfig } from '../../src/server/consult/openAiChatModel';
+import { withRecovery, RECOVERY_LIMITS } from '../../src/server/consult/modelRecovery';
+import { createInflightGuard } from '../../src/server/consult/chatHandler';
 import { createOpenAiAdGenerator } from '../../src/server/advertising/openAiAdGenerator';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 
@@ -288,4 +290,72 @@ test('TEST-14d 상담 경로는 모델을 한도 예약을 거쳐서만 부른�
   const model = { name: 'fake', costPerCallKrw: 10, async generate() { generated++; return 'x'; } };
   await answerChat(deps({ model, budget: createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '5' }) }), input(), NOW);
   assert.equal(generated, 0);
+});
+
+// ───────── a2acdbc(PM 11/24 1번 복구 래퍼) 반영: 재시도 비용·차단기·중복 방어 ─────────
+const noSleep = async () => undefined;
+const recovering = (t: BodyTransport, over: Partial<OpenAiChatModelConfig> = {}, rc: Record<string, unknown> = {}) =>
+  withRecovery(createOpenAiChatModel(cfg(t, over)), { sleep: noSleep, ...rc } as never);
+
+test('TEST-06r 복구 래퍼: 429·500·503은 상한(기본 2회, 어떤 설정도 3회 초과 불가) 안에서만 재시도하고 실제 전송 횟수만큼 한도에 포함', async () => {
+  for (const status of [429, 500, 503]) {
+    const p = mockProvider({ status });
+    const s = spyBudget(createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' }));
+    const r = await answerChat(deps({ model: recovering(p.t), budget: s.b }), input(), NOW);
+    assert.ok(r.ok && r.source === 'fallback');
+    assert.equal(p.calls.length, 2, `status ${status}`);
+    assert.deepEqual(s.log, ['reserve(20)=ok', 'confirm(20)']); // 재시도 포함 최대 비용을 먼저 예약, 보낸 횟수(2×10)만큼 확정
+    assert.ok(await s.b.reserve(980)); assert.equal(await s.b.reserve(1), null); // 사용액이 정확히 20원
+  }
+  const p = mockProvider({ status: 503 });
+  await answerChat(deps({ model: recovering(p.t, {}, { maxAttempts: 99 }), budget: createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' }) }), input(), NOW);
+  assert.equal(p.calls.length, RECOVERY_LIMITS.maxAttempts);
+});
+test('TEST-06r2 재시도 비용이 남은 한도를 넘으면(예약 20 > 잔여 15) 첫 호출도 하지 않는다', async () => {
+  const p = mockProvider({ status: 503 });
+  const s = spyBudget(createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '15' }));
+  const r = await answerChat(deps({ model: recovering(p.t), budget: s.b }), input(), NOW);
+  assert.ok(r.ok && r.source === 'fallback');
+  assert.equal(p.calls.length, 0);
+  assert.deepEqual(s.log, ['reserve(20)=denied']);
+});
+test('TEST-06r3 4xx(인증·형식)는 재시도하지 않는다 — 전송 1회, 비용 10원만 확정', async () => {
+  for (const status of [400, 401, 403]) {
+    const p = mockProvider({ status });
+    const s = spyBudget(createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' }));
+    await answerChat(deps({ model: recovering(p.t), budget: s.b }), input(), NOW);
+    assert.equal(p.calls.length, 1, `status ${status}`);
+    assert.deepEqual(s.log, ['reserve(20)=ok', 'confirm(10)']);
+  }
+});
+test('TEST-06r4 차단기: 연속 3회 실패 뒤에는 Provider 0회·예약 취소(0원)로 즉시 승인 안내문', async () => {
+  const p = mockProvider({ status: 503 });
+  const model = recovering(p.t);
+  const budget = createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' });
+  for (let i = 0; i < 3; i++) await answerChat(deps({ model, budget }), input(), NOW);
+  const before = p.calls.length;
+  const s = spyBudget(budget);
+  const r = await answerChat(deps({ model, budget: s.b }), input(), NOW);
+  assert.ok(r.ok && r.source === 'fallback');
+  assert.equal(p.calls.length, before, '차단기가 열린 뒤 Provider 호출 0회');
+  assert.deepEqual(s.log, ['reserve(20)=ok', 'cancel']);
+});
+test('TEST-05r 복구 래퍼 + 무응답: 상담 전체 시간 초과 시 추가 시도 없이 전송 1회, 보낸 1회분(10원) 확정', async () => {
+  const p = mockProvider({ hang: true });
+  const s = spyBudget(createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' }));
+  const r = await answerChat(deps({ model: recovering(p.t), budget: s.b, timeoutMs: 40 }), input(), NOW);
+  assert.ok(r.ok && r.source === 'fallback');
+  assert.equal(p.calls.length, 1);
+  assert.deepEqual(s.log, ['reserve(20)=ok', 'confirm(10)']);
+});
+test('TEST-12r 같은 세션 처리 중 중복 요청 방어(단일 프로세스 메모리): 두 번째 입장 거부, 종료·만료 뒤 허용', () => {
+  const g = createInflightGuard(1000);
+  assert.equal(g.enter('s:a', 0), true);
+  assert.equal(g.enter('s:a', 10), false);
+  assert.equal(g.enter('s:b', 10), true);
+  g.leave('s:a'); assert.equal(g.enter('s:a', 20), true);
+  assert.equal(g.enter('s:a', 1500), true); // ttl 만료
+});
+test('TEST-12s 처리 중 중복 방어가 여러 서버 인스턴스에서도 동작', { todo: 'GAP: InflightGuard는 프로세스 메모리 Map — 인스턴스가 여러 개면 인스턴스별로만 막는다(공유 저장소·DB 멱등 키 없음)' }, () => {
+  assert.match(readFileSync(path.join(SRC, 'server/consult/chatHandler.ts'), 'utf8'), /inflight[\s\S]{0,400}(rpc|api\.|tx`|redis|database)/i);
 });
