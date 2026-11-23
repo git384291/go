@@ -19,6 +19,9 @@ import 'server-only';
 // - store:false는 모든 보관이 0이라는 보증이 아니다. max_output_tokens는 원화 청구 강제 상한이 아니다.
 //   실제 모델명·가격·지원 여부는 확인하지 않았다(모델명·비용을 지어내지 않는다).
 import type { AdCopyGenerator, AdPrompt, GeneratorOutcome } from './adGeneration';
+import { SCOPE_KEY, type AiBudget } from '@/server/consult/chatModel';
+import { estimateMaxKrw, inputTokenUpperBound, priceFor, type ModelPrice } from '@/server/ai/costModel';
+import { randomUUID } from 'node:crypto';
 
 export const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -40,6 +43,14 @@ export type OpenAiAdGeneratorConfig = {
   readonly maxOutputTokens: number;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
+  /** 0028·TEST-14: 공통 비용 게이트(필수). 없으면 호출 금지. 호출마다 '전에' 예약하고, 결과에 따라 확정·취소·불확실로 닫는다 */
+  readonly budget: AiBudget | null;
+  /** 1회 예약 비용(원, 1~1,000 정수). 가격표 예상 최대 비용 이상이어야 한다 */
+  readonly costPerCallKrw: number;
+  /** 사용자별 한도 자리의 키(서버 HMAC 64자리 — 광고 생성은 작업 주체 키). 없으면 DB 예약이 거부된다 */
+  readonly budgetScope: string | null;
+  readonly prices: readonly ModelPrice[] | null;
+  readonly maxInputTokens: number;
 };
 
 /** 모델이 따라야 하는 strict JSON schema(제목·설명 두 필드). 길이 제한은 strict 모드 지원 여부를 확인하지 않아 스키마에 넣지 않고 서버 검증(validateAdCopy)으로 강제한다 */
@@ -64,7 +75,12 @@ const validConfig = (c: OpenAiAdGeneratorConfig | null | undefined): c is OpenAi
   typeof c.model === 'string' && /^[a-z0-9][a-z0-9._-]{1,63}$/.test(c.model) &&
   Number.isSafeInteger(c.maxOutputTokens) && c.maxOutputTokens >= 16 && c.maxOutputTokens <= 512 &&
   Number.isSafeInteger(c.timeoutMs) && c.timeoutMs >= 1000 && c.timeoutMs <= 30000 &&
-  Number.isSafeInteger(c.maxResponseBytes) && c.maxResponseBytes >= 1024 && c.maxResponseBytes <= 65536;
+  Number.isSafeInteger(c.maxResponseBytes) && c.maxResponseBytes >= 1024 && c.maxResponseBytes <= 65536 &&
+  !!c.budget && typeof c.budget.reserve === 'function' &&
+  Number.isSafeInteger(c.costPerCallKrw) && c.costPerCallKrw >= 1 && c.costPerCallKrw <= 1000 &&
+  typeof c.budgetScope === 'string' && SCOPE_KEY.test(c.budgetScope) &&
+  Number.isSafeInteger(c.maxInputTokens) && c.maxInputTokens >= 64 && c.maxInputTokens <= 20000 &&
+  (() => { const p = priceFor(c.prices, c.model as string); const m = p && estimateMaxKrw(p, c.maxInputTokens, c.maxOutputTokens); return typeof m === 'number' && m <= c.costPerCallKrw; })();
 
 /** 요청 본문(고정 구조). 시험에서 정확히 대조한다 */
 export function buildResponsesBody(model: string, prompt: AdPrompt, maxOutputTokens: number): string {
@@ -137,10 +153,10 @@ const cancelQuiet = (x: { cancel?: () => Promise<unknown> } | null | undefined):
  * 기본 설정·환경변수를 읽지 않는다. 반환 객체는 생성 오케스트레이터에 주입한다.
  */
 export function createOpenAiAdGenerator(config: OpenAiAdGeneratorConfig | null): AdCopyGenerator {
-  return Object.freeze({
-    generate: async (prompt: AdPrompt): Promise<GeneratorOutcome> => {
-      if (!validConfig(config)) return err('NOT_CONFIGURED', false);
-      const { transport, apiKey, model, maxOutputTokens, timeoutMs, maxResponseBytes } = config;
+  if (!validConfig(config)) return Object.freeze({ generate: async () => err('NOT_CONFIGURED', false) });
+  const cfg = config;
+  const sendOnce = async (prompt: AdPrompt): Promise<GeneratorOutcome> => {
+      const { transport, apiKey, model, maxOutputTokens, timeoutMs, maxResponseBytes } = cfg;
       const ac = new AbortController();
       let expired = false;
       let activeReader: Reader | null = null;
@@ -225,6 +241,22 @@ export function createOpenAiAdGenerator(config: OpenAiAdGeneratorConfig | null):
       } finally {
         if (timer) clearTimeout(timer);
       }
+  };
+  return Object.freeze({
+    // 공통 비용 게이트: 입력 상한 → 예약(거부 = 전송 0회) → 1회 전송 → 확정(보낸 비용)·취소(안 보냄)·불확실(시간 초과·연결 끊김, 환불하지 않음)
+    generate: async (prompt: AdPrompt): Promise<GeneratorOutcome> => {
+      const text = buildResponsesBody(cfg.model, prompt, cfg.maxOutputTokens);
+      if (inputTokenUpperBound(text) > cfg.maxInputTokens) return err('INPUT_TOO_LARGE', false);
+      const hold = await (cfg.budget as AiBudget).reserve(cfg.costPerCallKrw, { requestId: randomUUID(), scope: cfg.budgetScope as string }).catch(() => null);
+      if (!hold) return err('BUDGET_DENIED', false);
+      const r = await sendOnce(prompt);
+      try {
+        if (r.kind === 'ok') await hold.confirm(cfg.costPerCallKrw);
+        else if (!r.called) await hold.cancel();
+        else if ((r.code === 'TIMEOUT' || r.code === 'TRANSPORT_ERROR') && hold.uncertain) await hold.uncertain();
+        else await hold.confirm(cfg.costPerCallKrw);
+      } catch { /* 정산 실패 = 미정산(예약 전액으로 센다) */ }
+      return r;
     },
   });
 }

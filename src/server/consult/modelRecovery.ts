@@ -62,14 +62,14 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
   let openUntil = 0; // 0 = 닫힘. 양수면 이 시각까지 호출 금지, 지난 뒤에는 반열림(시험 1회)
   let probing = false;
 
-  async function attempt(input: ModelInput, parent: AbortSignal, ms: number): Promise<string> {
+  async function attempt(input: ModelInput, parent: AbortSignal, ms: number, meter: CallMeter | undefined): Promise<string> {
     const ac = new AbortController();
     const onAbort = () => ac.abort();
     if (parent.aborted) ac.abort(); else parent.addEventListener('abort', onAbort, { once: true });
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        inner.generate(input, ac.signal),
+        inner.generate(input, ac.signal, meter), // 비용 게이트 허가를 그대로 넘긴다(개수는 이 래퍼가 센다)
         new Promise<never>((_, rej) => { timer = setTimeout(() => { ac.abort(); rej(new ModelCallError('TIMEOUT', 'timeout')); }, ms); }),
         // 바깥 취소(상담 전체 시간 초과)도 기다리지 않고 바로 끝낸다
         new Promise<never>((_, rej) => { ac.signal.addEventListener('abort', () => rej(new ModelCallError('ABORTED', 'timeout')), { once: true }); }),
@@ -102,7 +102,7 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
           if (remaining <= 0 || signal.aborted) break;
           if (meter) meter.sent += 1;
           try {
-            const out = await attempt(input, signal, Math.min(attemptMs, remaining));
+            const out = await attempt(input, signal, Math.min(attemptMs, remaining), meter);
             failures = 0; openUntil = 0;
             return out;
           } catch (e) {

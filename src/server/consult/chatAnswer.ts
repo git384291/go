@@ -4,8 +4,9 @@ import { AI_UNAVAILABLE_GUIDANCE, POLICY_UNVERIFIED_GUIDANCE } from '@/content/c
 import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
 import { maskPii } from './piiMask';
 import { SYSTEM_PROMPT } from './chatModel';
-import { ModelNotCalledError } from './chatModel';
-import type { AiBudget, CallMeter, ChatModel } from './chatModel';
+import { grantBudgetPermit, ModelNotCalledError, revokeBudgetPermit } from './chatModel';
+import type { AiBudget, CallMeter, ChatModel, ReserveContext } from './chatModel';
+import { ModelCallError } from './modelRecovery';
 
 /**
  * AI 24시간 상담 답변(PM 11/21 ②). 요금·사은품은 승인된 정책 견적 문장에서만 나온다.
@@ -21,7 +22,11 @@ export type ChatDeps = {
   readonly budget: AiBudget;
   readonly timeoutMs?: number;
 };
-export type ChatInput = { readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string };
+export type ChatInput = {
+  readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string;
+  /** 0028: 예약 문맥(요청 ID·사용자 키). 없으면 DB 예약은 거부된다(메모리 시험 예산은 문맥 없이도 동작) */
+  readonly budgetCtx?: ReserveContext;
+};
 export type ChatReply =
   | { readonly ok: false; readonly code: 'INVALID_INPUT' }
   | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' | 'callback' | 'blocked'; readonly callbackPrompt?: string };
@@ -66,6 +71,9 @@ export function chatTimeoutMs(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CHAT_TIMEOUT_MAX_MS, Math.trunc(v)) : CHAT_TIMEOUT_DEFAULT_MS;
 }
 
+const isUncertain = (e: unknown): boolean =>
+  (e instanceof Error && e.message === 'TIMEOUT') || (e instanceof ModelCallError && (e.kind === 'timeout' || e.kind === 'network'));
+
 export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): Promise<ChatReply> {
   const m = input.message;
   if (typeof m !== 'string' || m.trim().length < 1 || m.length > 300) return { ok: false, code: 'INVALID_INPUT' };
@@ -81,10 +89,11 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const unavailable = (): ChatReply => gate(withCallback({ ok: true, kind: approved.kind, text: approved.kind === 'quote' ? `${AI_UNAVAILABLE_GUIDANCE}\n\n${approved.text}` : AI_UNAVAILABLE_GUIDANCE, source: 'fallback', next: 'signup' }, m));
   const model = deps.model;
   if (!model) return unavailable();
-  const hold = await deps.budget.reserve(model.costPerCallKrw);
+  const hold = await deps.budget.reserve(model.costPerCallKrw, input.budgetCtx);
   if (!hold) return unavailable();
   const ctl = new AbortController();
   const meter: CallMeter = { sent: 0 };
+  grantBudgetPermit(meter); // 공통 비용 게이트: 예약이 성공한 이 호출에만 전송 허가
   // 확정 비용: 재시도 래퍼가 센 전송 횟수만큼(예약 이하). 세지 않는 모델은 예약 전액(보수적)
   const spent = () => (model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -100,9 +109,13 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     return gate(withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m));
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
-    if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(spent());
+    // 0028: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)
+    if (e instanceof ModelNotCalledError) await hold.cancel();
+    else if (isUncertain(e) && hold.uncertain) await hold.uncertain();
+    else await hold.confirm(spent());
     return unavailable();
   } finally {
+    revokeBudgetPermit(meter);
     if (timer) clearTimeout(timer);
   }
 }

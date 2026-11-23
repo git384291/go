@@ -33,12 +33,14 @@ exec_allow(rolname, proname) as (
     -- 0010 광고 예산 통제(PM 11/21)
     ('app_staff', 'ad_budget_approve'), ('app_staff', 'ad_budget_revoke'), ('app_staff', 'ad_spend_request'), ('app_staff', 'ad_budget_overview'),
     -- 0011 광고 성과 수집·분석, AI 사용료 예약(전용 역할)
-    ('app_staff', 'ad_performance_record'), ('app_staff', 'ad_funnel'), ('app_ai', 'ai_budget_reserve'),
+    ('app_staff', 'ad_performance_record'), ('app_staff', 'ad_funnel'),
     -- 0012 상담 시작 집계·전환 분석·AI 정산
     ('app_public', 'consult_event_record'), ('app_staff', 'ad_funnel_full'), ('app_staff', 'ad_alert_open'), ('app_staff', 'ad_alert_resolve'), ('app_staff', 'ad_alert_list'), ('app_staff', 'ai_budget_limit_get'), ('app_staff', 'ai_budget_limit_set'), ('app_staff', 'policy_publish_get'), ('app_staff', 'policy_publish_set'), ('app_staff', 'notice_text_list'), ('app_staff', 'notice_text_add'), ('app_public', 'notice_intake_gate'), ('app_public', 'application_save'), ('app_staff', 'dealer_packet_get'), ('app_staff', 'dealer_packet_status'), ('app_staff', 'handoff_record'), ('app_staff', 'handoff_list'), ('app_staff', 'notice_review_add'), ('app_staff', 'notice_review_list'),
     -- 0018 광고 launch 상태
     ('app_staff', 'ad_launch_begin'), ('app_staff', 'ad_launch_finish'), ('app_staff', 'ad_launch_active'), ('app_staff', 'ad_launch_paused'), ('app_staff', 'ad_launch_resolve'), ('app_public', 'application_amend'), ('app_staff', 'application_amendments'),
-    ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'),
+    ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'), ('app_ai', 'ai_budget_uncertain'),
+    -- 0028 AI 하드 한도: 일·사용자 한도·긴급 차단·조정(대표)
+    ('app_staff', 'ai_budget_limits_set'), ('app_staff', 'ai_budget_pause_set'), ('app_staff', 'ai_budget_adjust'),
     -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
     ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)

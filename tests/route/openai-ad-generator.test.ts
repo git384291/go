@@ -45,8 +45,11 @@ const transport = (status: number, body: string, delayMs = 0) => {
   };
   return { t, calls, streams };
 };
+const allowAll = { async reserve() { return { async confirm() {}, async cancel() {}, async uncertain() {} }; } };
 const cfg = (t: HttpTransport | null, over: Partial<OpenAiAdGeneratorConfig> = {}): OpenAiAdGeneratorConfig => ({
-  transport: t, apiKey: KEY, model: 'fake-model-1', executionAllowed: true, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192, ...over,
+  transport: t, apiKey: KEY, model: 'fake-model-1', executionAllowed: true, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192,
+  // 0025: 공통 비용 게이트(항상 허용하는 시험용 예산)·가상 가격표
+  budget: allowAll, costPerCallKrw: 10, budgetScope: 'a'.repeat(64), prices: [{ model: 'fake-model-1', currency: 'KRW', inputKrwPerMTok: 100, outputKrwPerMTok: 400 }], maxInputTokens: 4000, ...over,
 });
 
 test('OA1 미설정·실행 허용 false·잘못된 설정 → transport 0회', async () => {

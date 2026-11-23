@@ -9,7 +9,8 @@ import 'server-only';
 // - 출력은 그대로 믿지 않는다: chatAnswer가 금액·혜택 가드(guardAiReply·benefitClaimsAllowed)로 다시 검사하고, 실패하면 승인 안내문으로 대체한다.
 // - 1요청 1호출(재시도는 이 어댑터 밖의 modelRecovery.withRecovery가 하드 상한 안에서만), 응답 크기 상한, 마감 시각 초과 시 중단. 오류 본문·헤더·키는 반사하지 않는다.
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
-import { ModelNotCalledError, type ChatModel, type ModelInput } from './chatModel';
+import { hasBudgetPermit, ModelNotCalledError, type CallMeter, type ChatModel, type ModelInput } from './chatModel';
+import { estimateMaxKrw, inputTokenUpperBound, priceFor, type ModelPrice } from '@/server/ai/costModel';
 import { ModelCallError } from './modelRecovery';
 
 export const MAX_REPLY_CHARS = 600;
@@ -27,6 +28,10 @@ export type OpenAiChatModelConfig = {
   readonly maxOutputTokens: number;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
+  /** 0028·TEST-10: 승인된 가격표(주입, 코드에 실제 가격 없음). 모델이 없거나 KRW가 아니면 호출 금지 */
+  readonly prices: readonly ModelPrice[] | null;
+  /** 요청당 입력 토큰 상한(가정: 토큰 ≤ UTF-8 바이트). 넘으면 전송 0회 */
+  readonly maxInputTokens: number;
 };
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -39,7 +44,16 @@ const valid = (c: OpenAiChatModelConfig | null): c is OpenAiChatModelConfig & { 
   Number.isSafeInteger(c.costPerCallKrw) && c.costPerCallKrw >= 1 && c.costPerCallKrw <= 1000 &&
   Number.isSafeInteger(c.maxOutputTokens) && c.maxOutputTokens >= 16 && c.maxOutputTokens <= 512 &&
   Number.isSafeInteger(c.timeoutMs) && c.timeoutMs >= 1000 && c.timeoutMs <= 15000 &&
-  Number.isSafeInteger(c.maxResponseBytes) && c.maxResponseBytes >= 1024 && c.maxResponseBytes <= 65536;
+  Number.isSafeInteger(c.maxResponseBytes) && c.maxResponseBytes >= 1024 && c.maxResponseBytes <= 65536 &&
+  Number.isSafeInteger(c.maxInputTokens) && c.maxInputTokens >= 64 && c.maxInputTokens <= 20000 &&
+  coversMaxCost(c);
+/** 예약 비용(1회)이 가격표로 계산한 예상 최대 비용 이상이어야 한다(과소 예약 = 호출 금지) */
+function coversMaxCost(c: OpenAiChatModelConfig): boolean {
+  const p = typeof c.model === 'string' ? priceFor(c.prices, c.model) : null;
+  if (!p) return false;
+  const max = estimateMaxKrw(p, c.maxInputTokens, c.maxOutputTokens);
+  return max !== null && max <= c.costPerCallKrw;
+}
 
 /** 요청 본문(고정 구조). 고객 글은 가린 뒤의 글만, 승인 안내문은 서버 문장만 */
 export function buildChatBody(model: string, input: ModelInput, maxOutputTokens: number): string {
@@ -80,13 +94,16 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
   return Object.freeze({
     name: 'openai',
     costPerCallKrw: valid(config) ? config.costPerCallKrw : 1,
-    async generate(input: ModelInput, signal: AbortSignal): Promise<string> {
+    async generate(input: ModelInput, signal: AbortSignal, meter?: CallMeter): Promise<string> {
       if (!valid(config)) throw new ModelNotCalledError('NOT_CONFIGURED');
+      if (!hasBudgetPermit(meter)) throw new ModelNotCalledError('NO_BUDGET_PERMIT'); // 비용 게이트 우회(직접 호출) 차단
       if (signal.aborted) throw new ModelNotCalledError('ABORTED');
+      const bodyText = buildChatBody(config.model, input, config.maxOutputTokens);
+      if (inputTokenUpperBound(bodyText) > config.maxInputTokens) throw new ModelNotCalledError('INPUT_TOO_LARGE');
       const r = await boundedRequest(config.transport, config.endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-        body: enc.encode(buildChatBody(config.model, input, config.maxOutputTokens)),
+        body: enc.encode(bodyText),
       }, { deadlineAt: Date.now() + config.timeoutMs, maxResponseBytes: config.maxResponseBytes, signal });
       if (r.kind === 'error' && !r.sent) throw new ModelNotCalledError(r.code);
       // 실패 종류만 구분한다(재시도 여부는 modelRecovery가 정한다): 429·5xx·timeout·네트워크 = 재시도 가능, 4xx·응답 형식·거절 = 불가
