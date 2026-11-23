@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { adminAuthMode, adminMockVisible } from '../../src/server/auth/adminAuthMode';
+import { adminAuthMode, adminMockVisible, isLocalDatabaseUrl } from '../../src/server/auth/adminAuthMode';
 import { logoutFlow, passwordStep, totpStep, type AuthPort } from '../../src/server/auth/loginFlow';
 import { StaffAuthError, type VerifiedClaims } from '../../src/server/auth/staffAssertion';
 import { StaffSessionUnavailable } from '../../src/server/auth/staffSession';
@@ -16,6 +16,7 @@ const FULL = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'x',
   FIDEON_STAFF_SIGNING_KEY: 'x',
   DATABASE_URL: 'x',
+  SUPABASE_DB_CA_CERT: 'x', // 'x'는 원격으로 취급되므로 CA가 있어야 켜진다
 };
 
 test('스위치: 기본·오타·설정 누락·운영이면 꺼짐, 명시 + 설정 완비일 때만 켜짐', () => {
@@ -34,6 +35,29 @@ test('가상 데이터 관리자 화면: 인증 꺼짐 + 로컬 개발 서버에
   assert.equal(adminMockVisible({ NODE_ENV: 'development', VERCEL: '1' }), false);
   assert.equal(adminMockVisible({ ...FULL, NODE_ENV: 'development' }), false);
   assert.equal(adminMockVisible({}), false);
+});
+
+test('스위치: 원격 DB인데 CA 인증서가 없으면 꺼짐(로그인 단계 DB 접속 실패 방지), 로컬 DB는 CA 없이 켜짐', () => {
+  const REMOTE = 'postgresql://app_server.ref@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+  const LOCAL = 'postgres://app_server@127.0.0.1:54329/fideon_test';
+  for (const ca of [undefined, '', '  \n']) {
+    assert.equal(adminAuthMode({ ...FULL, DATABASE_URL: REMOTE, SUPABASE_DB_CA_CERT: ca }), 'disabled', `remote ca=${JSON.stringify(ca)}`);
+    assert.equal(adminAuthMode({ ...FULL, DATABASE_URL: LOCAL, SUPABASE_DB_CA_CERT: ca }), 'supabase', `local ca=${JSON.stringify(ca)}`);
+  }
+  assert.equal(adminAuthMode({ ...FULL, DATABASE_URL: REMOTE }), 'supabase');
+  assert.equal(adminAuthMode({ ...FULL, DATABASE_URL: REMOTE, SUPABASE_DB_CA_CERT: undefined, VERCEL_ENV: 'production' }), 'disabled');
+});
+
+test('로컬 DB 판단: 호스트가 정확히 localhost·127.0.0.1일 때만, 흉내·해석 실패·다른 프로토콜은 원격', () => {
+  for (const u of ['postgres://u@localhost/x', 'postgresql://u@127.0.0.1:5432/x', 'postgres://u:p@localhost:5432/x']) assert.equal(isLocalDatabaseUrl(u), true, u);
+  for (const u of [
+    undefined, '', 'x', 'not a url',
+    'postgres://u@127.0.0.1.example.com/x',
+    'postgres://u@localhost.example.com:5432/x',
+    'postgres://u:p@localhost:1@db.example.com:5432/x', // 비밀번호 안의 @localhost: 흉내
+    'http://localhost/x',
+    'postgres://u@0.0.0.0/x',
+  ]) assert.equal(isLocalDatabaseUrl(u), false, String(u));
 });
 
 const USER = '00000000-0000-4000-8000-000000000001';

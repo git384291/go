@@ -1,5 +1,6 @@
 import 'server-only';
 import postgres from 'postgres';
+import { isLocalDatabaseUrl } from '../auth/adminAuthMode';
 
 /**
  * 서버 전용 DB 연결 (Supabase 연결 풀러, 트랜잭션 모드).
@@ -13,8 +14,8 @@ export function db(): postgres.Sql {
   if (client) return client;
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
-  const isLocal = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
-  const ca = process.env.SUPABASE_DB_CA_CERT;
+  const isLocal = isLocalDatabaseUrl(url); // 관리자 인증 스위치와 같은 판단(주소 해석 실패는 원격 취급)
+  const ca = process.env.SUPABASE_DB_CA_CERT?.trim();
   if (!isLocal && !ca) throw new Error('SUPABASE_DB_CA_CERT is required for non-local databases');
   client = postgres(url, {
     prepare: false,

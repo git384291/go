@@ -15,6 +15,7 @@ const ON = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'x',
   FIDEON_STAFF_SIGNING_KEY: 'x',
   DATABASE_URL: 'x',
+  SUPABASE_DB_CA_CERT: 'x', // 'x'는 원격으로 취급되므로 CA가 있어야 켜진다
 };
 
 async function load() {
