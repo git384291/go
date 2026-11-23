@@ -1,7 +1,7 @@
 // PM 11/24 추가 지시: 정책 검증 장애(B)면 서버가 접수 트랜잭션 안에서 저장 전에 취소하는지 시험(가짜 실행기, 실제 DB는 db/tests/99_policy_intake_gate.sql·db-test.sh PG6).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { submitLead } from '../../src/server/leads/submitLead';
+import { noticeHashes, submitLead } from '../../src/server/leads/submitLead';
 import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 import { classifyResponse, OUTCOME_MESSAGES } from '../../src/components/consultSubmit';
 import { POLICY_UNVERIFIED_GUIDANCE } from '../../src/content/consultGuidance';
