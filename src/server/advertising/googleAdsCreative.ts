@@ -5,8 +5,7 @@
 // - 최종 URL은 서버 환경변수(AD_LANDING_URL)의 https 주소만, 추적 꼬리표는 utm_source=google·utm_medium=cpc·utm_campaign=<캠페인 키>(상담·접수 집계와 같은 키 형식).
 import { AD_TARGET_COPY } from '../../content/adTargetCopy';
 import { CAMPAIGN_KEY } from '../../content/attribution';
-import { AD_FORBIDDEN_CLAIMS } from '../../content/adDrafts';
-import { validateAdCopy } from './adGeneration';
+import { AD_GENERATION_BANNED, validateAdCopy } from './adGeneration';
 
 export const RSA_HEADLINE_MAX_WIDTH = 30;
 export const RSA_DESCRIPTION_MAX_WIDTH = 90;
@@ -103,7 +102,7 @@ export function checkKeyword(text: unknown, approved: readonly string[]): Keywor
   if (text !== text.normalize('NFC') || !KEYWORD_FORMAT.test(text) || googleTextWidth(text) > KEYWORD_MAX_WIDTH || text.split(' ').length > KEYWORD_MAX_WORDS) return 'FORMAT';
   const low = text.toLowerCase();
   if (KEYWORD_INACTIVE_PRODUCT_TERMS.some((t) => low.includes(t))) return 'PRODUCT_NOT_ACTIVE';
-  if (AD_FORBIDDEN_CLAIMS.some((b) => low.includes(b.toLowerCase()))) return 'FORBIDDEN';
+  if (AD_GENERATION_BANNED.some((b) => low.includes(b))) return 'FORBIDDEN';  // 소재와 같은 금지 목록(금액·최저·무료·통신사명·연락 유도 등)
   if (!KEYWORD_SCOPE.test(text)) return 'OUT_OF_SCOPE';
   if (!approved.includes(text)) return 'NOT_APPROVED';
   return null;
