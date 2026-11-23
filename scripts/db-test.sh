@@ -26,7 +26,7 @@ if [ ! -s "$DATA/PG_VERSION" ]; then
   as_pg "mkdir -p '$DATA' && '$PG_BIN/initdb' -D '$DATA' -U postgres --auth=trust --encoding=UTF8 --locale=$PG_LOCALE >/dev/null"
 fi
 if ! as_pg "'$PG_BIN/pg_ctl' -D '$DATA' status" >/dev/null 2>&1; then
-  as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PORT -k $SOCK -c listen_addresses=''\" -l '$DATA/server.log' -w start" >/dev/null
+  as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PORT -k $SOCK -c listen_addresses='' -c max_connections=200\" -l '$DATA/server.log' -w start" >/dev/null
 fi
 
 PSQL=(psql -X -q -h "$SOCK" -p "$PORT" -U postgres -v ON_ERROR_STOP=1)
@@ -72,6 +72,7 @@ run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 �
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0026)
+run db/tests/99_ai_confirm_cap.sql >/dev/null   # AI 확정 상한: 예약 금액 초과 확정 거부(0027, PM 11/24 결함 보완)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 
 echo "== 정책 변경과 접수 동시 요청(0025): 접수 트랜잭션이 끝날 때까지 정책 쓰기는 대기"
@@ -482,6 +483,28 @@ else
   echo "FAIL | K5 bad=$bad final=$final seen=$seen" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
 
+echo "== concurrency: AI 예약 100건 동시 + 초과 확정 100건 동시(0027)"
+AIQ() { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_ai" -c "$1" -c "commit" 2>&1; }
+AISC=$(printf 'f%.0s' $(seq 64))
+AIS() { "${PSQL[@]}" -d "$DB" -At -c "select month_all || '|' || day_all from core.ai_spent(to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM'), (now() at time zone 'Asia/Seoul')::date, '$AISC')"; }
+par() { rm -f "$LOG_DIR"/aic-*; local pids=(); for i in $(seq 1 100); do ( AIQ "$(printf "$1" "$i" "$i")" > "$LOG_DIR/aic-$i.out" ) & pids+=($!); done; for p in "${pids[@]}"; do wait "$p" || true; done; }
+s0=$(AIS); m0=${s0%|*}; d0=${s0#*|}
+"${PSQL[@]}" -d "$DB" -q -c "update core.ai_budget_config set paused = false, monthly_limit_krw = $m0 + 1000, daily_limit_krw = $d0 + 100000, scope_daily_limit_krw = 100000, scope_monthly_limit_krw = 100000, max_inflight = 1000 where singleton"
+par "select coalesce(api.ai_budget_hold(30, 'aicc-%012d', '$AISC')::text, 'null') -- %d"
+okh=$(cat "$LOG_DIR"/aic-*.out | grep -c '^[0-9]' || true); errh=$(cat "$LOG_DIR"/aic-*.out | grep -c 'ERROR' || true)
+s1=$(AIS); m1=${s1%|*}
+# 승인된 33건에 900원 확정을 동시에 → 전부 거부, 이어서 정상 확정(20원)을 동시에 → 전부 허용
+par "select api.ai_budget_confirm(test.hid('aicc-%012d'), 900) -- %d"
+rej=$(cat "$LOG_DIR"/aic-*.out | grep -c '^f$' || true); acc900=$(cat "$LOG_DIR"/aic-*.out | grep -c '^t$' || true)
+s2=$(AIS); m2=${s2%|*}
+par "select api.ai_budget_confirm(test.hid('aicc-%012d'), 20) -- %d"
+acc20=$(cat "$LOG_DIR"/aic-*.out | grep -c '^t$' || true)
+s3=$(AIS); m3=${s3%|*}
+[ "$okh" = 33 ] && [ "$errh" = 0 ] && [ $((m1 - m0)) = 990 ] && [ "$acc900" = 0 ] && [ "$rej" = 100 ] && [ "$m2" = "$m1" ] && [ "$acc20" = 33 ] && [ $((m3 - m0)) = 660 ] || { echo "FAIL | C20 예약=$okh 오류=$errh 증가=$((m1 - m0)) 900확정허용=$acc900 거부=$rej 900뒤=$((m2 - m0)) 20확정=$acc20 최종=$((m3 - m0))" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | C20 AI 예약 동시 100건(월 여유 1,000원·30원씩) → 33건만(990원), 900원 초과 확정 동시 100건 → 허용 0·사용액 변화 0, 정상 20원 확정 동시 → 33건 허용(최종 660원)" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DB" -q -c "update core.ai_budget_config set paused = false, monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0 where singleton"
+rm -f "$LOG_DIR"/aic-*
+
 echo "== migration drill: 0007·0008 적용(기존 데이터 보존) → 롤백(고지·정책 보관) → 복구 → 재적용 (별도 가상 DB)"
 DRILL=fideon_drill
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" -c "create database $DRILL" >/dev/null
@@ -700,6 +723,15 @@ D -f db/migrations/0024_consult_rate.sql >/dev/null
 back24=$(D -At -c "select to_regprocedure('api.consult_rate_hit(text,text)') is not null")
 [ "$gone24" = t ] && [ "$back24" = t ] || { echo "FAIL | M24 0024 롤백 gone=$gone24 재적용=$back24" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M24 상담 공용 횟수 제한 0024 롤백: 함수 제거·집계 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0027 AI 확정 상한: 적용 → 롤백(0026 정의로) → 재적용
+D -f db/migrations/0027_ai_confirm_cap.sql >/dev/null
+src27=$(D -At -c "select (prosrc like '%p_actual > v_cost%')::text from pg_proc where oid = 'api.ai_budget_confirm(bigint,int)'::regprocedure")
+D -f db/rollback/0027_down.sql >/dev/null
+old27=$(D -At -c "select (prosrc not like '%p_actual > v_cost%')::text from pg_proc where oid = 'api.ai_budget_confirm(bigint,int)'::regprocedure")
+D -f db/migrations/0027_ai_confirm_cap.sql >/dev/null
+back27=$(D -At -c "select (prosrc like '%p_actual > v_cost%')::text from pg_proc where oid = 'api.ai_budget_confirm(bigint,int)'::regprocedure")
+[ "$src27" = true ] && [ "$old27" = true ] && [ "$back27" = true ] || { echo "FAIL | M27 0027 적용=$src27 롤백=$old27 재적용=$back27" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M27 AI 확정 상한 0027: 적용 → 롤백(0026 정의 복귀) → 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null
