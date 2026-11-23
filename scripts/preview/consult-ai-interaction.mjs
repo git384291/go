@@ -70,10 +70,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('[data-from="ai"]').length === 2);
   check('C6b 두 번째 요청은 서버가 내려 준 세션 토큰을 그대로 보냄(브라우저가 만들지 않음)', seen.api[1]?.session === TOKEN);
   const safe = await page.locator('[data-from="ai"]').nth(1).innerText();
-  check('C7 서버 장애(503)는 안전 안내문, 내부 코드 노출 없음', safe.includes('자동 안내를 불러오지 못했습니다') && !safe.includes('담당자가') && !safe.includes('DISABLED'));
+  check('C7 서버 장애(503)는 안전 안내문, 내부 코드 노출 없음', safe.includes('자동 상담 연결이 원활하지 않습니다') && !safe.includes('담당자가') && !safe.includes('DISABLED'));
   mode = 'bad'; await box.fill('형식 밖'); await send.click();
   await page.waitForFunction(() => document.querySelectorAll('[data-from="ai"]').length === 3);
-  check('C8 형식 밖 응답도 안전 안내문', (await page.locator('[data-from="ai"]').nth(2).innerText()).includes('자동 안내를 불러오지 못했습니다'));
+  check('C8 형식 밖 응답도 안전 안내문', (await page.locator('[data-from="ai"]').nth(2).innerText()).includes('자동 상담 연결이 원활하지 않습니다'));
   await page.screenshot({ path: `${OUT}/24-consult-ai-fallback-w390.png`, fullPage: true });
   check('C9 신청 링크는 같은 화면의 접수 양식으로 이동', (await page.getByRole('link', { name: '가입 상담 신청하기' }).getAttribute('href')) === '#apply');
   check('C10 외부 요청 0·예외 0·가로 넘침 없음', seen.external.length === 0 && seen.errors.length === 0 && (await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)));
@@ -121,7 +121,7 @@ try {
     for (const [id, m, leak] of [['RB1 429 BUSY', 'busy', 'BUSY'], ['RB2 5xx', 'err500', 'INTERNAL_SECRET'], ['RB3 네트워크 단절', 'neterr', 'failed']]) {
       mode = m; n = await ask(`${id} 질문`);
       const t = await answered(n);
-      check(`${id}: 안전 안내문, 내부 코드 노출 없음, 요금·약속 문구 없음`, t.includes('자동 안내를 불러오지 못했습니다') && !t.includes(leak) && !t.includes('담당자가') && !/\d{3,}원/.test(t));
+      check(`${id}: 안전 안내문, 내부 코드 노출 없음, 요금·약속 문구 없음`, t.includes('자동 상담 연결이 원활하지 않습니다') && !t.includes(leak) && !t.includes('담당자가') && !/\d{3,}원/.test(t));
       await b3.fill('다시 보낼 글');
       check(`${id} 뒤 글을 쓰면 보내기가 다시 열림(상담 재개 가능)`, await s3.isEnabled());
     }
@@ -129,7 +129,7 @@ try {
     mode = 'hang'; const before = seen.api.length; n = await ask('무응답 질문');
     await p3.clock.fastForward(14000);
     const th = await answered(n);
-    check('RB4 무응답: 13초 뒤 안전 안내문, 요청 1회(브라우저 자동 재시도 없음)', th.includes('자동 안내를 불러오지 못했습니다') && seen.api.length - before === 1);
+    check('RB4 무응답: 13초 뒤 안전 안내문, 요청 1회(브라우저 자동 재시도 없음)', th.includes('자동 상담 연결이 원활하지 않습니다') && seen.api.length - before === 1);
     // 복구: 서버가 정상으로 돌아오면 같은 화면에서 정상 상담 재개
     mode = 'ok'; n = await ask('복구 뒤 질문');
     const tr = await answered(n);

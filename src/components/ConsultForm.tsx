@@ -59,7 +59,8 @@ async function shownNoticeHashes(): Promise<Record<string, string>> {
 export type ApplicationChoice = { carrier: string; productId: string; regionCode: string };
 // choice: AI 상담 화면이 서버 설정으로 고정한 상품 선택. 넘기면 'AI 신청서 도우미'가 열리고 접수 때 총판 전달용 신청서 답변을 함께 보낸다(없으면 기존 양식 그대로).
 // app: 신청서 답을 바깥(AI 상담 화면)이 들고 있을 때 넘긴다. 이때 도우미는 바깥에서 보여 주므로 이 양식 안에는 그리지 않는다(없으면 기존대로 양식 안에서 묻는다).
-export function ConsultForm({ options, kakaoUrl, choice, app }: { options: readonly ConsultOption[]; kakaoUrl: string | null; choice?: ApplicationChoice; app?: Application }) {
+// blocked: 상담 응답이 정책 검증 장애(B)를 알린 상태(PM 11/24). 접수 버튼을 잠그고 보내지 않는다(서버·DB도 따로 막는다)
+export function ConsultForm({ options, kakaoUrl, choice, app, blocked = false }: { options: readonly ConsultOption[]; kakaoUrl: string | null; choice?: ApplicationChoice; app?: Application; blocked?: boolean }) {
   const [ownAnswers, setAppAnswers] = useState<Application>({});
   const appAnswers = app ?? ownAnswers;
   const hasOption = options.length > 0;
@@ -144,7 +145,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (inFlight.current || accepted.current) return;
-    if (!FORM_ENABLED || !hasOption) return;
+    if (!FORM_ENABLED || !hasOption || blocked) return;
     inFlight.current = true;
     try {
       const f = new FormData(e.currentTarget);
@@ -253,7 +254,7 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
     }
   }
 
-  const locked = !FORM_ENABLED || phase === 'sending' || phase === 'done';
+  const locked = !FORM_ENABLED || blocked || phase === 'sending' || phase === 'done';
   const errId = (f: ConsultField) => `consult-err-${f}`;
 
   return (
@@ -410,8 +411,8 @@ export function ConsultForm({ options, kakaoUrl, choice, app }: { options: reado
           </div>
         )}
 
-        <button className="btn btn-primary btn-block" type="submit" disabled={!hasOption}>
-          {!FORM_ENABLED ? '온라인 상담 서비스 준비 중' : phase === 'sending' ? '보내는 중…' : phase === 'done' ? '접수 완료' : '상담 신청하기'}
+        <button className="btn btn-primary btn-block" type="submit" disabled={!hasOption || blocked}>
+          {!FORM_ENABLED ? '온라인 상담 서비스 준비 중' : blocked ? '가입 접수 일시 제한' : phase === 'sending' ? '보내는 중…' : phase === 'done' ? '접수 완료' : '상담 신청하기'}
         </button>
       </fieldset>
 

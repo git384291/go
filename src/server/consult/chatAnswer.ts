@@ -1,5 +1,6 @@
 import 'server-only';
-import { answerQuote, guardAiReply } from './quoteAnswer';
+import { checkPolicy, guardAiReply } from './quoteAnswer';
+import { AI_UNAVAILABLE_GUIDANCE, POLICY_UNVERIFIED_GUIDANCE } from '@/content/consultGuidance';
 import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
 import { maskPii } from './piiMask';
 import { SYSTEM_PROMPT } from './chatModel';
@@ -9,7 +10,9 @@ import type { AiBudget, CallMeter, ChatModel } from './chatModel';
 /**
  * AI 24시간 상담 답변(PM 11/21 ②). 요금·사은품은 승인된 정책 견적 문장에서만 나온다.
  * 흐름: 입력 검사 → 승인 견적(서버) → [예산·모델 가능하면] 가린 글+견적 문장만 모델에 전달 → 금액·혜택 가드 → 통과 못 하면 견적/안전 안내문.
- * 모델 장애·시간 초과·한도 초과·가드 실패는 모두 승인 안내문(없으면 '담당자 확인')으로 닫는다. 오류 내용은 고객에게 내보내지 않는다.
+ * 가드 실패는 승인 안내문(없으면 '담당자 확인')으로 닫는다. 오류 내용은 고객에게 내보내지 않는다.
+ * PM 11/24: 모델 없음·한도·장애·시간 초과는 A 안내(AI 상담 장애, 승인 견적이 있으면 그 문장만 덧붙임),
+ * 정책 검증 장애(조회 실패·충돌·만료/미승인 행 등)는 모델을 부르지 않고 B 안내 + next 'blocked'(화면 접수 잠금, 서버·DB도 접수 차단).
  */
 export type ChatDeps = {
   readonly provider: ApprovedPolicyProvider;
@@ -21,7 +24,7 @@ export type ChatDeps = {
 export type ChatInput = { readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string };
 export type ChatReply =
   | { readonly ok: false; readonly code: 'INVALID_INPUT' }
-  | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' | 'callback'; readonly callbackPrompt?: string };
+  | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' | 'callback' | 'blocked'; readonly callbackPrompt?: string };
 
 /** PM 11/22 ② 7: 승인 견적으로 답할 수 없거나 고객이 잘 모르겠다고 하면 대표 직접 연락 동의를 묻는다(동의는 신청 양식의 체크로만 받는다) */
 export const CALLBACK_PROMPT = '대표가 직접 연락드려도 될까요? 동의하시면 아래 신청 양식에서 "대표 직접 연락에 동의합니다"를 선택해 주세요.';
@@ -66,14 +69,18 @@ export function chatTimeoutMs(v: unknown): number {
 export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): Promise<ChatReply> {
   const m = input.message;
   if (typeof m !== 'string' || m.trim().length < 1 || m.length > 300) return { ok: false, code: 'INVALID_INPUT' };
-  const approved = await answerQuote(deps.provider, {
+  const checked = await checkPolicy(deps.provider, {
     supplierId: deps.supplierId, segment: 'household', carrier: input.carrier, productId: input.productId, regionCode: input.regionCode, confirmedBundles: { known: false },
   }, now);
+  if (checked.fault) return { ok: true, kind: 'needs_review', text: POLICY_UNVERIFIED_GUIDANCE, source: 'fallback', next: 'blocked' };
+  const approved = checked.answer;
   const fallback = (): ChatReply => withCallback({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' }, m);
+  // A: AI 상담만 실패. 승인 견적(서버 검증 통과)이 있으면 그 문장만 덧붙이고, 없으면 금액 없는 A 안내만
+  const unavailable = (): ChatReply => withCallback({ ok: true, kind: approved.kind, text: approved.kind === 'quote' ? `${AI_UNAVAILABLE_GUIDANCE}\n\n${approved.text}` : AI_UNAVAILABLE_GUIDANCE, source: 'fallback', next: 'signup' }, m);
   const model = deps.model;
-  if (!model) return fallback();
+  if (!model) return unavailable();
   const hold = await deps.budget.reserve(model.costPerCallKrw);
-  if (!hold) return fallback();
+  if (!hold) return unavailable();
   const ctl = new AbortController();
   const meter: CallMeter = { sent: 0 };
   // 확정 비용: 재시도 래퍼가 센 전송 횟수만큼(예약 이하). 세지 않는 모델은 예약 전액(보수적)
@@ -92,7 +99,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
     if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(spent());
-    return fallback();
+    return unavailable();
   } finally {
     if (timer) clearTimeout(timer);
   }

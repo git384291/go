@@ -107,6 +107,11 @@ export type IntakeContext = {
   clientIp: string;
   nowSeconds?: number;
   notices?: NoticeConfig; // 기본은 content/requiredNotices의 확정 상태(현재 미확정 → 접수 거부)
+  /**
+   * 정책 검증 장애(B) 판정기(PM 11/24). 넣으면 접수 트랜잭션 안에서 api.policy_intake_gate()(정책 상태 공유 잠금·충돌 검사) 뒤
+   * api.policy_published()를 다시 읽어 이 판정기에 넘긴다. true(장애)면 저장 전에 POLICY_UNVERIFIED(503)로 취소한다. 운영 route.ts가 넣는다.
+   */
+  policyFault?: (rows: readonly unknown[], now: Date) => Promise<boolean>;
 };
 
 /**
