@@ -81,12 +81,13 @@ test('GT6 서버: gclid가 오면 [gclid, 요청 키, 연락처 HMAC, gclid] 서
   assert.notEqual(g.token, signToken('lead', ['gclid', body.idempotencyKey, a.phoneHmac, G2], ctx.signingKey, ctx.nowSeconds), '값이 바뀌면 서명도 다름');
 });
 
-test('GT7 서버: create_lead 서명 필드는 바뀌지 않는다(본문 고정 함수 호환), gclid 유무와 무관', () => {
-  const { token: t1, gclid: _g, ...r1 } = buildCreateLeadArgs({ ...body, gclid: G1 }, ctx);
-  const { token: t2, ...r2 } = buildCreateLeadArgs(body, ctx);
-  assert.equal(t1, t2);
-  assert.deepEqual(leadSignedFields(r1), leadSignedFields(r2));
-  assert.equal(_g?.gclid, G1);
+test('GT7 서버: create_lead 서명 필드는 그대로(15개, gclid 미포함) — 본문 고정 함수 호환', () => {
+  const { token, gclid, ...rest } = buildCreateLeadArgs({ ...body, gclid: G1 }, ctx);
+  const f = leadSignedFields(rest);
+  assert.equal(f.length, 15);
+  assert.ok(!f.includes(G1), 'gclid는 create_lead 서명에 들어가지 않음(별도 서명)');
+  assert.equal(token, signToken('lead', f, ctx.signingKey, ctx.nowSeconds), 'create_lead 서명은 기존 15개 필드로만');
+  assert.equal(gclid?.gclid, G1);
 });
 
 test('GT8 서버: 형식 밖 gclid는 버리고 접수는 계속(오류 아님), 200자 초과 문자열은 입력 오류', () => {
