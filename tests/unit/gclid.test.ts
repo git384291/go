@@ -67,7 +67,7 @@ const ctx = {
 const body = {
   name: '테스트고객', phone: '010-0000-0001', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false,
   privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['n1'], noticeHashes: noticeHashes(ctx.notices),
-  idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab', utmSource: 'google',
+  idempotencyKey: 'gclid-test-request-key-0001', utmSource: 'google',
 };
 
 test('GT6 서버: gclid가 오면 [gclid, 요청 키, 연락처 HMAC, gclid] 서명 인자를 만든다(DB 0027과 같은 순서)', () => {
