@@ -74,8 +74,14 @@ run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제�
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 
-echo "== 정책 변경과 접수 동시 요청(0025): 접수 트랜잭션이 끝날 때까지 정책 쓰기는 대기"
-"${PSQL[@]}" -d "$DB" -c "begin; select api.policy_intake_gate(); select pg_sleep(3); commit;" >/dev/null &
+echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
+# 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
+PUB0=$("${PSQL[@]}" -d "$DB" -At -c "select enabled::text from core.feature_flags where key = 'policy_publish'")
+CAT=$("${PSQL[@]}" -d "$DB" -At -c "select product_key from core.product_catalog where status = 'active' order by product_key limit 1")
+"${PSQL[@]}" -d "$DB" -c "update core.feature_flags set enabled = true where key = 'policy_publish'" \
+  -c "insert into core.policy_versions (supplier_id, segment, carrier, product_id, category, revision, state, source_kind, confirmed_at, valid_from, valid_until, product_label, terms, content_hash, created_by)
+      values ('pg6-sup', 'household', 'pg6-car', 'pg6-prod', '$CAT', 1, 'approved', 'official_policy_sheet', now() - interval '1 minute', now() - interval '1 minute', now() + interval '2 minute', '가상(PG6)', '{\"monthlyFee\":{\"known\":false},\"contractMonths\":{\"known\":false},\"equipmentMonthlyFee\":{\"known\":false},\"installFee\":{\"known\":false},\"bundlePrerequisites\":{\"known\":false},\"regionScope\":{\"known\":false},\"customerBenefit\":{\"known\":false}}', repeat('e', 64), '00000000-0000-4000-8000-0000000000f6')" >/dev/null
+"${PSQL[@]}" -d "$DB" -c "begin; set local role app_public; select api.policy_intake_gate('pg6-sup', 'pg6-car', 'pg6-prod'); select pg_sleep(3); commit;" >/dev/null 2>"$LOG_DIR/policy_gate_bg.err" &
 GATE_BG=$!
 sleep 1
 if "${PSQL[@]}" -d "$DB" -c "set lock_timeout = '500ms'; update core.feature_flags set enabled = enabled where key = 'policy_publish'" >/dev/null 2>"$LOG_DIR/policy_lock.err"; then
@@ -83,9 +89,10 @@ if "${PSQL[@]}" -d "$DB" -c "set lock_timeout = '500ms'; update core.feature_fla
   echo "FAIL | PG6 접수 트랜잭션 진행 중 게시 스위치 쓰기가 기다리지 않음" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
 grep -q "lock timeout" "$LOG_DIR/policy_lock.err" || { wait "$GATE_BG" || true; echo "FAIL | PG6 예상 밖 오류: $(head -c 200 "$LOG_DIR/policy_lock.err")" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-wait "$GATE_BG"
-"${PSQL[@]}" -d "$DB" -c "set lock_timeout = '2s'; update core.feature_flags set enabled = enabled where key = 'policy_publish'" >/dev/null
-echo "NOTICE:  PASS | PG6 접수 트랜잭션 중 정책 쓰기 대기(lock timeout) → 접수 종료 뒤 쓰기 가능" >> "$LOG_DIR/db-test.log"
+wait "$GATE_BG" || { echo "FAIL | PG6 배경 접수 게이트 실패: $(head -c 200 "$LOG_DIR/policy_gate_bg.err")" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+"${PSQL[@]}" -d "$DB" -c "set lock_timeout = '2s'; update core.feature_flags set enabled = $PUB0 where key = 'policy_publish'" >/dev/null
+[ "$("${PSQL[@]}" -d "$DB" -At -c "select enabled::text from core.feature_flags where key = 'policy_publish'")" = "$PUB0" ] || { echo "FAIL | PG6 게시 스위치 복원 실패" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | PG6 [필수4] 게이트 통과한 접수 트랜잭션 중 정책 쓰기 대기(lock timeout) → 종료 뒤 쓰기 가능, 스위치 시작 값($PUB0) 복원" >> "$LOG_DIR/db-test.log"
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -700,6 +707,28 @@ D -f db/migrations/0024_consult_rate.sql >/dev/null
 back24=$(D -At -c "select to_regprocedure('api.consult_rate_hit(text,text)') is not null")
 [ "$gone24" = t ] && [ "$back24" = t ] || { echo "FAIL | M24 0024 롤백 gone=$gone24 재적용=$back24" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M24 상담 공용 횟수 제한 0024 롤백: 함수 제거·집계 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0025·0026 접수 정책 게이트(PM 11/24): 적용 → 동작 확인 → 롤백(0026 → 0025, 함수·트리거 제거, 데이터·스위치 보존) → 재적용
+SNAP="select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from core.policy_versions) || '/' || (select enabled::text from core.feature_flags where key = 'policy_publish')"
+s0=$(D -At -c "$SNAP")
+D -f db/migrations/0025_policy_intake_gate.sql >/dev/null
+D -f db/migrations/0026_policy_intake_rule.sql >/dev/null
+on26=$(D -At -c "select to_regprocedure('api.policy_intake_gate(text,text,text)') is not null and to_regprocedure('api.policy_intake_gate()') is null and (select count(*) from pg_trigger where tgname in ('policy_versions_state_lock', 'feature_flags_state_lock')) = 2")
+err26=$({ D -At -c "select api.policy_intake_gate('m26-sup', 'm26-car', 'm26-prod')" 2>&1 >/dev/null || true; } | grep -oE 'POLICY_[A-Z_]+' | head -1 || true)
+D -f db/rollback/0026_down.sql >/dev/null
+mid=$(D -At -c "select to_regprocedure('api.policy_intake_gate(text,text,text)') is null and to_regprocedure('api.policy_intake_gate()') is not null")
+D -f db/rollback/0025_down.sql >/dev/null
+gone25=$(D -At -c "select to_regprocedure('api.policy_intake_gate()') is null and to_regprocedure('core.policy_state_lock()') is null and (select count(*) from pg_trigger where tgname in ('policy_versions_state_lock', 'feature_flags_state_lock')) = 0")
+s1=$(D -At -c "$SNAP")
+D -c "update core.feature_flags set enabled = enabled where key = 'policy_publish'" >/dev/null   # 롤백 뒤 기존 쓰기 동작(트리거 없음)
+D -f db/migrations/0025_policy_intake_gate.sql >/dev/null
+D -f db/migrations/0026_policy_intake_rule.sql >/dev/null
+back26=$(D -At -c "select to_regprocedure('api.policy_intake_gate(text,text,text)') is not null and (select count(*) from pg_trigger where tgname in ('policy_versions_state_lock', 'feature_flags_state_lock')) = 2")
+s2=$(D -At -c "$SNAP")
+if [ "$on26" = t ] && [ -n "$err26" ] && [ "$mid" = t ] && [ "$gone25" = t ] && [ "$back26" = t ] && [ "$s0" = "$s1" ] && [ "$s1" = "$s2" ]; then
+  echo "NOTICE:  PASS | M26 0025·0026 적용($err26 차단 확인) → 롤백(0026→0025 게이트 복귀 → 함수·트리거 제거) → 재적용, 리드/고객/정책/스위치 보존($s0)" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | M26 0025·0026 롤백 on=$on26 err=$err26 mid=$mid gone=$gone25 back=$back26 snap=$s0→$s1→$s2" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

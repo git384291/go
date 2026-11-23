@@ -28,7 +28,8 @@ const FAULT_REASONS: ReadonlySet<ReasonCode> = new Set<ReasonCode>([
   'INPUT_INVALID', 'TIME_FORMAT_INVALID', 'TIME_ORDER_INVALID', 'CONFLICTING_VERSIONS', 'NOT_APPROVED', 'SOURCE_NOT_QUOTABLE',
   'CONFIRMED_AT_UNKNOWN', 'CONFIRMED_IN_FUTURE', 'NOT_YET_VALID', 'EXPIRED', 'VALIDITY_UNKNOWN',
 ]);
-export type PolicyCheck = { readonly answer: QuoteAnswer; readonly fault: boolean };
+/** present: 이 상품 키에 지금 유효한 승인·게시 정책이 하나 있다(PM 11/24 결정: 없으면 접수 차단 — 정책 없음·게시 스위치 OFF 포함) */
+export type PolicyCheck = { readonly answer: QuoteAnswer; readonly fault: boolean; readonly present: boolean };
 
 export async function answerQuote(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): Promise<QuoteAnswer> {
   return (await checkPolicy(provider, request, now)).answer;
@@ -36,21 +37,24 @@ export async function answerQuote(provider: ApprovedPolicyProvider, request: Quo
 
 /** answerQuote와 같은 안내문 + 정책 검증 장애(B) 여부. 장애여도 안내문은 금액 없는 '담당자 확인' 문장이다 */
 export async function checkPolicy(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): Promise<PolicyCheck> {
-  const fault = (): PolicyCheck => Object.freeze({ answer: closed(), fault: true });
+  const fault = (): PolicyCheck => Object.freeze({ answer: closed(), fault: true, present: false });
   try {
     const records = await provider(now);
     if (!Array.isArray(records)) return fault();
     const r = quotePolicy(records, request, now);
     const m = renderQuoteMessage(r);
     if (r.status !== 'quote' || m.kind !== 'quote') {
-      return r.status === 'needs_review' && r.reasons.some((x) => FAULT_REASONS.has(x)) ? fault() : Object.freeze({ answer: m, fault: false });
+      if (r.status === 'needs_review' && r.reasons.some((x) => FAULT_REASONS.has(x))) return fault();
+      // 조건 미상(요금·지역·결합 등)은 유효 정책은 있으나 담당자 확인 대상. 정책 없음·상품 비활성은 '정책 없음'
+      const absent = r.status !== 'needs_review' || r.reasons.some((x) => x === 'NO_POLICY' || x === 'PRODUCT_NOT_ACTIVE');
+      return Object.freeze({ answer: m, fault: false, present: !absent });
     }
     const b = r.quote.benefit;
     return Object.freeze({ answer: Object.freeze({ ...m, allow: Object.freeze({
       giftForm: b.form !== 'none' && b.amountKrw > 0 ? b.form : null,
       installFree: r.quote.installFee.amountKrw === 0,
       equipmentFree: r.quote.equipmentMonthlyFee.amountKrw === 0,
-    }) }), fault: false });
+    }) }), fault: false, present: true });
   } catch {
     return fault();
   }

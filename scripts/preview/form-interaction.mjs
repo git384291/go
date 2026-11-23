@@ -75,7 +75,7 @@ const FAKE_TURNSTILE = `
     };
   })();`;
 
-async function openForm(browser, { enabled, siteKey, api, clock = false, privacy, dev = false, tsConf = {}, scriptFailTimes = 0 }) {
+async function openForm(browser, { enabled, siteKey, api, clock = false, privacy, dev = false, tsConf = {}, scriptFailTimes = 0, status = null }) {
   const js = await bundle({ enabled, siteKey, privacy, dev });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
   const page = await ctx.newPage();
@@ -94,6 +94,11 @@ async function openForm(browser, { enabled, siteKey, api, clock = false, privacy
       return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><meta charset="utf-8"><div id="root"></div><script src="/form.js"></script>' });
     }
     if (u.origin === ORIGIN && u.pathname === '/form.js') return route.fulfill({ contentType: 'text/javascript', body: js });
+    // PM 11/24: 접수 화면 잠금용 정책 상태(서버 판정). 시나리오가 주면 그 응답, 없으면 막힘(화면 판정 보류 = 기존 동작)
+    if (u.origin === ORIGIN && u.pathname === '/api/leads/status' && status) {
+      seen.status = (seen.status ?? 0) + 1;
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(status) });
+    }
     if (u.origin === ORIGIN && u.pathname === '/api/leads') {
       const body = JSON.parse(req.postData() ?? '{}');
       seen.api.push(body);
@@ -300,6 +305,29 @@ async function scenarioTimeout(browser) {
   await ctx.close();
 }
 
+/** PM 11/24 결정 [필수7]: 서버가 정책 상태로 접수 불가(open:false)를 알리면 접수 버튼·입력이 잠기고 B 안내가 보이며 요청 0건. open:true면 그대로 열림 */
+async function scenarioPolicyBlocked(browser) {
+  const closed = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', api: reply(202, { ok: true }), status: { ok: true, open: false } });
+  await closed.page.waitForSelector('[data-field="policy-blocked"]', { timeout: 3000 }).catch(() => {});
+  const st = await closed.page.evaluate(() => ({
+    btn: document.querySelector('button[type=submit]')?.disabled === true,
+    fs: document.querySelector('fieldset')?.disabled === true,
+    msg: document.querySelector('[data-field="policy-blocked"]')?.textContent ?? '',
+    label: document.querySelector('button[type=submit]')?.textContent ?? '',
+  }));
+  await closed.page.evaluate(() => document.querySelector('form').requestSubmit());
+  await closed.page.waitForTimeout(300);
+  check('F40 정책 접수 불가(서버 open:false): 접수 버튼·입력 잠금, B 안내 표시, 강제 제출해도 요청 0건',
+    st.btn && st.fs && st.msg.includes('가입 접수를 일시적으로 제한') && st.label.includes('일시 제한') && closed.seen.api.length === 0 && closed.seen.status >= 1,
+    JSON.stringify({ ...st, api: closed.seen.api.length, status: closed.seen.status }));
+  await closed.ctx.close();
+  const open = await openForm(browser, { enabled: true, siteKey: 'test-only-site-key', api: reply(202, { ok: true }), status: { ok: true, open: true } });
+  await open.page.waitForTimeout(400);
+  const o = await open.page.evaluate(() => ({ btn: document.querySelector('button[type=submit]')?.disabled === false, blocked: document.querySelectorAll('[data-field="policy-blocked"]').length }));
+  check('F41 정책 접수 가능(서버 open:true): 버튼 열림, 잠금 안내 없음', o.btn && o.blocked === 0 && open.seen.status >= 1, JSON.stringify(o));
+  await open.ctx.close();
+}
+
 async function scenarioClosed(browser) {
   for (const [label, enabled, siteKey] of [['폼 꺼짐(기본값)', false, ''], ['폼 꺼짐 + 키 있음', false, 'test-only-site-key'], ['폼 켜짐 + 공개 키 없음', true, '']]) {
     const { page, ctx, seen } = await openForm(browser, { enabled, siteKey, api: reply(202, { ok: true }) });
@@ -447,6 +475,7 @@ try {
   await scenarioSdkThrows(browser);
   await scenarioNotReady(browser);
   await scenarioDevStrict(browser);
+  await scenarioPolicyBlocked(browser);
 } catch (e) {
   check('시나리오 실행 중 예외 없음', false, String(e && e.message ? e.message.split('\n')[0] : e));
 } finally {

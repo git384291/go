@@ -88,7 +88,7 @@ grant execute on function
   api.policy_published(),
   api.consult_event_record(text, text),   -- 0012: 상담 시작 건수(개인정보 없음)
   api.notice_intake_gate(text, jsonb),    -- 0016: 접수 직전 고지 승인 게이트(문구·개인정보 없이 오류 코드만)
-  api.policy_intake_gate(),               -- 0025: 접수 직전 정책 상태 잠금·충돌 게이트(오류 코드만)
+  api.policy_intake_gate(text, text, text),  -- 0025·0026: 접수 직전 정책 상태 잠금·게시 스위치·유효 정책 게이트(오류 코드만)
   api.application_save(text, text, text, text),  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
   api.followup_request(text, text, text, text),  -- 0023: 서버 서명이 있어야 기록되는 대표 직접 연락 동의
   api.consult_rate_hit(text, text),  -- 0024: 상담 채팅 공용 횟수 제한(IP HMAC만)

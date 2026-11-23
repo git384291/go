@@ -82,9 +82,11 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   }, now);
   if (checked.fault) return { ok: true, kind: 'needs_review', text: POLICY_UNVERIFIED_GUIDANCE, source: 'fallback', next: 'blocked' };
   const approved = checked.answer;
-  const fallback = (): ChatReply => withCallback({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' }, m);
+  // PM 11/24 결정: 유효한 게시 정책이 없으면(정책 없음·게시 스위치 OFF) 일반 상담 안내는 그대로 하되 접수는 잠근다(next 'blocked', 연락 동의 질문 없음)
+  const gate = (r: ChatReply): ChatReply => (r.ok && !checked.present ? { ok: true, kind: r.kind, text: r.text, source: r.source, next: 'blocked' } : r);
+  const fallback = (): ChatReply => gate(withCallback({ ok: true, kind: approved.kind, text: approved.text, source: 'fallback', next: 'signup' }, m));
   // A: AI 상담만 실패. 승인 견적(서버 검증 통과)이 있으면 그 문장만 덧붙이고, 없으면 금액 없는 A 안내만
-  const unavailable = (): ChatReply => withCallback({ ok: true, kind: approved.kind, text: approved.kind === 'quote' ? `${AI_UNAVAILABLE_GUIDANCE}\n\n${approved.text}` : AI_UNAVAILABLE_GUIDANCE, source: 'fallback', next: 'signup' }, m);
+  const unavailable = (): ChatReply => gate(withCallback({ ok: true, kind: approved.kind, text: approved.kind === 'quote' ? `${AI_UNAVAILABLE_GUIDANCE}\n\n${approved.text}` : AI_UNAVAILABLE_GUIDANCE, source: 'fallback', next: 'signup' }, m));
   const model = deps.model;
   if (!model) return unavailable();
   const hold = await deps.budget.reserve(model.costPerCallKrw, input.budgetCtx);
@@ -104,7 +106,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     const guarded = guardAiReply(reply, approved);
     if (guarded.text !== reply) return fallback();
     if (!benefitClaimsAllowed(reply, approved)) return fallback();
-    return withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m);
+    return gate(withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m));
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
     // 0028: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)

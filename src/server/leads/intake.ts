@@ -108,10 +108,14 @@ export type IntakeContext = {
   nowSeconds?: number;
   notices?: NoticeConfig; // 기본은 content/requiredNotices의 확정 상태(현재 미확정 → 접수 거부)
   /**
-   * 정책 검증 장애(B) 판정기(PM 11/24). 넣으면 접수 트랜잭션 안에서 api.policy_intake_gate()(정책 상태 공유 잠금·충돌 검사) 뒤
-   * api.policy_published()를 다시 읽어 이 판정기에 넘긴다. true(장애)면 저장 전에 POLICY_UNVERIFIED(503)로 취소한다. 운영 route.ts가 넣는다.
+   * 정책 접수 조건(PM 11/24 결정). 넣으면(운영 route.ts) 접수 트랜잭션 안에서 DB 게이트 api.policy_intake_gate(공급자·통신사·상품:
+   * 정책 상태 공유 잠금 + 게시 스위치 ON + 유효 승인 정책 정확히 1개) 뒤 api.policy_published()를 다시 읽어 verdict로 판정한다.
+   * 키가 없거나 판정이 null이 아니면 저장 전에 503(POLICY_NOT_PUBLISHED·POLICY_UNVERIFIED 등)으로 취소한다.
    */
-  policyFault?: (rows: readonly unknown[], now: Date) => Promise<boolean>;
+  policy?: {
+    key: { supplierId: string; carrier: string; productId: string } | null;
+    verdict: (rows: readonly unknown[], now: Date) => Promise<string | null>;
+  };
 };
 
 /**

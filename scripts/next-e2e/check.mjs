@@ -431,10 +431,14 @@ try {
     const t2 = await ask('이제 접수하고 싶어요');
     const boxes = await pg.locator('.consent-box[aria-label="필수 고지"] input[type=checkbox]').count();
     const gate = (await pg.locator('.consent-box[aria-label="필수 고지"]').textContent()) ?? '';
+    // PM 11/24 결정: 이 환경은 게시 정책이 없다(스위치 OFF) → 상담 안내는 하되 도우미는 접수 제한만 알리고, 상담창·접수 양식 모두 잠긴다(서버 상태 API 판정)
+    const chatBlocked = await pg.locator('[data-field="intake-blocked"]').count();
+    const submitDisabled = await pg.locator('form button[type=submit]').isDisabled();
+    const formBanner = await pg.locator('[data-field="policy-blocked"]').count();
     await pg.locator('form button[type=submit]').click({ timeout: 2000, force: true }).catch(() => {});
     await pg.waitForTimeout(500);
     await br.close();
-    check('UI1 실제 Next 화면(고지 미확정): 상담 후 신청서 도우미가 이어 묻고, 모두 채워도 "접수 불가" 안내, 가짜 고지 체크박스 없음, 제출해도 접수 요청 0건·DB 저장 0건', /설치하실 곳의 주소/.test(t1) && /필수 고지 문구가 확정되기 전이라 접수는 아직 받을 수 없습니다/.test(t2) && boxes === 0 && /확정되기 전에는 상담 신청을 받지 않습니다/.test(gate) && leadPosts === 0 && (await lc()) === leads0, `t2=${t2.slice(0, 40)} boxes=${boxes} posts=${leadPosts}`);
+    check('UI1 실제 Next 화면(고지 미확정·게시 정책 없음): 상담 안내 후 도우미는 "가입 접수 일시 제한"만 안내, 상담창·접수 버튼 잠금(B 안내), 가짜 고지 체크박스 없음, 제출해도 접수 요청 0건·DB 저장 0건', /가입 접수가 일시 제한/.test(t1) && /가입 접수가 일시 제한/.test(t2) && chatBlocked === 1 && submitDisabled && formBanner === 1 && boxes === 0 && /확정되기 전에는 상담 신청을 받지 않습니다/.test(gate) && leadPosts === 0 && (await lc()) === leads0, `t2=${t2.slice(0, 40)} boxes=${boxes} posts=${leadPosts} chat=${chatBlocked} disabled=${submitDisabled} banner=${formBanner}`);
   } catch (e) { check('UI1 실제 Next 화면 검증', false, String(e.message).split('\n')[0]); }
   // PM 11/22 P1-6: 같은 캠페인 키의 상담(consult_events)과 접수(leads.utm_campaign)가 ad_funnel_full에서 한 줄로 함께 집계된다(대표 API)
   try {

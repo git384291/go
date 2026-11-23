@@ -292,7 +292,8 @@ test('CB 대표 직접 연락 동의 질문: 승인 견적이 없거나 고객�
   assert.equal(needsCallback('설치 언제 돼요?', 'quote'), false);
   assert.ok(CALLBACK_PROMPT.startsWith('대표가 직접 연락드려도 될까요?'));
   assert.ok(!/\d/.test(CALLBACK_PROMPT));  const none = await answerChat(deps({ provider: () => [] }), input(), NOW);
-  assert.ok(none.ok && none.next === 'callback' && none.callbackPrompt === CALLBACK_PROMPT && none.text === NEEDS_REVIEW_GUIDANCE);
+  // PM 11/24 결정: 게시 정책이 없으면 접수(연락 동의 포함 신청 양식)를 잠근다 → 연락 동의 질문 대신 next 'blocked', 안내문은 그대로
+  assert.ok(none.ok && none.next === 'blocked' && !('callbackPrompt' in none) && none.text === NEEDS_REVIEW_GUIDANCE);
   const unsure = await answerChat(deps(), input('잘 모르겠어요'), NOW);
   assert.ok(unsure.ok && unsure.kind === 'quote' && unsure.next === 'callback');
   const plain = await answerChat(deps(), input(), NOW);

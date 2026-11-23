@@ -14,6 +14,8 @@ import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './T
 export const SAFE = '현재 자동 상담 연결이 원활하지 않습니다. 정확한 안내를 위해 담당자 확인이 필요합니다. 확인되지 않은 요금과 가입 혜택은 안내하지 않습니다. 잠시 후 다시 보내 주시거나, 아래 가입 상담 신청 양식에 남겨 주세요.';
 /** 서버 응답이 이 시간 안에 안 오면(서버 상담 상한 8~10초 + 여유) 기다리기를 멈추고 안전 안내문으로 전환한다. 브라우저는 자동 재시도하지 않는다(재시도는 서버가 상한 안에서만) */
 export const CLIENT_TIMEOUT_MS = 13000;
+/** PM 11/24 결정: 정책 접수 불가(next 'blocked')면 신청서 도우미는 더 묻지 않고 접수 제한만 알린다(고정 문장, 숫자 없음) */
+export const ASSIST_BLOCKED = '신청서 도우미: 현재 정확한 요금과 가입 조건을 확인할 수 없어 가입 접수가 일시 제한되어 있습니다. 신청서는 받지 않습니다.';
 export type ChatChoice = { carrier: string; productId: string; regionCode: string };
 type Msg = { from: 'me' | 'ai' | 'assist'; text: string };
 const TURNSTILE_SITE_KEY = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim();
@@ -72,7 +74,7 @@ export function ConsultAiChat({ choice, application, intakeOpen = false, onPolic
     } catch { /* 안전 안내문 유지 */ } finally { clearTimeout(timer); }
     if (policyBlocked) { setBlocked(true); onPolicyBlocked?.(); }
     if (!session) { botRef.current = null; setBotReady(false); widget.current?.reset(); }
-    setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(ask ? [{ from: 'ai' as const, text: ask }] : []), ...(appRef.current && !policyBlocked ? [{ from: 'assist' as const, text: assistFollowUp(appRef.current, intakeOpenRef.current) }] : [])]);
+    setMsgs((m) => [...m, { from: 'ai', text: reply }, ...(ask ? [{ from: 'ai' as const, text: ask }] : []), ...(appRef.current ? [{ from: 'assist' as const, text: policyBlocked ? ASSIST_BLOCKED : assistFollowUp(appRef.current, intakeOpenRef.current) }] : [])]);
     setBusy(false);
     sending.current = false;
   }
