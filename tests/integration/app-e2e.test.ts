@@ -645,7 +645,16 @@ test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수
 });
 
 test('E16 대표 직접 연락 동의(PM 11/22 ② 7): 고객이 잘 모르면 동의 질문 → 동의 체크 접수 → 같은 트랜잭션 기록 → 대표만 목록(가린 정보)·완료, 미동의 접수는 목록에 없음', async () => {
-  const chat = { provider: () => [], supplierId: 'supplier-a', model: mockModel, budget: createAiBudget({}) };
+  // PM 11/24 결정: 유효한 게시 정책이 없으면 접수(연락 동의 포함)를 잠그므로, 동의 질문은 유효 정책이 있을 때 고객이 잘 모를 때 나온다(가상 정책 행)
+  const t0 = Date.now(), at = (ms: number) => new Date(ms).toISOString().replace('Z', '+00:00'), kv = <T,>(value: T) => ({ known: true as const, value });
+  const e16Rec = {
+    supplierId: 'supplier-a', segment: 'household', carrier: 'carrier-x', productId: 'e2e-p1', productLabel: '가상 인터넷+TV(E16)', category: 'internet_tv',
+    version: 'v-e16', sourceKind: 'official_policy_sheet', reviewStatus: 'approved', confirmedAt: at(t0 - 3_600_000), validFrom: at(t0 - 3_600_000), validUntil: kv(at(t0 + 86_400_000)),
+    monthlyFee: kv({ amountKrw: 11111, vat: 'included' }), contractMonths: kv(36), equipmentMonthlyFee: kv({ amountKrw: 0, vat: 'included' }), installFee: kv({ amountKrw: 2222, vat: 'included' }),
+    bundlePrerequisites: kv([]), regionScope: kv('nationwide'), customerBenefit: kv({ amountKrw: 3333, form: 'gift_card', payoutCondition: kv('x'), cancellationCondition: kv('y') }),
+    internal: { commissionKrw: null, sourceRef: null },
+  };
+  const chat = { provider: () => [e16Rec], supplierId: 'supplier-a', model: mockModel, budget: createAiBudget({}) };
   const ask = await answerChat(chat, { message: '잘 모르겠어요', carrier: 'carrier-x', productId: 'e2e-p1', regionCode: 'region-1' }, new Date());
   assert.ok(ask.ok && ask.next === 'callback' && typeof ask.callbackPrompt === 'string' && ask.callbackPrompt.startsWith('대표가 직접 연락드려도 될까요?'));
   const deps = (staff: StaffIdentity): DealerPacketDeps => ({
