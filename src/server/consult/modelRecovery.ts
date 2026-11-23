@@ -13,10 +13,13 @@ export type ModelFailureKind = 'timeout' | 'network' | 'rate_limited' | 'server'
 export class ModelCallError extends Error {
   readonly kind: ModelFailureKind;
   readonly status: number | undefined;
-  constructor(message: string, kind: ModelFailureKind, status?: number) {
+  /** 서버가 Retry-After(정수 초)로 알려 준 대기(ms). 없으면 undefined */
+  readonly retryAfterMs: number | undefined;
+  constructor(message: string, kind: ModelFailureKind, status?: number, retryAfterMs?: number) {
     super(message);
     this.kind = kind;
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 const RETRYABLE: ReadonlySet<ModelFailureKind> = new Set(['timeout', 'network', 'rate_limited', 'server']);
@@ -111,7 +114,10 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
             sentAny = true;
             last = e;
             if (!isRetryableModelError(e) || n >= max) break;
-            const delay = Math.min(maxDelay, baseDelay * 2 ** (n - 1));
+            // 서버가 우리 대기 상한보다 오래 기다리라고 하면 다시 시도하지 않는다(시간·비용 낭비 방지). 상한 안이면 그만큼 기다린다
+            const ra = e instanceof ModelCallError ? e.retryAfterMs : undefined;
+            if (ra !== undefined && ra > maxDelay) break;
+            const delay = Math.min(maxDelay, Math.max(baseDelay * 2 ** (n - 1), ra ?? 0));
             if (deadline - now() <= delay) break; // 다시 시도할 시간이 없다
             await sleep(delay, signal);
             if (signal.aborted) break;

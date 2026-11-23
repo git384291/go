@@ -1,3 +1,4 @@
+import { POLICY_UNVERIFIED_GUIDANCE } from '../content/consultGuidance';
 // 상담 신청 폼의 순수 보조 모듈(브라우저 코드로 내려간다). 서버 검증을 대신하지 않는다.
 // - 고객 입력·요청 키·봇 토큰은 호출자의 메모리에서만 다룬다. 저장소·URL·로그·분석으로 보내지 않는다.
 // - 서버 응답은 상태 코드와 허용 목록에 있는 오류 코드만 읽고, 화면 문구는 아래 고정 문구만 쓴다(응답 원문 반사 없음).
@@ -83,7 +84,7 @@ export class IdempotencyKeeper {
   }
 }
 
-export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'stale' | 'secure_context' | 'rate' | 'bot' | 'not_ready' | 'temporary' | 'unknown';
+export type OutcomeKind = 'accepted' | 'field' | 'input' | 'consent_version' | 'stale' | 'secure_context' | 'rate' | 'bot' | 'not_ready' | 'policy' | 'temporary' | 'unknown';
 export type SubmitOutcome = { kind: OutcomeKind; message: string; field?: ConsultField; retryable: boolean };
 
 export const OUTCOME_MESSAGES = {
@@ -96,6 +97,7 @@ export const OUTCOME_MESSAGES = {
   bot: '자동 입력 방지 확인을 다시 완료한 뒤 시도해 주세요.',
   bot_pending: '자동 입력 방지 확인을 완료한 뒤 신청해 주세요.',
   not_ready: '지금은 신청을 받을 수 없습니다.',
+  policy: POLICY_UNVERIFIED_GUIDANCE, // PM 11/24 B: 정책·요금·필수 고지 검증 장애(서버·DB 접수 차단)
   temporary: '일시적인 문제로 접수되지 않았습니다. 입력 내용은 그대로 있으니 다시 시도해 주세요.',
   // 응답 없음·시간 초과·해석 불가: 저장 여부를 모른다. 접수됐다/안 됐다고 단정하지 않는다
   unknown: '접수 결과를 확인하지 못했습니다. 입력 내용은 그대로 있으니 같은 내용으로 다시 시도해 주세요.',
@@ -119,6 +121,7 @@ const CODE_KIND: Readonly<Record<string, { kind: OutcomeKind; field?: ConsultFie
   BOT_CHECK_UNAVAILABLE: { kind: 'temporary' },
   PRODUCT_NOT_ACTIVE: { kind: 'not_ready' },
   SERVICE_NOT_READY: { kind: 'not_ready' },
+  POLICY_UNVERIFIED: { kind: 'policy' },
   LEAD_INTAKE_DISABLED: { kind: 'not_ready' },
   LOCAL_MODE_NOT_ALLOWED_ON_VERCEL: { kind: 'not_ready' },
   DATABASE_URL_INVALID: { kind: 'not_ready' },
@@ -153,6 +156,8 @@ function outcome(kind: OutcomeKind, field?: ConsultField): SubmitOutcome {
       return { kind, message: OUTCOME_MESSAGES.secure_context, retryable: false };
     case 'not_ready':
       return { kind, message: OUTCOME_MESSAGES.not_ready, retryable: false };
+    case 'policy':
+      return { kind, message: OUTCOME_MESSAGES.policy, retryable: false };
   }
 }
 

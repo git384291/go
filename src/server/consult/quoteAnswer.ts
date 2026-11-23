@@ -1,6 +1,6 @@
 import 'server-only';
 import { NEEDS_REVIEW_GUIDANCE, quotePolicy, renderQuoteMessage } from '@/server/policies';
-import type { QuoteRequest } from '@/server/policies';
+import type { QuoteRequest, ReasonCode } from '@/server/policies';
 
 /**
  * 상담창 금액 안내(PM 11/21 1·2·7항) — 승인된 정책 견적에서 나온 문장만 고객에게 간다.
@@ -19,21 +19,40 @@ export type BenefitAllowance = {
 };
 export type QuoteAnswer = { readonly kind: 'quote' | 'needs_review'; readonly text: string; readonly allow?: BenefitAllowance };
 
+/**
+ * 정책 검증 장애(B, PM 11/24): DB가 이미 승인·유효·게시·유일 버전으로 걸러 준 행을 서버가 다시 검사했는데 통과하지 못한 경우.
+ * 조회 실패·형식 오류·충돌 버전·만료/미승인/시작 전/시각 오류 행이 섞여 온 경우다 → 접수까지 막는다.
+ * 정책 없음(게시 스위치 OFF 포함)·조건 미상·지역 미확정은 장애가 아니라 정상 '담당자 확인' 상태다(금액 없음, 접수는 독립 안전조건으로 판정).
+ */
+const FAULT_REASONS: ReadonlySet<ReasonCode> = new Set<ReasonCode>([
+  'INPUT_INVALID', 'TIME_FORMAT_INVALID', 'TIME_ORDER_INVALID', 'CONFLICTING_VERSIONS', 'NOT_APPROVED', 'SOURCE_NOT_QUOTABLE',
+  'CONFIRMED_AT_UNKNOWN', 'CONFIRMED_IN_FUTURE', 'NOT_YET_VALID', 'EXPIRED', 'VALIDITY_UNKNOWN',
+]);
+export type PolicyCheck = { readonly answer: QuoteAnswer; readonly fault: boolean };
+
 export async function answerQuote(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): Promise<QuoteAnswer> {
+  return (await checkPolicy(provider, request, now)).answer;
+}
+
+/** answerQuote와 같은 안내문 + 정책 검증 장애(B) 여부. 장애여도 안내문은 금액 없는 '담당자 확인' 문장이다 */
+export async function checkPolicy(provider: ApprovedPolicyProvider, request: QuoteRequest, now: Date): Promise<PolicyCheck> {
+  const fault = (): PolicyCheck => Object.freeze({ answer: closed(), fault: true });
   try {
     const records = await provider(now);
-    if (!Array.isArray(records)) return closed();
+    if (!Array.isArray(records)) return fault();
     const r = quotePolicy(records, request, now);
     const m = renderQuoteMessage(r);
-    if (r.status !== 'quote' || m.kind !== 'quote') return m;
+    if (r.status !== 'quote' || m.kind !== 'quote') {
+      return r.status === 'needs_review' && r.reasons.some((x) => FAULT_REASONS.has(x)) ? fault() : Object.freeze({ answer: m, fault: false });
+    }
     const b = r.quote.benefit;
-    return Object.freeze({ ...m, allow: Object.freeze({
+    return Object.freeze({ answer: Object.freeze({ ...m, allow: Object.freeze({
       giftForm: b.form !== 'none' && b.amountKrw > 0 ? b.form : null,
       installFree: r.quote.installFee.amountKrw === 0,
       equipmentFree: r.quote.equipmentMonthlyFee.amountKrw === 0,
-    }) });
+    }) }), fault: false });
   } catch {
-    return closed();
+    return fault();
   }
 }
 
