@@ -8,6 +8,6 @@ const ALLOWED = /^https:\/\/(oauth2\.googleapis\.com\/token|googleads\.googleapi
 
 export const googleAdsFetchTransport: BodyTransport = async (url, init) => {
   if (!ALLOWED.test(url)) throw new Error('DESTINATION_NOT_ALLOWED');
-  const r = await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: init.signal, redirect: 'error', cache: 'no-store' });
+  const r = await fetch(url, { method: init.method, headers: init.headers, body: init.body as BodyInit | undefined, signal: init.signal, redirect: 'error', cache: 'no-store' });
   return { status: r.status, body: r.body };
 };

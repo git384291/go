@@ -39,7 +39,7 @@ test('GW3 소재 조립: 금지 주장·금액·형식 오류 문안은 버리�
   assert.ok(buildRsaCreative(ok));
   const bad = [{ title: '최대 현금 지원', description: '지금 신청하면 사은품을 바로 드립니다 놓치지 마세요' }, { title: '10만원 지원', description: x(30) }, { title: 'x', description: 'y' }, null, 'str', { title: ok[0]!.title, description: ok[0]!.description, extra: 1 }];
   assert.equal(buildRsaCreative([ok[0], ok[1], ...bad]), null);
-  assert.equal(buildRsaCreative([...ok, ...ok]).headlines.length, 3); // 중복 제거
+  assert.equal(buildRsaCreative([...ok, ...ok])!.headlines.length, 3); // 중복 제거
 });
 function x(n: number) { return '가'.repeat(n); }
 
