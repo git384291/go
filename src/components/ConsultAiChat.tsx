@@ -8,7 +8,8 @@ import { TurnstileWidget, type TurnstileHandle, type TurnstileStatus } from './T
 
 // AI 24시간 상담창(PM 11/21 ②). 글을 서버(/api/consult/chat)로만 보낸다. 요금·사은품은 서버가 승인 정책에서 만든 문장만 돌려준다.
 // 개인정보는 여기 쓰지 않도록 안내하고(서버도 가림), 신청은 기존 접수 양식(/consult)으로 이어진다. 모델·키·비용 정보는 화면에 없다.
-const SAFE = '지금은 자동 안내를 불러오지 못했습니다. 담당자가 확인한 뒤 안내드리겠습니다.';
+// 상담창에는 연락처가 없으므로 '담당자가 연락' 같은 약속을 하지 않는다. 다시 보내기 또는 신청 양식(대표 직접 연락 동의 포함)으로 안내한다
+export const SAFE = '지금은 자동 안내를 불러오지 못했습니다. 잠시 후 다시 보내 주시거나, 아래 가입 상담 신청 양식에 남겨 주세요.';
 export type ChatChoice = { carrier: string; productId: string; regionCode: string };
 type Msg = { from: 'me' | 'ai' | 'assist'; text: string };
 const TURNSTILE_SITE_KEY = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim();

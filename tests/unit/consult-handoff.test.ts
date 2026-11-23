@@ -282,3 +282,11 @@ test('HF21 잘못된 입력 뒤에도 정상 같은 요청의 모의 확인·중
   assert.equal(late.decision?.state, 'delivery_unknown');
   assert.equal(takeReply(late, T0 + DEADLINE + 3).reply, null);
 });
+
+test('HF22 상담창 실패 안내는 연락 약속을 하지 않는다(상담창엔 연락처가 없음): 다시 보내기·신청 양식으로만 안내', () => {
+  const src = readFileSync(new URL('../../src/components/ConsultAiChat.tsx', import.meta.url), 'utf8');
+  const m = /export const SAFE = '([^']+)';/.exec(src);
+  assert.ok(m, 'SAFE 문구 위치');
+  assert.ok(!/담당자가|연락드리|안내드리겠/.test(m[1]), m[1]);
+  assert.ok(/다시 보내|신청 양식/.test(m[1]), m[1]);
+});

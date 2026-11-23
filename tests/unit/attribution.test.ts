@@ -1,7 +1,7 @@
 // 유입 출처(UTM) 판정 시험 — 순수 함수, 외부 호출 없음
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAttribution, resolveAttribution, ATTRIBUTION_STORAGE_KEY } from '../../src/content/attribution';
+import { parseAttribution, resolveAttribution, ATTRIBUTION_STORAGE_KEY, CAMPAIGN_KEY } from '../../src/content/attribution';
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -59,4 +59,10 @@ test('AT8 전화번호·이메일 모양 값은 출처로 쓰지 않는다', () 
   assert.deepEqual(parseAttribution('?utm_source=a@b.com'), {});
   assert.deepEqual(parseAttribution('?utm_source=naver&utm_campaign=01012345678'), { utmSource: 'naver' });
   assert.equal(parseAttribution('?utm_source=naver&utm_campaign=cpc_2026_11').utmCampaign, 'cpc_2026_11');
+});
+
+test('AT9 캠페인 키는 집계 형식(점 불가)만: 점이 든 캠페인은 버리고 출처·매체는 유지(상담·접수·광고 성과가 같은 키로 묶이게)', () => {
+  assert.deepEqual(parseAttribution('?utm_source=naver.blog&utm_medium=cpc&utm_campaign=spring.2026'), { utmSource: 'naver.blog', utmMedium: 'cpc' });
+  assert.deepEqual(parseAttribution('?utm_source=google&utm_campaign=Spring_2026-TV'), { utmSource: 'google', utmCampaign: 'spring_2026-tv' });
+  assert.ok(CAMPAIGN_KEY.test('internet-tv_1') && !CAMPAIGN_KEY.test('a.b') && !CAMPAIGN_KEY.test('-a'));
 });

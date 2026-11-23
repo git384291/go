@@ -8,6 +8,8 @@ export type Attribution = { utmSource?: string; utmMedium?: string; utmCampaign?
 
 export const ATTRIBUTION_STORAGE_KEY = 'fideon_attr_v1';
 const CODE = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
+/** 캠페인 키는 광고 성과·상담 집계·DB(core.ad_performance·consult_events)와 같은 형식(점 불가). 다르면 퍼널에서 접수가 다른 캠페인으로 갈라진다 */
+export const CAMPAIGN_KEY = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /** 숫자 7자리 이상 연속은 전화번호 등 개인정보일 수 있어 출처 코드로 쓰지 않는다 */
 const LOOKS_PERSONAL = /\d[\s_.-]?(?:\d[\s_.-]?){6,}/;
@@ -26,7 +28,8 @@ export function parseAttribution(search: string): Attribution {
   if (!utmSource) return {};
   const out: Attribution = { utmSource };
   const utmMedium = clean(p.get('utm_medium'));
-  const utmCampaign = clean(p.get('utm_campaign'));
+  const c = clean(p.get('utm_campaign'));
+  const utmCampaign = c !== undefined && CAMPAIGN_KEY.test(c) ? c : undefined;
   if (utmMedium) out.utmMedium = utmMedium;
   if (utmCampaign) out.utmCampaign = utmCampaign;
   return out;

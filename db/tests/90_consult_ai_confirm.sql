@@ -28,6 +28,17 @@ select test.expect_error($$delete from core.consult_events$$, '42501', 'S5b 상�
 set role app_staff;
 select test.expect_eq($$select test.fullfunnel('owner', 'camp-q')$$, 'camp-q:0/0/2/0', 'S6 대표 분석: 상담 2건(접수 0)');
 select test.expect_eq($$select test.fullfunnel('reviewer', 'camp-q')$$, 'camp-q:0/0/2/0', 'S6b 검토자 조회');
+-- S6g 광고→상담→접수 한 줄: 같은 캠페인 키로 들어온 접수는 같은 행의 접수 열에 더해진다. 점이 든 키(화면은 버림)는 다른 캠페인으로 새지 않는다
+reset role;
+insert into core.leads (name_masked, phone_last4, interest, utm_source, utm_campaign, idempotency_key)
+values ('김*', '0001', 'internet_tv', 'naver', 'camp-q', 'idem-funnel-0000000001'),
+       ('이*', '0002', 'internet_tv', 'naver', 'camp.q', 'idem-funnel-0000000002');
+set role app_staff;
+select test.expect_eq($$select test.fullfunnel('owner', 'camp-q')$$, 'camp-q:0/0/2/1', 'S6g 같은 캠페인: 상담 2·접수 1이 한 행');
+select test.expect_eq($$select test.fullfunnel('owner', 'camp.q')$$, 'camp.q:0/0/0/1', 'S6h 형식 밖 캠페인 키 접수는 별도 행(상담·광고와 섞이지 않음)');
+reset role;
+delete from core.leads where idempotency_key in ('idem-funnel-0000000001', 'idem-funnel-0000000002');
+set role app_staff;
 select test.expect_error(test.adcall('counselor', 'ad_funnel_full', $$current_date - 1, current_date$$), '42501', 'S6c 상담원 조회 불가');
 select test.expect_error(test.adcall('editor', 'ad_funnel_full', $$current_date - 1, current_date$$), '42501', 'S6d 정책 편집자 조회 불가');
 select test.expect_error(test.adcall('owner', 'ad_funnel_full', $$current_date, current_date - 1$$), '22023', 'S6e 거꾸로 된 기간 거부');
