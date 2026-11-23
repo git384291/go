@@ -14,7 +14,7 @@ import { answerQuote } from '../../src/server/consult/quoteAnswer';
 import { answerChat } from '../../src/server/consult/chatAnswer';
 import { handleChat } from '../../src/server/consult/chatHandler';
 import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type AiBudget, type ChatModel } from '../../src/server/consult/chatModel';
-// 0026: DB는 요청 ID·사용자 키 없는 예약을 거부한다. 시험용 래퍼가 문맥을 붙인다(가상 키, 개인정보 아님)
+// 0028: DB는 요청 ID·사용자 키 없는 예약을 거부한다. 시험용 래퍼가 문맥을 붙인다(가상 키, 개인정보 아님)
 let e2eReq = 0;
 const E2E_SCOPE = 'e'.repeat(64);
 const withCtx = (b: AiBudget): AiBudget => ({ reserve: (c, ctx) => b.reserve(c, ctx ?? { requestId: `e2e-req-${Date.now()}-${e2eReq++}`, scope: E2E_SCOPE }) });
@@ -439,8 +439,8 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
 
 test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확정/취소, 호출 전 실패만 취소·장애는 확정, 한도 안에서만(동시 포함), 전용 역할만 실행', async () => {
   const budget = withCtx(createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never))));
-  await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0026 새 한도는 넉넉히(월 한도만 시험)
-  // 0026: DB 판정(core.ai_spent)과 같은 기준 — 이번 달(KST)만, 불확실 정산은 조정값 우선
+  await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0028 새 한도는 넉넉히(월 한도만 시험)
+  // 0028: DB 판정(core.ai_spent)과 같은 기준 — 이번 달(KST)만, 불확실 정산은 조정값 우선
   const used = async () => count(`select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw
       when 'uncertain' then coalesce(a.actual_cost_krw, s.actual_cost_krw) else u.cost_krw end), 0)::int as n
     from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id left join core.ai_usage_adjustments a on a.reservation_id = u.id
@@ -606,7 +606,7 @@ test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수
   assert.equal((await set(owner, { limitKrw: 100, reason: '' })).status, 422);
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ai.budget_limit_set'`), a0);
   const budget = withCtx(createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never))));
-  await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0026 새 한도는 넉넉히(월 한도만 시험)
+  await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0028 새 한도는 넉넉히(월 한도만 시험)
   const used0 = (await get(owner)).b.usedKrw as number;
   try {
     assert.equal((await set(owner, { limitKrw: used0 + 20, reason: 'E15 시험' })).status, 200);

@@ -24,7 +24,7 @@ export type ChatDeps = {
 };
 export type ChatInput = {
   readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string;
-  /** 0026: 예약 문맥(요청 ID·사용자 키). 없으면 DB 예약은 거부된다(메모리 시험 예산은 문맥 없이도 동작) */
+  /** 0028: 예약 문맥(요청 ID·사용자 키). 없으면 DB 예약은 거부된다(메모리 시험 예산은 문맥 없이도 동작) */
   readonly budgetCtx?: ReserveContext;
 };
 export type ChatReply =
@@ -107,7 +107,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     return withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m);
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
-    // 0026: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)
+    // 0028: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)
     if (e instanceof ModelNotCalledError) await hold.cancel();
     else if (isUncertain(e) && hold.uncertain) await hold.uncertain();
     else await hold.confirm(spent());

@@ -71,7 +71,7 @@ run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
-run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0026)
+run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 
 echo "== 정책 변경과 접수 동시 요청(0025): 접수 트랜잭션이 끝날 때까지 정책 쓰기는 대기"

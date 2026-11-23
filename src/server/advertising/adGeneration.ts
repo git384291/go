@@ -17,7 +17,7 @@ export type AdPrompt = { readonly instructions: string; readonly input: string }
 export type GeneratorErrorCode =
   | 'NOT_CONFIGURED' | 'TIMEOUT' | 'RATE_LIMITED' | 'HTTP_ERROR' | 'TRANSPORT_ERROR'
   | 'TOO_LARGE' | 'BAD_RESPONSE' | 'REFUSED' | 'INCOMPLETE'
-  | 'BUDGET_DENIED' | 'INPUT_TOO_LARGE';  // 0026: 공통 비용 게이트 거부·입력 토큰 상한 초과(둘 다 전송 0회)
+  | 'BUDGET_DENIED' | 'INPUT_TOO_LARGE';  // 0028: 공통 비용 게이트 거부·입력 토큰 상한 초과(둘 다 전송 0회)
 
 export const GENERATOR_ERROR_CODES: readonly GeneratorErrorCode[] = Object.freeze([
   'NOT_CONFIGURED', 'TIMEOUT', 'RATE_LIMITED', 'HTTP_ERROR', 'TRANSPORT_ERROR', 'TOO_LARGE', 'BAD_RESPONSE', 'REFUSED', 'INCOMPLETE', 'BUDGET_DENIED', 'INPUT_TOO_LARGE',

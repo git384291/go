@@ -58,7 +58,7 @@ export type HandlerDeps = {
   rateLimit: (kind: 'chat' | 'session') => Promise<boolean>;
   /** 처리 중 중복 요청 방어(없으면 프로세스 기본값) */
   inflight?: InflightGuard;
-  /** 0026: 사용자별 AI 비용 한도 키(서버 IP HMAC 64자리). 없거나 실패하면 DB 예약이 거부된다(호출 금지) */
+  /** 0028: 사용자별 AI 비용 한도 키(서버 IP HMAC 64자리). 없거나 실패하면 DB 예약이 거부된다(호출 금지) */
   budgetScope?: () => string;
 };
 
@@ -80,7 +80,7 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   const hasCampaign = 'campaign' in b;
   const hasSession = 'session' in b;
   const hasBot = 'turnstileToken' in b;
-  const hasReq = 'requestId' in b; // 0026: 선택. 같은 요청 ID 재전송은 다시 예약·호출하지 않는다
+  const hasReq = 'requestId' in b; // 0028: 선택. 같은 요청 ID 재전송은 다시 예약·호출하지 않는다
   if (hasReq && (typeof b.requestId !== 'string' || !REQUEST_ID.test(b.requestId))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   if (hasSession && hasBot) return json(400, { ok: false, code: 'INVALID_INPUT' }); // 봇 확인 토큰은 새 세션 요청에서만
   const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : []), ...(hasReq ? ['requestId'] : [])].sort().join(',');
