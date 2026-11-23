@@ -330,7 +330,7 @@ test('E9 광고 예산: 승인 없으면 차단, 한도·중복·동시 요청 �
 });
 
 // AI 상담 → 가입 접수 → DB → 관리자 조회(실제 DB, 무료 모의 모델, 실제 AI 호출 없음)
-test('E10 AI 상담: 승인 정책만 안내 → 접수 → DB 암호화 저장 → 관리자 마스킹 조회, 개인정보는 모델에 가려서만 전달', async () => {
+test('E10 AI 상담: 승인 정책만 안내 → 접수 → DB 암호화 저장 → 관리자 마스킹 조회, 개인정보가 있는 글은 모델에 보내지 않음(PR #2 최소화)', async () => {
   const provider = dbPolicyProvider(async () => {
     const rows = (await withRoleOn(app, 'public', (tx) => tx`select api.policy_published() as p`)) as unknown as { p: unknown }[];
     return rows.map((r) => r.p);
@@ -346,8 +346,12 @@ test('E10 AI 상담: 승인 정책만 안내 → 접수 → DB 암호화 저장 
     const off = await answerChat(chat, input('요금과 사은품이 궁금해요'), new Date());
     assert.ok(off.ok && off.kind === 'needs_review' && !/11,?111/.test(off.text));
     await admin`update core.feature_flags set enabled = true where key = 'policy_publish'`;
-    const on = await answerChat(chat, input('이름은 김철수 010-9999-8888 요금이 궁금해요'), new Date());
+    const on = await answerChat(chat, input('요금이 궁금해요'), new Date());
     assert.ok(on.ok && on.kind === 'quote' && on.source === 'model' && /11,?111/.test(on.text), JSON.stringify(on));
+    const before = seen.length;
+    const pii = await answerChat(chat, input('이름은 김철수 010-9999-8888 요금이 궁금해요'), new Date());
+    assert.ok(pii.ok && pii.kind === 'quote' && pii.source === 'fallback' && /11,?111/.test(pii.text), JSON.stringify(pii));
+    assert.equal(seen.length, before, '개인정보 글은 모델 호출 0회');
     assert.ok(!seen.join().includes('9999') && !seen.join().includes('김철수'));
   } finally {
     await admin`update core.feature_flags set enabled = ${original} where key = 'policy_publish'`;
