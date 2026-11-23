@@ -63,7 +63,7 @@ try {
   await send.click();
   await page.waitForSelector('[data-from="ai"]');
   const b = seen.api[0];
-  check('C5 요청 본문: 고정 코드 3개 + 글 + 첫 요청엔 세션 대신 1회용 봇 확인 토큰(서버가 세션 발급, 키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode', 'turnstileToken']) && b.message === '요금이 얼마예요?' && b.carrier === 'carrier-x' && b.turnstileToken === 'auto-tok-1');
+  check('C5 요청 본문: 고정 코드 3개 + 글 + 첫 요청엔 세션 대신 1회용 봇 확인 토큰(서버가 세션 발급, 키·모델·개인정보 필드 없음)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['carrier', 'message', 'productId', 'regionCode', 'requestId', 'turnstileToken']) && b.message === '요금이 얼마예요?' && b.carrier === 'carrier-x' && b.turnstileToken === 'auto-tok-1');
   check('C6 승인 안내가 AI 도우미 말풍선에 표시, 입력칸 비워짐', (await page.locator('[data-from="ai"]').innerText()).includes('11,111원') && (await box.inputValue()) === '');
   await page.screenshot({ path: `${OUT}/23-consult-ai-answer-w390.png`, fullPage: true });
   mode = 'down'; await box.fill('또 질문'); await send.click();

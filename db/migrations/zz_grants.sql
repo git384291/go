@@ -139,7 +139,10 @@ grant execute on function
   api.application_amendments(uuid, uuid, text, uuid),   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
   api.ad_spend_request_window(uuid, uuid, text, text, int, text),   -- 0021: 집행 기간·날짜별 최대 청구액 판정
   api.followup_list(uuid, uuid, text),   -- 0023: 대표 후속 연락 목록(대표만)
-  api.followup_done(uuid, uuid, text, uuid)
+  api.followup_done(uuid, uuid, text, uuid),
+  api.ai_budget_daily_limit_set(uuid, uuid, text, int, text),   -- 0025: AI 일 한도(대표만)
+  api.ai_budget_guard_get(uuid, uuid, text),   -- 0025: 오늘 사용액·초과 잠금 조회
+  api.ai_budget_overage_resolve(uuid, uuid, text, text)   -- 0025: 초과 잠금 해제(대표만)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
@@ -148,7 +151,7 @@ grant execute on function core.ad_account_day(date), core.ad_account_total(), co
 grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb), api.ad_monitor_begin(uuid) to app_ad_monitor;  -- 0022: 중복 실행 방지
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
-grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint) to app_ai;
+grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint), api.ai_budget_hold_keyed(int, text, text) to app_ai;   -- 0025: 멱등 예약
 grant execute on function api.ad_funnel_full(uuid, uuid, text, date, date) to app_staff;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.

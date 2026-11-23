@@ -35,7 +35,12 @@ export class ModelNotCalledError extends Error {}
 
 /** 사용료 예약 → 호출 → 확정(실제 비용)/취소(호출 안 함). 정산이 오지 않은 예약은 DB가 예약 비용 전액으로 센다. */
 export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void> };
-export type AiBudget = { reserve(costKrw: number): Promise<Reservation | null> };
+/** 요청별 멱등성(0025): 같은 key·같은 hash 재시도는 새 예약 없이 거부(null), 같은 key·다른 hash도 거부(충돌). AI는 호출되지 않는다 */
+export type BudgetRequest = { readonly key: string; readonly hash: string };
+export const REQUEST_KEY = /^[A-Za-z0-9-]{16,64}$/;
+const REQUEST_HASH = /^[0-9a-f]{64}$/;
+const validReq = (r: BudgetRequest | undefined): r is BudgetRequest => !!r && typeof r.key === 'string' && REQUEST_KEY.test(r.key) && typeof r.hash === 'string' && REQUEST_HASH.test(r.hash);
+export type AiBudget = { reserve(costKrw: number, req?: BudgetRequest): Promise<Reservation | null> };
 const NOOP: Reservation = Object.freeze({ async confirm() {}, async cancel() {} });
 
 /** 시험·로컬용 메모리 집계(프로세스 재시작 시 0). 운영 경로는 createDbAiBudget을 쓴다. */
@@ -43,12 +48,16 @@ export function createAiBudget(env: Record<string, string | undefined>): AiBudge
   const raw = Number(env.CONSULT_AI_MONTHLY_BUDGET_KRW ?? '0');
   const limit = Number.isSafeInteger(raw) && raw > 0 ? raw : 0;
   let used = 0;
+  const seen = new Set<string>();
   return {
-    async reserve(cost) {
+    async reserve(cost, req) {
       if (!Number.isSafeInteger(cost) || cost < 0) return null;
+      if (req !== undefined && !validReq(req)) return null;
       if (cost === 0) return NOOP;
+      if (req && seen.has(req.key)) return null; // 재시도·충돌: 새 예약 없음
       if (used + cost > limit) return null;
       used += cost;
+      if (req) seen.add(req.key);
       let done = false;
       const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
       return { async confirm(a) { settle(Math.max(0, Math.min(1000, Math.trunc(a)))); }, async cancel() { settle(0); } };
@@ -56,16 +65,19 @@ export function createAiBudget(env: Record<string, string | undefined>): AiBudge
   };
 }
 
-/** DB 집계: api.ai_budget_hold/confirm/release가 월 한도(core.ai_budget_config, 기본 0원)와 추가 전용 원장으로 판정한다. 어떤 오류든 예약 거부, 정산 오류는 삼킨다(미정산 = 예약 비용 전액). */
+/** DB 집계: api.ai_budget_hold_keyed(0025)/confirm/release가 월·일 한도(core.ai_budget_config, 기본 0원)와 추가 전용 원장으로 판정한다. 어떤 오류든 예약 거부, 정산 오류는 삼킨다(미정산 = 예약 비용 전액). */
 export type RunAi = <T>(fn: (tx: (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>) => Promise<T>) => Promise<T>;
 export function createDbAiBudget(run: RunAi): AiBudget {
   return {
-    async reserve(cost) {
+    async reserve(cost, req) {
       if (!Number.isSafeInteger(cost) || cost < 0) return null;
+      if (req !== undefined && !validReq(req)) return null;
       if (cost === 0) return NOOP;
       let id: unknown;
       try {
-        const rows = (await run(async (tx) => tx`select api.ai_budget_hold(${cost}::int)::text as id`)) as readonly { id?: unknown }[];
+        // 0025: 월·일 한도·초과 잠금·멱등성 키를 DB가 한 잠금 안에서 판정. reserved가 아니면 hold_id는 null(= 호출 금지)
+        const key = req ? req.key : null, hash = req ? req.hash : null;
+        const rows = (await run(async (tx) => tx`select hold_id::text as id from api.ai_budget_hold_keyed(${cost}::int, ${key}::text, ${hash}::text)`)) as readonly { id?: unknown }[];
         id = rows[0]?.id;
       } catch { return null; }
       if (typeof id !== 'string' || !/^\d{1,18}$/.test(id)) return null;

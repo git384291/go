@@ -76,9 +76,10 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   const hasCampaign = 'campaign' in b;
   const hasSession = 'session' in b;
   const hasBot = 'turnstileToken' in b;
+  const hasReq = 'requestId' in b; // 0025 멱등성 키(선택, 형식 검사)
   if (hasSession && hasBot) return json(400, { ok: false, code: 'INVALID_INPUT' }); // 봇 확인 토큰은 새 세션 요청에서만
-  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : [])].sort().join(',');
-  if (Object.keys(b).sort().join(',') !== allowed || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode) || (hasCampaign && !ok(b.campaign))) return json(400, { ok: false, code: 'INVALID_INPUT' });
+  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : []), ...(hasReq ? ['requestId'] : [])].sort().join(',');
+  if (Object.keys(b).sort().join(',') !== allowed || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode) || (hasCampaign && !ok(b.campaign)) || (hasReq && (typeof b.requestId !== 'string' || !/^[A-Za-z0-9-]{16,64}$/.test(b.requestId)))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   // 세션: 있으면 서명 검증, 없으면 새로 발급(IP별 횟수 제한). 브라우저가 만든 id는 받지 않는다
   let sessionId = '';
   let token = '';
@@ -111,7 +112,7 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     const chatOk = await d.rateLimit('chat').catch(() => null);
     if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
     if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
-    const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode }, d.now());
+    const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, ...(hasReq ? { requestKey: b.requestId as string } : {}) }, d.now());
     if (!r.ok) return json(400, r);
     if (d.recordConsult) { try { await d.recordConsult(sessionId, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }
     return json(200, { ...r, session: token });

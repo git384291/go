@@ -75,7 +75,7 @@ async function scenario(confirmed) {
     check(tag + 'FW8 확정 fixture: 고지 제목·확인 체크박스가 표시되고 접수 가능 표시', boxes === 1 && gateText.includes('시험 고지') && /접수:/.test(state) && !/접수 대기/.test(state), `boxes=${boxes}`);
   }
   const sent = JSON.stringify(seen.api);
-  check(tag + 'FW5 채팅 서버로 가는 요청에는 고객의 신청서 답(주소·이메일 등)이 없다(상품 고정 코드+상담 글만, 새 세션엔 1회용 봇 확인 토큰)', !/시험로|example\.com|ack12m|installAddress|email/.test(sent) && seen.api.every((b) => Object.keys(b).every((k) => ['carrier', 'productId', 'regionCode', 'message', 'session', 'campaign', 'turnstileToken'].includes(k))), sent.slice(0, 120));
+  check(tag + 'FW5 채팅 서버로 가는 요청에는 고객의 신청서 답(주소·이메일 등)이 없다(상품 고정 코드+상담 글만, 새 세션엔 1회용 봇 확인 토큰)', !/시험로|example\.com|ack12m|installAddress|email/.test(sent) && seen.api.every((b) => Object.keys(b).every((k) => ['carrier', 'productId', 'regionCode', 'message', 'session', 'campaign', 'turnstileToken', 'requestId'].includes(k))), sent.slice(0, 120));
   const all = await page.locator('[role=log]').textContent();
   check(tag + 'FW6 대화에서 주민번호·자동이체·사은품계좌를 묻는 질문은 없다(안내 문구에서 묻지 않는다고만 밝힘)', !/(주민번호|자동이체|사은품계좌|계좌).{0,12}(알려|입력해|말씀해)/.test(all) && all.includes('묻지 않습니다'));
   check(tag + 'FW7 외부 요청 0·페이지 오류 0', seen.external.length === 0 && seen.errors.length === 0, `${seen.external.join(',')} ${seen.errors.join(',')}`);

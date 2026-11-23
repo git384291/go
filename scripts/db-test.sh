@@ -26,7 +26,7 @@ if [ ! -s "$DATA/PG_VERSION" ]; then
   as_pg "mkdir -p '$DATA' && '$PG_BIN/initdb' -D '$DATA' -U postgres --auth=trust --encoding=UTF8 --locale=$PG_LOCALE >/dev/null"
 fi
 if ! as_pg "'$PG_BIN/pg_ctl' -D '$DATA' status" >/dev/null 2>&1; then
-  as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PORT -k $SOCK -c listen_addresses=''\" -l '$DATA/server.log' -w start" >/dev/null
+  as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PORT -k $SOCK -c listen_addresses='' -c max_connections=200\" -l '$DATA/server.log' -w start" >/dev/null
 fi
 
 PSQL=(psql -X -q -h "$SOCK" -p "$PORT" -U postgres -v ON_ERROR_STOP=1)
@@ -71,6 +71,7 @@ run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
+run db/tests/99_ai_budget_hard_cap.sql >/dev/null   # AI 비용 하드 한도: 초과 정산 잠금·멱등성 키·일일 한도(0025, PM 11/24)
 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
@@ -467,6 +468,41 @@ else
   echo "FAIL | K5 bad=$bad final=$final seen=$seen" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
 
+echo "== concurrency: AI 비용 예약 100건 동시(0025 월·일 한도, 같은 키 100회)"
+AIQ() { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_ai" -c "$1" -c "commit" 2>&1; }
+AIU="select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0) from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id"
+ai_run() { # $1=라벨 접두, $2=키 함수(SQL, $i 치환) → 결과를 ai-conc-*.out에
+  rm -f "$LOG_DIR"/ai-conc-*; local pids=()
+  for i in $(seq 1 100); do ( AIQ "select coalesce(h.hold_id::text, '-') || ':' || h.outcome from api.ai_budget_hold_keyed(30, $(printf "$2" "$i"), $(printf "$3" "$i")) h" > "$LOG_DIR/ai-conc-$i.out" ) & pids+=($!); done
+  for p in "${pids[@]}"; do wait "$p" || true; done
+}
+# (1) 서로 다른 키 100건, 월 한도 남은 1,000원 → 30원 × 33건까지만
+mu=$("${PSQL[@]}" -d "$DB" -At -c "$AIU where u.month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')")
+"${PSQL[@]}" -d "$DB" -q -c "update core.ai_budget_config set monthly_limit_krw = $mu + 1000, daily_limit_krw = null where singleton"
+ai_run x "'aicm-%012d'" "encode(sha256(convert_to('aicm-%d', 'UTF8')), 'hex')"
+ok1=$(cat "$LOG_DIR"/ai-conc-*.out | grep -c ':reserved$' || true); lim1=$(cat "$LOG_DIR"/ai-conc-*.out | grep -c ':monthly_limit$' || true)
+mu1=$("${PSQL[@]}" -d "$DB" -At -c "$AIU where u.month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')")
+[ "$ok1" = 33 ] && [ "$lim1" = 67 ] && [ $((mu1 - mu)) = 990 ] || { echo "FAIL | C10 AI 동시 100건(월) 승인=$ok1 거부=$lim1 증가=$((mu1 - mu))" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | C10 AI 예약 동시 100건(월 한도 남은 1,000원, 30원씩) → 승인 33·거부 67, 증가 990원(초과 승인 0건)" >> "$LOG_DIR/db-test.log"
+# (2) 서로 다른 키 100건, 일 한도 남은 300원(월 한도는 넉넉) → 10건까지만
+du=$("${PSQL[@]}" -d "$DB" -At -c "$AIU where u.day = (now() at time zone 'Asia/Seoul')::date")
+mu=$("${PSQL[@]}" -d "$DB" -At -c "$AIU where u.month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')")
+"${PSQL[@]}" -d "$DB" -q -c "update core.ai_budget_config set monthly_limit_krw = $mu + 100000, daily_limit_krw = $du + 300 where singleton"
+ai_run x "'aicd-%012d'" "encode(sha256(convert_to('aicd-%d', 'UTF8')), 'hex')"
+ok2=$(cat "$LOG_DIR"/ai-conc-*.out | grep -c ':reserved$' || true); lim2=$(cat "$LOG_DIR"/ai-conc-*.out | grep -c ':daily_limit$' || true)
+du2=$("${PSQL[@]}" -d "$DB" -At -c "$AIU where u.day = (now() at time zone 'Asia/Seoul')::date")
+[ "$ok2" = 10 ] && [ "$lim2" = 90 ] && [ $((du2 - du)) = 300 ] || { echo "FAIL | C11 AI 동시 100건(일) 승인=$ok2 거부=$lim2 증가=$((du2 - du))" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | C11 AI 예약 동시 100건(일 한도 남은 300원) → 승인 10·거부 90, 일 증가 300원(초과 승인 0건)" >> "$LOG_DIR/db-test.log"
+# (3) 같은 키·같은 내용 100회 동시 재시도 → 예약 1건, 나머지 replay
+"${PSQL[@]}" -d "$DB" -q -c "update core.ai_budget_config set daily_limit_krw = null where singleton"
+ai_run x "'aicsame-%.0s000000000001'" "encode(sha256(convert_to('same%.0s', 'UTF8')), 'hex')"
+ok3=$(cat "$LOG_DIR"/ai-conc-*.out | grep -c ':reserved$' || true); rp3=$(cat "$LOG_DIR"/ai-conc-*.out | grep -c '^-:replay$' || true)
+rows3=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.ai_usage_ledger where request_key = 'aicsame-000000000001'")
+[ "$ok3" = 1 ] && [ "$rp3" = 99 ] && [ "$rows3" = 1 ] || { echo "FAIL | C12 같은 키 100회 예약=$ok3 replay=$rp3 원장=$rows3" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | C12 같은 요청 100회 동시 재시도 → 예약 1건·replay 99건, 원장 1행(중복 예약 0건)" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DB" -q -c "update core.ai_budget_config set monthly_limit_krw = 0, daily_limit_krw = null where singleton"
+rm -f "$LOG_DIR"/ai-conc-*
+
 echo "== migration drill: 0007·0008 적용(기존 데이터 보존) → 롤백(고지·정책 보관) → 복구 → 재적용 (별도 가상 DB)"
 DRILL=fideon_drill
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" -c "create database $DRILL" >/dev/null
@@ -685,6 +721,16 @@ D -f db/migrations/0024_consult_rate.sql >/dev/null
 back24=$(D -At -c "select to_regprocedure('api.consult_rate_hit(text,text)') is not null")
 [ "$gone24" = t ] && [ "$back24" = t ] || { echo "FAIL | M24 0024 롤백 gone=$gone24 재적용=$back24" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M24 상담 공용 횟수 제한 0024 롤백: 함수 제거·집계 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0025 AI 비용 하드 한도: 적용(기존 원장 날짜 채움) → 롤백(새 함수 제거, 예약·확정 0012 정의로) → 재적용
+D -q -c "insert into core.ai_usage_ledger (month, cost_krw, created_at) values ('2026-11', 3, '2026-11-30 23:30:00+09')"
+D -f db/migrations/0025_ai_budget_hard_cap.sql >/dev/null
+day25=$(D -At -c "select day from core.ai_usage_ledger where created_at = '2026-11-30 23:30:00+09'")
+D -f db/rollback/0025_down.sql >/dev/null
+gone25=$(D -At -c "select (to_regprocedure('api.ai_budget_hold_keyed(int,text,text)') is null and to_regprocedure('api.ai_budget_hold(int)') is not null and to_regclass('core.ai_usage_overages') is not null)")
+D -f db/migrations/0025_ai_budget_hard_cap.sql >/dev/null 2>&1 && re25=ok || re25=fail
+back25=$(D -At -c "select to_regprocedure('api.ai_budget_hold_keyed(int,text,text)') is not null")
+[ "$day25" = 2026-11-30 ] && [ "$gone25" = t ] && [ "$re25" = ok ] && [ "$back25" = t ] || { echo "FAIL | M25 0025 날짜=$day25 롤백=$gone25 재적용=$re25/$back25" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M25 AI 하드 한도 0025: 기존 원장 날짜 서울 기준 채움(11/30 23:30 → 2026-11-30), 롤백 시 새 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

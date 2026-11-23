@@ -1,10 +1,12 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { answerQuote, guardAiReply } from './quoteAnswer';
 import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
 import { isSafeModelInput, prepareUserText, replyHasPii } from './piiBoundary';
 import { SYSTEM_PROMPT } from './chatModel';
 import { ModelNotCalledError } from './chatModel';
-import type { AiBudget, CallMeter, ChatModel } from './chatModel';
+import type { AiBudget, BudgetRequest, CallMeter, ChatModel } from './chatModel';
+import { REQUEST_KEY } from './chatModel';
 
 /**
  * AI 24시간 상담 답변(PM 11/21 ②). 요금·사은품은 승인된 정책 견적 문장에서만 나온다.
@@ -20,7 +22,13 @@ export type ChatDeps = {
   /** 시험용 마스킹 주입(기본 maskPii). 운영 경로는 주입하지 않는다 */
   readonly mask?: (t: string) => string;
 };
-export type ChatInput = { readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string };
+/** requestKey(선택): 브라우저가 메시지마다 만든 멱등성 키. 같은 키 재전송은 새 비용 예약·AI 호출 없이 승인 안내문으로 닫는다(0025) */
+export type ChatInput = { readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string; readonly requestKey?: string };
+/** 멱등성 키에 묶는 요청 내용 지문(서버 계산). 같은 키에 다른 내용이면 DB가 충돌로 거부한다.
+ *  고객 원문이 아니라 개인정보를 가린 글(prepareUserText 결과)로만 만든다 — 전화번호 등 원문의 해시를 DB에 남기지 않는다(P0 경계) */
+export function requestFingerprint(maskedText: string, input: Pick<ChatInput, 'carrier' | 'productId' | 'regionCode'>): string {
+  return createHash('sha256').update(JSON.stringify([maskedText, input.carrier, input.productId, input.regionCode])).digest('hex');
+}
 export type ChatReply =
   | { readonly ok: false; readonly code: 'INVALID_INPUT' }
   | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' | 'callback'; readonly callbackPrompt?: string };
@@ -79,7 +87,9 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   if (!prepared.ok) return fallback();
   const payload = { system: SYSTEM_PROMPT, user: prepared.text, approved: approved.text };
   if (!isSafeModelInput(payload)) return fallback();
-  const hold = await deps.budget.reserve(model.costPerCallKrw);
+  const req: BudgetRequest | undefined = typeof input.requestKey === 'string' && REQUEST_KEY.test(input.requestKey)
+    ? { key: input.requestKey, hash: requestFingerprint(prepared.text, input) } : undefined;
+  const hold = await deps.budget.reserve(model.costPerCallKrw, req);
   if (!hold) return fallback();
   const ctl = new AbortController();
   const meter: CallMeter = { sent: 0 };
