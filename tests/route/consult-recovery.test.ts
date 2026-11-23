@@ -1,5 +1,6 @@
 // 상담 AI 장애·타임아웃 자동 복구 시험(PM 11/24) — 가짜 모델·가짜 transport만. 실제 유료 API 호출 0회.
 import { test } from 'node:test';
+import { grantBudgetPermit } from '../../src/server/consult/chatModel';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { answerChat, chatTimeoutMs } from '../../src/server/consult/chatAnswer';
@@ -9,6 +10,7 @@ import { createInflightGuard, createLimiter, handleChat } from '../../src/server
 import { createOpenAiChatModel, type OpenAiChatModelConfig } from '../../src/server/consult/openAiChatModel';
 import { isRetryableModelError, ModelCallError, RECOVERY_LIMITS, recoveringModelFor, withRecovery, type ModelFailureKind } from '../../src/server/consult/modelRecovery';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
+const permit = () => { const m = { sent: 0 }; grantBudgetPermit(m); return m; }; // 0025: 비용 게이트 허가(시험용)
 
 const NOW = new Date('2026-11-23T12:00:00+09:00');
 const K = <T,>(value: T) => ({ known: true as const, value });
@@ -60,10 +62,10 @@ test('RC1 재시도 가능 분류: timeout·네트워크·429·5xx만, 4xx·응�
 });
 
 test('RC2 어댑터 오류 분류(가짜 transport): 429·5xx·네트워크·timeout·4xx·형식 이상·거절, 키·본문 반사 없음', async () => {
-  const cfg = (t: BodyTransport, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192, ...over });
+  const cfg = (t: BodyTransport, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192, prices: [{ model: 'test-model', currency: 'KRW', inputKrwPerMTok: 100, outputKrwPerMTok: 400 }], maxInputTokens: 4000, ...over });
   const resp = (status: number, text = '{}'): BodyTransport => async () => ({ status, body: new Response(text).body });
   const kindOf = async (t: BodyTransport) => {
-    const e = await createOpenAiChatModel(cfg(t)).generate(IN, sig()).catch((x: unknown) => x);
+    const e = await createOpenAiChatModel(cfg(t)).generate(IN, sig(), permit()).catch((x: unknown) => x);
     assert.ok(e instanceof ModelCallError, String(e));
     assert.ok(!(e as Error).message.includes(KEY) && !(e as Error).message.includes('secret-body'));
     return [(e as ModelCallError).kind, (e as ModelCallError).status ?? 0, (e as Error).message];
@@ -220,7 +222,7 @@ test('RC9 계속 실패(429·5xx·네트워크·timeout)해도 고객에게는 �
     };
     return { t, calls };
   };
-  const model = (t: BodyTransport) => withRecovery(createOpenAiChatModel({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192 }), { ...fast, sleep: async () => {} });
+  const model = (t: BodyTransport) => withRecovery(createOpenAiChatModel({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 1000, maxResponseBytes: 8192, prices: [{ model: 'test-model', currency: 'KRW', inputKrwPerMTok: 100, outputKrwPerMTok: 400 }], maxInputTokens: 4000 }), { ...fast, sleep: async () => {} });
   for (const [name, seq] of [['429', ['429']], ['5xx', ['500']], ['network', ['net']], ['timeout', ['hang']]] as const) {
     const x = T([...seq]);
     const r = await answerChat(deps({ model: model(x.t), budget: createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' }), timeoutMs: 5000 }), input(), NOW);

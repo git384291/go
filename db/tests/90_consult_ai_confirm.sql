@@ -45,7 +45,7 @@ select test.expect_error(test.adcall('owner', 'ad_funnel_full', $$current_date, 
 reset role;
 
 -- 정산 시험: 월 한도 100원
-update core.ai_budget_config set monthly_limit_krw = (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger where month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')) + 100 where singleton;
+update core.ai_budget_config set monthly_limit_krw = (select coalesce(sum(cost_krw), 0) from core.ai_usage_ledger where month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')) + 100, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000 where singleton;  -- 0025
 create temp table t_base as select (select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0) from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id) as used;
 create function test.used() returns text language sql security definer set search_path = pg_catalog as $$
   select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0)::text
@@ -53,9 +53,9 @@ create function test.used() returns text language sql security definer set searc
 create function test.lastid(p_cost int) returns bigint language sql security definer set search_path = pg_catalog as $$ select max(id) from core.ai_usage_ledger where cost_krw = p_cost $$;
 grant execute on function test.lastid(int) to app_ai;
 set role app_ai;
-select test.expect_eq($$select (api.ai_budget_hold(60) is not null)::text$$, 'true', 'U9 예약 60원(한도 100원 안)');
-select test.expect_eq($$select (api.ai_budget_hold(60) is null)::text$$, 'true', 'U9b 두 번째 60원은 한도 초과로 거부(null)');
-select test.expect_eq($$select (api.ai_budget_hold(0) is null and api.ai_budget_hold(1001) is null and api.ai_budget_hold(null) is null)::text$$, 'true', 'U9c 범위 밖 비용은 null');
+select test.expect_eq($$select (api.ai_budget_hold(60, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'true', 'U9 예약 60원(한도 100원 안)');
+select test.expect_eq($$select (api.ai_budget_hold(60, gen_random_uuid()::text, repeat('a', 64)) is null)::text$$, 'true', 'U9b 두 번째 60원은 한도 초과로 거부(null)');
+select test.expect_eq($$select (api.ai_budget_hold(0, gen_random_uuid()::text, repeat('a', 64)) is null and api.ai_budget_hold(1001, gen_random_uuid()::text, repeat('a', 64)) is null and api.ai_budget_hold(null, gen_random_uuid()::text, repeat('a', 64)) is null)::text$$, 'true', 'U9c 범위 밖 비용은 null');
 reset role;
 select test.expect_eq($$select (select count(*) from core.ai_usage_ledger where cost_krw = 60 and id not in (select reservation_id from core.ai_usage_closures))::text$$, '1', 'U10 미정산 예약 1건 = 전액 계산');
 -- 확정(실제 비용 20원) → 사용액이 줄어 다시 예약 가능
@@ -63,7 +63,7 @@ set role app_ai;
 select test.expect_eq($$select api.ai_budget_confirm(test.lastid(60), 20)::text$$, 'true', 'U11 확정(실제 20원)');
 select test.expect_eq($$select api.ai_budget_confirm(test.lastid(60), 5)::text$$, 'false', 'U11b 같은 예약 재정산 불가');
 select test.expect_eq($$select api.ai_budget_release(test.lastid(60))::text$$, 'false', 'U11c 확정된 예약은 취소 불가');
-select test.expect_eq($$select (api.ai_budget_hold(70) is not null)::text$$, 'true', 'U12 확정으로 줄어든 사용액 덕에 70원 예약 가능');
+select test.expect_eq($$select (api.ai_budget_hold(70, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'true', 'U12 확정으로 줄어든 사용액 덕에 70원 예약 가능');
 -- 취소 → 0원 처리
 select test.expect_eq($$select api.ai_budget_release(test.lastid(70))::text$$, 'true', 'U13 취소');
 select test.expect_eq($$select api.ai_budget_release(test.lastid(70))::text$$, 'false', 'U13b 같은 예약 재취소 불가');
@@ -79,6 +79,6 @@ set role app_public;
 select test.expect_error($$select api.ai_budget_confirm(1, 1)$$, '42501', 'U18 app_public은 정산 실행 불가');
 reset role;
 set role app_staff;
-select test.expect_error($$select api.ai_budget_hold(1)$$, '42501', 'U18b app_staff는 예약 실행 불가');
+select test.expect_error($$select api.ai_budget_hold(1, gen_random_uuid()::text, repeat('a', 64))$$, '42501', 'U18b app_staff는 예약 실행 불가');
 reset role;
 update core.ai_budget_config set monthly_limit_krw = 0 where singleton;

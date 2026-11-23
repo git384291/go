@@ -121,6 +121,9 @@ grant execute on function
   api.ad_alert_list(uuid, uuid, text, int),
   api.ai_budget_limit_get(uuid, uuid, text),
   api.ai_budget_limit_set(uuid, uuid, text, int, text),
+  api.ai_budget_limits_set(uuid, uuid, text, int, int, int, int, text),   -- 0025: 일·사용자 한도(대표만)
+  api.ai_budget_pause_set(uuid, uuid, text, boolean, text),   -- 0025: 긴급 차단(대표만)
+  api.ai_budget_adjust(uuid, uuid, text, bigint, int, text),   -- 0025: 불확실 정산 조정(대표만)
   api.policy_publish_get(uuid, uuid, text),
   api.policy_publish_set(uuid, uuid, text, boolean, text),
   api.notice_text_list(uuid, uuid, text),
@@ -148,7 +151,8 @@ grant execute on function core.ad_account_day(date), core.ad_account_total(), co
 grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb), api.ad_monitor_begin(uuid) to app_ad_monitor;  -- 0022: 중복 실행 방지
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
-grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint) to app_ai;
+grant execute on function api.ai_budget_hold(int, text, text), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint), api.ai_budget_uncertain(bigint) to app_ai;  -- 0025: 한도 4종·멱등 예약, 불확실 정산
+grant execute on function core.ai_spent(text, date, text) to fideon_api;  -- 0025: 사용액 계산 보조(api 함수 소유자만)
 grant execute on function api.ad_funnel_full(uuid, uuid, text, date, date) to app_staff;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.

@@ -1,5 +1,6 @@
 // 상담 AI 실제 모델 어댑터(준비 코드) 시험 — 가짜 transport만. 실제 API 호출 0회. 상담 경로 미연결 확인.
 import { test } from 'node:test';
+import { grantBudgetPermit } from '../../src/server/consult/chatModel';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildChatBody, createOpenAiChatModel, MAX_REPLY_CHARS, parseChatReply, type OpenAiChatModelConfig } from '../../src/server/consult/openAiChatModel';
@@ -7,6 +8,7 @@ import { createModel, ModelNotCalledError } from '../../src/server/consult/chatM
 import { answerChat } from '../../src/server/consult/chatAnswer';
 import { createAiBudget } from '../../src/server/consult/chatModel';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
+const permit = () => { const m = { sent: 0 }; grantBudgetPermit(m); return m; }; // 0025: 비용 게이트 허가(시험용)
 
 const KEY = 'sk-test-' + 'A'.repeat(30);
 const EP = 'https://model.example.test/v1/responses'; // 가짜 주소(실제 서비스 아님)
@@ -20,23 +22,23 @@ function fake(res: { status?: number; text?: string; throws?: boolean } = {}) {
   };
   return { t, calls };
 }
-const cfg = (t: BodyTransport | null, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, endpoint: EP, apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, ...over });
+const cfg = (t: BodyTransport | null, over: Partial<OpenAiChatModelConfig> = {}): OpenAiChatModelConfig => ({ transport: t, endpoint: EP, apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, prices: [{ model: 'test-model', currency: 'KRW', inputKrwPerMTok: 100, outputKrwPerMTok: 400 }], maxInputTokens: 4000, ...over });
 const IN = { system: 'SYS', user: '이름은 *** 요금이 궁금해요', approved: '월 11,111원' };
 const sig = () => new AbortController().signal;
 
 test('OC1 설정 누락·실행 허용 아님·잘못된 값: 전송 0회, ModelNotCalledError(예약 취소 대상)', async () => {
   for (const over of [{ executionAllowed: 'true' }, { executionAllowed: false }, { endpoint: null }, { endpoint: 'http://model.example.test/v1/responses' }, { endpoint: 'https://user:pw@model.example.test/x' }, { endpoint: 'https://model.example.test/x?k=1' }, { apiKey: 'short' }, { model: 'Bad Model' }, { costPerCallKrw: 0 }, { maxOutputTokens: 5000 }, { timeoutMs: 60000 }]) {
     const f = fake();
-    await assert.rejects(createOpenAiChatModel(cfg(f.t, over as never)).generate(IN, sig()), ModelNotCalledError, JSON.stringify(over));
+    await assert.rejects(createOpenAiChatModel(cfg(f.t, over as never)).generate(IN, sig(), permit()), ModelNotCalledError, JSON.stringify(over));
     assert.equal(f.calls.length, 0);
   }
   await assert.rejects(createOpenAiChatModel(null).generate(IN, sig()), ModelNotCalledError);
   const ac = new AbortController(); ac.abort();
-  const f = fake(); await assert.rejects(createOpenAiChatModel(cfg(f.t)).generate(IN, ac.signal), ModelNotCalledError); assert.equal(f.calls.length, 0);
+  const f = fake(); await assert.rejects(createOpenAiChatModel(cfg(f.t)).generate(IN, ac.signal, permit()), ModelNotCalledError); assert.equal(f.calls.length, 0);
 });
 test('OC2 요청 계약: 고정 URL·Bearer·store false·tools 없음·redirect error, 1회, 본문은 가린 글+승인 안내문만', async () => {
   const f = fake();
-  const out = await createOpenAiChatModel(cfg(f.t)).generate(IN, sig());
+  const out = await createOpenAiChatModel(cfg(f.t)).generate(IN, sig(), permit());
   assert.equal(out, '안녕하세요. 승인된 안내입니다.');
   assert.equal(f.calls.length, 1);
   const c = f.calls[0]!;
@@ -54,10 +56,10 @@ test('OC3 응답 불신: 거절·미완료·형식 이상·텍스트 2개·길�
   assert.throws(() => parseChatReply(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'a' }, { type: 'output_text', text: 'b' }] }] })), /BAD_RESPONSE/);
   assert.throws(() => parseChatReply(ok('가'.repeat(MAX_REPLY_CHARS + 1))), /BAD_RESPONSE/);
   for (const [r, re] of [[{ status: 500, text: 'secret ' + KEY }, /HTTP_ERROR/], [{ status: 429 }, /HTTP_RATE_LIMITED/], [{ throws: true }, /TRANSPORT_ERROR/]] as const) {
-    const e = await createOpenAiChatModel(cfg(fake(r).t)).generate(IN, sig()).catch((x: Error) => x);
+    const e = await createOpenAiChatModel(cfg(fake(r).t)).generate(IN, sig(), permit()).catch((x: Error) => x);
     assert.ok(e instanceof Error && re.test(e.message) && !e.message.includes(KEY), String(e));
   }
-  const big = await createOpenAiChatModel(cfg(fake({ text: 'x'.repeat(9000) }).t)).generate(IN, sig()).catch((x: Error) => x);
+  const big = await createOpenAiChatModel(cfg(fake({ text: 'x'.repeat(9000) }).t)).generate(IN, sig(), permit()).catch((x: Error) => x);
   assert.ok(big instanceof Error && /TOO_LARGE/.test(big.message));
 });
 test('OC4 상담 흐름에 넣어도 가드 유지: 승인 밖 금액을 말하면 승인 안내문으로 대체, 모델 오류는 안전 안내문', async () => {

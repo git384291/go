@@ -34,24 +34,55 @@ export function createModel(env: Record<string, string | undefined>): ChatModel 
 export class ModelNotCalledError extends Error {}
 
 /** 사용료 예약 → 호출 → 확정(실제 비용)/취소(호출 안 함). 정산이 오지 않은 예약은 DB가 예약 비용 전액으로 센다. */
-export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void> };
-export type AiBudget = { reserve(costKrw: number): Promise<Reservation | null> };
-const NOOP: Reservation = Object.freeze({ async confirm() {}, async cancel() {} });
+// - uncertain(): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 예약 전액으로 닫고 대표 조정 대기(0025). 없으면 확정으로 처리한다.
+export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(): Promise<void> };
+/** 예약 문맥(0025): 요청 ID(멱등, 같은 ID는 다시 예약하지 않음)와 사용자 키(서버 HMAC 64자리, 사용자별 일·월 한도) */
+export type ReserveContext = { readonly requestId: string; readonly scope: string };
+export const REQUEST_ID = /^[A-Za-z0-9-]{16,64}$/;
+export const SCOPE_KEY = /^[0-9a-f]{64}$/;
+export type AiBudget = { reserve(costKrw: number, ctx?: ReserveContext): Promise<Reservation | null> };
+const NOOP: Reservation = Object.freeze({ async confirm() {}, async cancel() {}, async uncertain() {} });
+
+/**
+ * 공통 비용 게이트 허가(P0 TEST-14). 유료 어댑터는 이 허가가 붙은 meter 없이는 전송하지 않는다(ModelNotCalledError).
+ * 허가는 예약이 성공한 직후에만 붙고, 답변이 끝나면 떼어 낸다 — 어댑터를 직접 부르면(예약 없이) 전송 0회.
+ * 허가를 붙이는 곳은 정적 시험이 목록으로 고정한다(chatAnswer·광고 생성 게이트).
+ */
+const permits = new WeakSet<CallMeter>();
+export function grantBudgetPermit(m: CallMeter): void { permits.add(m); }
+export function revokeBudgetPermit(m: CallMeter): void { permits.delete(m); }
+export function hasBudgetPermit(m: unknown): boolean { return typeof m === 'object' && m !== null && permits.has(m as CallMeter); }
+
+/** 원 단위 한도 문자열: 10진 정수(0~1,000,000)만. 0x10·1e3·공백·부호·소수는 무효(null) — 추측해 해석하지 않는다 */
+export function parseKrwLimit(v: string | undefined): number | null {
+  if (typeof v !== 'string' || !/^(0|[1-9][0-9]{0,6})$/.test(v)) return null;
+  const n = Number(v);
+  return n <= 1_000_000 ? n : null;
+}
+/** 설정 오류 기록(관리자 확인용). 값·키는 남기지 않고 변수 이름과 고정 코드만 */
+export type ConfigLog = (code: string, name: string) => void;
+const defaultConfigLog: ConfigLog = (code, name) => { console.error(`[ai-cost] ${code} ${name}`); };
 
 /** 시험·로컬용 메모리 집계(프로세스 재시작 시 0). 운영 경로는 createDbAiBudget을 쓴다. */
-export function createAiBudget(env: Record<string, string | undefined>): AiBudget {
-  const raw = Number(env.CONSULT_AI_MONTHLY_BUDGET_KRW ?? '0');
-  const limit = Number.isSafeInteger(raw) && raw > 0 ? raw : 0;
+export function createAiBudget(env: Record<string, string | undefined>, log: ConfigLog = defaultConfigLog): AiBudget {
+  const rawEnv = env.CONSULT_AI_MONTHLY_BUDGET_KRW;
+  const parsed = rawEnv === undefined ? 0 : parseKrwLimit(rawEnv);
+  if (parsed === null) log('CONFIG_INVALID', 'CONSULT_AI_MONTHLY_BUDGET_KRW'); // 무효 = 0원(호출 금지), 관리자 확인용 기록
+  const limit = parsed ?? 0;
   let used = 0;
+  const seen = new Set<string>();
   return {
-    async reserve(cost) {
+    async reserve(cost, ctx) {
       if (!Number.isSafeInteger(cost) || cost < 0) return null;
       if (cost === 0) return NOOP;
+      if (ctx && (!REQUEST_ID.test(ctx.requestId) || seen.has(ctx.requestId))) return null; // 같은 요청 ID 재예약 금지
       if (used + cost > limit) return null;
+      if (ctx) seen.add(ctx.requestId);
       used += cost;
       let done = false;
       const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
-      return { async confirm(a) { settle(Math.max(0, Math.min(1000, Math.trunc(a)))); }, async cancel() { settle(0); } };
+      // 확정은 1원 이상(호출이 나간 뒤 0원으로 지우지 못함, DB 0025와 같음). 0원은 취소(호출 안 함)뿐
+      return { async confirm(a) { settle(Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain() { settle(cost); } };
     },
   };
 }
@@ -60,12 +91,15 @@ export function createAiBudget(env: Record<string, string | undefined>): AiBudge
 export type RunAi = <T>(fn: (tx: (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>) => Promise<T>) => Promise<T>;
 export function createDbAiBudget(run: RunAi): AiBudget {
   return {
-    async reserve(cost) {
+    async reserve(cost, ctx) {
       if (!Number.isSafeInteger(cost) || cost < 0) return null;
       if (cost === 0) return NOOP;
+      // 0025: 요청 ID·사용자 키가 없거나 형식이 틀리면 DB가 거부한다(null). 여기서 지어내지 않는다
+      const req = ctx && REQUEST_ID.test(ctx.requestId) ? ctx.requestId : null;
+      const scope = ctx && SCOPE_KEY.test(ctx.scope) ? ctx.scope : null;
       let id: unknown;
       try {
-        const rows = (await run(async (tx) => tx`select api.ai_budget_hold(${cost}::int)::text as id`)) as readonly { id?: unknown }[];
+        const rows = (await run(async (tx) => tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text)::text as id`)) as readonly { id?: unknown }[];
         id = rows[0]?.id;
       } catch { return null; }
       if (typeof id !== 'string' || !/^\d{1,18}$/.test(id)) return null;
@@ -77,8 +111,9 @@ export function createDbAiBudget(run: RunAi): AiBudget {
         }
       };
       return {
-        confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(0, Math.min(1000, Math.trunc(actual)))}::int)`),
+        confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(actual) ? actual : cost)))}::int)`),
         cancel: () => settle((tx) => tx`select api.ai_budget_release(${id as string}::bigint)`),
+        uncertain: () => settle((tx) => tx`select api.ai_budget_uncertain(${id as string}::bigint)`),
       };
     },
   };

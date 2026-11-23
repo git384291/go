@@ -2,6 +2,8 @@ import 'server-only';
 import { answerChat } from './chatAnswer';
 import type { ChatDeps } from './chatAnswer';
 import { issueSession, verifySession } from './consultSession';
+import { REQUEST_ID, SCOPE_KEY } from './chatModel';
+import { randomUUID } from 'node:crypto';
 
 /**
  * POST /api/consult/chat 처리(주입형). 스위치(CONSULT_CHAT_ENABLED)·크기·형식·IP별 횟수 제한을 모델 호출 전에 모두 거른다.
@@ -56,6 +58,8 @@ export type HandlerDeps = {
   rateLimit: (kind: 'chat' | 'session') => Promise<boolean>;
   /** 처리 중 중복 요청 방어(없으면 프로세스 기본값) */
   inflight?: InflightGuard;
+  /** 0025: 사용자별 AI 비용 한도 키(서버 IP HMAC 64자리). 없거나 실패하면 DB 예약이 거부된다(호출 금지) */
+  budgetScope?: () => string;
 };
 
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
@@ -76,8 +80,10 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   const hasCampaign = 'campaign' in b;
   const hasSession = 'session' in b;
   const hasBot = 'turnstileToken' in b;
+  const hasReq = 'requestId' in b; // 0025: 선택. 같은 요청 ID 재전송은 다시 예약·호출하지 않는다
+  if (hasReq && (typeof b.requestId !== 'string' || !REQUEST_ID.test(b.requestId))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   if (hasSession && hasBot) return json(400, { ok: false, code: 'INVALID_INPUT' }); // 봇 확인 토큰은 새 세션 요청에서만
-  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : [])].sort().join(',');
+  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : []), ...(hasReq ? ['requestId'] : [])].sort().join(',');
   if (Object.keys(b).sort().join(',') !== allowed || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode) || (hasCampaign && !ok(b.campaign))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   // 세션: 있으면 서명 검증, 없으면 새로 발급(IP별 횟수 제한). 브라우저가 만든 id는 받지 않는다
   let sessionId = '';
@@ -111,7 +117,10 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     const chatOk = await d.rateLimit('chat').catch(() => null);
     if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
     if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
-    const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode }, d.now());
+    let scope = '';
+    try { scope = d.budgetScope ? d.budgetScope() : ''; } catch { scope = ''; }
+    const budgetCtx = SCOPE_KEY.test(scope) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope } : undefined;
+    const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, budgetCtx }, d.now());
     if (!r.ok) return json(400, r);
     if (d.recordConsult) { try { await d.recordConsult(sessionId, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }
     return json(200, { ...r, session: token });
