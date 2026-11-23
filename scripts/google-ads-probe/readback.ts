@@ -6,7 +6,7 @@
 // - 출력은 단계·불리언·HTTP 상태뿐. credential·토큰·고객 ID·캠페인 ID·오류 원문은 출력하지 않는다. 만든 PAUSED 캠페인은 테스트 계정에 남는다.
 import { randomUUID } from 'node:crypto';
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '../../src/server/advertising/boundedHttp';
-import { approvedRsaCreative, landingUrlFrom } from '../../src/server/advertising/googleAdsCreative';
+import { approvedKeywords, approvedRsaCreative, landingUrlFrom } from '../../src/server/advertising/googleAdsCreative';
 import { ACCOUNT_TIME_ZONE, createGoogleAdsPlatform, GOOGLE_ADS_DEFAULT_API_VERSION, GOOGLE_ADS_ENV_NAMES, googleAdsConfigFromEnv } from '../../src/server/advertising/googleAdsPlatform';
 import { PlatformError } from '../../src/server/advertising/platform';
 
@@ -25,7 +25,7 @@ export async function runReadback(env: Readonly<Record<string, string | undefine
   log({ step: 'env', ok: missing.length === 0 && armed, missing: [...missing], armed });
   if (missing.length > 0 || !armed) return 2;
   // 11/23 C: launch가 광고 그룹·반응형 검색광고(모두 PAUSED)까지 만들므로 검수 소재와 최종 URL(AD_LANDING_URL)이 필요하다
-  const cfg = { ...googleAdsConfigFromEnv(env, transport), initialStatus: 'PAUSED' as const, validateOnly: false, creative: approvedRsaCreative(), landingUrl: landingUrlFrom(env.AD_LANDING_URL) };
+  const cfg = { ...googleAdsConfigFromEnv(env, transport), initialStatus: 'PAUSED' as const, validateOnly: false, creative: approvedRsaCreative(), keywords: approvedKeywords(), landingUrl: landingUrlFrom(env.AD_LANDING_URL) };
   const platform = createGoogleAdsPlatform(cfg);
   if (!platform || !cfg.customerId) { log({ step: 'config', ok: false }); return 2; }
   const deadline = () => Date.now() + 15_000; // 요청 시간 제한은 실제 시계(종료일 계산용 now와 분리)

@@ -5,6 +5,7 @@
 // - 최종 URL은 서버 환경변수(AD_LANDING_URL)의 https 주소만, 추적 꼬리표는 utm_source=google·utm_medium=cpc·utm_campaign=<캠페인 키>(상담·접수 집계와 같은 키 형식).
 import { AD_TARGET_COPY } from '../../content/adTargetCopy';
 import { CAMPAIGN_KEY } from '../../content/attribution';
+import { AD_FORBIDDEN_CLAIMS } from '../../content/adDrafts';
 import { validateAdCopy } from './adGeneration';
 
 export const RSA_HEADLINE_MAX_WIDTH = 30;
@@ -71,3 +72,75 @@ export const adGroupAdCreatePayload = (adGroupResource: string, creative: RsaCre
     responsiveSearchAd: { headlines: creative.headlines.map((text) => ({ text })), descriptions: creative.descriptions.map((text) => ({ text })) },
   },
 });
+
+// ───── 검색 키워드(PM 11/24 1번 승인) — 순수 함수. 외부 호출·집행 없음 ─────
+// - 키워드는 새로 만들지 않는다: 검수된 고정 문안(adTargetCopy)의 검색어 후보 중 **승인 목록**에 있는 것만 쓴다. 목록 밖 문구·입력은 전부 거부(NOT_APPROVED).
+// - 매치 유형은 EXACT 하나뿐이다(BROAD·PHRASE 생성 코드 없음). 입찰가(CPC)는 정하지 않는다 — Keyword Planner 실데이터·PM 승인 전 확정 금지.
+// - 범위: 현재 운영 상품(인터넷+TV)만. 인터넷·TV 말이 없거나 예약 상품(휴대폰·유심·CCTV·집전화 등) 말이 들어가면 거부한다.
+// - 하나라도 거부되면 전체를 만들지 않는다(null). 비어 있어도 null(키워드 없는 광고는 만들지 않는다).
+export const KEYWORD_MAX_WIDTH = 80;
+export const KEYWORD_MAX_WORDS = 10;
+export const KEYWORDS_MAX = 20;
+export type AdKeyword = { readonly text: string; readonly matchType: 'EXACT' };
+export type KeywordSet = readonly AdKeyword[];
+export type KeywordRejection = 'SHAPE' | 'FORMAT' | 'OUT_OF_SCOPE' | 'PRODUCT_NOT_ACTIVE' | 'FORBIDDEN' | 'NOT_APPROVED' | 'DUPLICATE' | 'EMPTY' | 'TOO_MANY';
+
+const KEYWORD_FORMAT = /^[가-힣A-Za-z0-9]+(?: [가-힣A-Za-z0-9]+)*$/;
+const KEYWORD_SCOPE = /인터넷|tv|티비|iptv/i;
+/** 현재 비활성(reserved) 상품 말: 휴대폰·유심·CCTV·집전화·알뜰폰 등. 카탈로그 reserved 상품과 맞춘다 */
+export const KEYWORD_INACTIVE_PRODUCT_TERMS = Object.freeze(['휴대폰', '핸드폰', '스마트폰', '폰', '유심', 'usim', 'sim', 'cctv', '씨씨티비', '보안', '알뜰', '모바일', '전화', '5g', 'lte'] as const);
+
+const keywordKey = (t: string) => t.toLowerCase().replace(/\s+/g, '');
+
+/** 승인 목록(검수 문안의 검색어 후보). 같은 문구는 한 번만 */
+export function approvedKeywordTexts(): readonly string[] {
+  return Object.freeze([...new Set(Object.values(AD_TARGET_COPY).flatMap((x) => x.keywords))]);
+}
+
+/** 키워드 1개 검사. 통과하면 null, 아니면 거부 사유 */
+export function checkKeyword(text: unknown, approved: readonly string[]): KeywordRejection | null {
+  if (typeof text !== 'string') return 'SHAPE';
+  if (text !== text.normalize('NFC') || !KEYWORD_FORMAT.test(text) || googleTextWidth(text) > KEYWORD_MAX_WIDTH || text.split(' ').length > KEYWORD_MAX_WORDS) return 'FORMAT';
+  const low = text.toLowerCase();
+  if (KEYWORD_INACTIVE_PRODUCT_TERMS.some((t) => low.includes(t))) return 'PRODUCT_NOT_ACTIVE';
+  if (AD_FORBIDDEN_CLAIMS.some((b) => low.includes(b.toLowerCase()))) return 'FORBIDDEN';
+  if (!KEYWORD_SCOPE.test(text)) return 'OUT_OF_SCOPE';
+  if (!approved.includes(text)) return 'NOT_APPROVED';
+  return null;
+}
+
+/** 후보 목록 → 키워드 집합(전부 EXACT). 하나라도 거부·중복이면 null(만들지 않음). 비어 있어도 null */
+export function buildKeywordSet(candidates: readonly unknown[], approved: readonly string[] = approvedKeywordTexts()): KeywordSet | null {
+  return keywordSetOrReason(candidates, approved).set;
+}
+/** 시험·진단용: 거부 사유까지 돌려준다 */
+export function keywordSetOrReason(candidates: unknown, approved: readonly string[] = approvedKeywordTexts()): { set: KeywordSet | null; reason: KeywordRejection | null } {
+  if (!Array.isArray(candidates)) return { set: null, reason: 'SHAPE' };
+  if (candidates.length === 0) return { set: null, reason: 'EMPTY' };
+  if (candidates.length > KEYWORDS_MAX) return { set: null, reason: 'TOO_MANY' };
+  const seen = new Set<string>();
+  const out: AdKeyword[] = [];
+  for (const c of candidates) {
+    const r = checkKeyword(c, approved);
+    if (r) return { set: null, reason: r };
+    const k = keywordKey(c as string);
+    if (seen.has(k)) return { set: null, reason: 'DUPLICATE' };
+    seen.add(k);
+    out.push(Object.freeze({ text: c as string, matchType: 'EXACT' as const }));
+  }
+  return { set: Object.freeze(out), reason: null };
+}
+
+/** 기본 키워드: 승인 목록 전체(검수 문안의 검색어 후보 10개) */
+export const approvedKeywords = (): KeywordSet | null => buildKeywordSet(approvedKeywordTexts());
+
+/** 어댑터에 주입된 값이 승인된 EXACT 집합인지 다시 확인(호출자를 믿지 않는다) */
+export function isApprovedKeywordSet(x: unknown): x is KeywordSet {
+  if (!Array.isArray(x) || x.length === 0) return false;
+  if (!x.every((k) => typeof k === 'object' && k !== null && Object.keys(k).length === 2 && (k as AdKeyword).matchType === 'EXACT' && typeof (k as AdKeyword).text === 'string')) return false;
+  return buildKeywordSet((x as AdKeyword[]).map((k) => k.text)) !== null;
+}
+
+/** 키워드 생성 본문(항상 PAUSED·EXACT, 입찰가 없음) */
+export const adGroupCriterionCreatePayload = (adGroupResource: string, k: AdKeyword) =>
+  ({ adGroup: adGroupResource, status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } });
