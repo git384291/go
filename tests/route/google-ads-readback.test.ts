@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { candidateKeywords } from '../../src/server/advertising/googleAdsCreative';
 import { kstTomorrow, runReadback, type ReadbackLine } from '../../scripts/google-ads-probe/readback';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 
@@ -18,6 +19,8 @@ function fake(o: Over = {}) {
     if (url.endsWith('/token')) return { status: 200, body: body({ access_token: 'ya29.access-SECRET-token' }) };
     // 11/23 C: 광고 그룹·반응형 검색광고(PAUSED)와 상태 확인 조회
     if (url.endsWith('adGroups:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/adGroups/66' }] }) };
+    if (url.endsWith('adGroupCriteria:mutate')) return { status: 200, body: body({ results: candidateKeywords()!.map((_, i) => ({ resourceName: `customers/1234567890/adGroupCriteria/66~${200 + i}` })) }) };
+    if (url.endsWith('googleAds:search') && b.includes('FROM ad_group_criterion')) return { status: 200, body: body({ results: candidateKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) }) };
     if (url.endsWith('adGroupAds:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/adGroupAds/66~77' }] }) };
     if (url.endsWith('googleAds:search') && b.includes('FROM ad_group_ad')) return { status: 200, body: body({ results: [{ campaign: { status: 'PAUSED' }, adGroup: { status: 'PAUSED' }, adGroupAd: { status: 'PAUSED' } }] }) };
     if (url.endsWith('googleAds:search') && b.includes('FROM customer')) return { status: 200, body: body({ results: [{ customer: o.acct ?? ACCT }] }) };
@@ -51,9 +54,9 @@ test('RB3 정상: 예산 1,000원·PAUSED 캠페인·종료 KST 내일 23:59:59 
   assert.equal(create.operations[0].create.status, 'PAUSED');
   assert.equal(create.operations[0].create.endDateTime, '2026-11-23 23:59:59');
   assert.equal(JSON.parse(f.calls.find((c) => c.url.endsWith('campaignBudgets:mutate'))!.body).operations[0].create.amountMicros, '1000000000');
-  assert.ok(!mutates(f).some((c) => /keyword|criterion|asset|ENABLED/i.test(c.body)));
+  assert.ok(!mutates(f).some((c) => /asset|ENABLED|BROAD|PHRASE|cpcBid/i.test(c.body)));
   // 11/23 C: 예산·캠페인·광고 그룹·반응형 검색광고 생성(모두 PAUSED) + pause, 재시도 없음
-  assert.deepEqual(mutates(f).map((c) => c.url.replace(/^.*\//, '')), ['campaignBudgets:mutate', 'campaigns:mutate', 'adGroups:mutate', 'adGroupAds:mutate', 'campaigns:mutate']);
+  assert.deepEqual(mutates(f).map((c) => c.url.replace(/^.*\//, '')), ['campaignBudgets:mutate', 'campaigns:mutate', 'adGroups:mutate', 'adGroupCriteria:mutate', 'adGroupAds:mutate', 'campaigns:mutate']);
   const launch = r.lines.find((l) => l.step === 'launch')!;
   assert.deepEqual([launch.budgetReadBack, launch.endDateTimeReadBack], [true, true]);
   assert.equal(r.lines.at(-1)!.ok, true);
