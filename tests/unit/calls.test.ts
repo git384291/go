@@ -171,7 +171,7 @@ test('CA9 요약 비용: 한도 없으면 모델 호출 0, 작업 없으면 예�
   assert.deepEqual(h.log, ['hold:20', 'confirm:r1:0', 'complete:internet_tv:callback_requested']);
 });
 
-test('CA8 저장 실패 처리: 업로드 실패 → DB 호출 없음, DB 실패 → 올린 파일 즉시 삭제, 삭제도 실패 → ORPHAN 경로 보고', async () => {
+test('CA9 저장 실패 처리: 업로드 실패 → DB 호출 없음, DB 실패 → 올린 파일 즉시 삭제, 삭제도 실패 → ORPHAN 경로 보고', async () => {
   const base = { provider: 'mock', providerCallId: 'call-f001', direction: 'inbound' as const, customerPhone: '010-1234-5678',
     startedEpoch: 1_764_000_000, durationSec: 60, noticeVersion: 'rec-v1', audio: AUDIO, agentId: null };
   let dbCalls = 0;
