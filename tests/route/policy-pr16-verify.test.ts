@@ -133,29 +133,30 @@ test('V8 AI 답변의 금액이 승인 값과 다르면 막고(요금·설치비
 
 test('V9 매 호출 재조회: 새 버전 게시→새 금액, 게시 OFF→금액 없음, 조회 장애→이전 금액을 재사용하지 않고 닫힘', async () => {
   let calls = 0;
+  const n = (): number => calls; // assert.ok가 변수를 리터럴 타입으로 좁히지 않게 함수로 읽는다
   let rows: unknown[] = [base];
   let fail = false;
   const provider = dbPolicyProvider(async () => { calls += 1; if (fail) throw new Error('DB_DOWN'); return rows; });
   const a1 = await answerQuote(provider, req, NOW);
-  assert.ok(a1.text.includes('27,700원') && calls === 1);
+  assert.ok(a1.text.includes('27,700원') && n() === 1);
 
   rows = [rec({ version: 'r2', monthlyFee: K({ amountKrw: 29900, vat: 'included' as const }) })]; // 새 버전 승인·게시
   const a2 = await answerQuote(provider, req, NOW);
-  assert.ok(a2.text.includes('29,900원') && !a2.text.includes('27,700') && calls === 2);
+  assert.ok(a2.text.includes('29,900원') && !a2.text.includes('27,700') && n() === 2);
 
   rows = []; // 게시 스위치 OFF 또는 만료 → DB가 0건
   const a3 = await answerQuote(provider, req, NOW);
   assert.deepEqual({ kind: a3.kind, text: a3.text }, { kind: 'needs_review', text: NEEDS_REVIEW_GUIDANCE });
-  assert.ok(!MONEY.test(a3.text) && calls === 3);
+  assert.ok(!MONEY.test(a3.text) && n() === 3);
 
   rows = [base]; fail = true; // 조회 장애: 직전 성공 값이 남아 있어도 쓰지 않는다
   const a4 = await answerQuote(provider, req, NOW);
   assert.deepEqual({ kind: a4.kind, text: a4.text }, { kind: 'needs_review', text: NEEDS_REVIEW_GUIDANCE });
-  assert.ok(!MONEY.test(a4.text) && calls === 4);
+  assert.ok(!MONEY.test(a4.text) && n() === 4);
 
   fail = false; // 복구되면 즉시 다시 안내
   const a5 = await answerQuote(provider, req, NOW);
-  assert.ok(a5.text.includes('27,700원') && calls === 5);
+  assert.ok(a5.text.includes('27,700원') && n() === 5);
 });
 
 test('V10 정책을 읽는 모든 서버 경로에 캐시 계층이 없음(데이터 캐시·재검증·정적 라우트·모듈 전역 저장소 금지)', () => {
