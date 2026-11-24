@@ -8,7 +8,7 @@ import { createPiiCrypto } from '../../src/server/security/piiCrypto';
 const crypto = createPiiCrypto({ encKeys: { '1': Buffer.alloc(32, 1) }, currentVersion: '1', hmacKey: Buffer.alloc(32, 3), ipHashKey: Buffer.alloc(32, 4) });
 const notices = { version: 'privacy-test-v1', confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: ' 시험용 문구 ' }] };
 const base = { crypto, signingKey: { keyId: 1, secret: Buffer.alloc(32, 0x22) }, currentPrivacyVersion: 'privacy-test-v1', nowSeconds: 1_800_000_000, notices };
-const lead = { name: '테스트고객', phone: '010-0000-0001', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['n1'], noticeHashes: noticeHashes(notices), idempotencyKey: 'a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab' };
+const lead = { name: '테스트고객', phone: '010-0000-0001', interest: 'internet_tv', contactTime: '평일 저녁', consentCollection: true, marketingOptIn: false, privacyVersion: 'privacy-test-v1', noticeVersion: 'privacy-test-v1', noticeKeys: ['n1'], noticeHashes: noticeHashes(notices), idempotencyKey: 'lead-ip64-test-0001' };
 
 async function sentIpHash(clientIp: string): Promise<unknown> {
   const calls: { q: string; v: unknown[] }[] = [];
