@@ -19,4 +19,5 @@ c5a39236a73d26b48883efb11b226d7447bc9214:tests/route/ai-recovery-final.test.ts:g
 #   - 조치: 현재 파일은 낮은 엔트로피 값으로 교체(031010f). 첫 커밋의 탐지만 아래 지문으로 예외(이력 재작성·force push 없음)
 #   - 범위: 이 커밋·이 파일·이 규칙·이 줄에만 적용
 c96ec5661220eb49e5123e443c715647d9b314fe:tests/unit/lead-ip64.test.ts:generic-api-key:11
-031010f52adf6ea89feb4ce90caab7c9f1bda9b2:tests/unit/lead-ip64.test.ts:generic-api-key:11  # 교체 값도 오탐(사용자 승인 A, 11/24)
+# 아래 1줄: 교체 값도 오탐(사용자 승인 A, 11/24)
+031010f52adf6ea89feb4ce90caab7c9f1bda9b2:tests/unit/lead-ip64.test.ts:generic-api-key:11
