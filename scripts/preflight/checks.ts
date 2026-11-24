@@ -125,7 +125,7 @@ export function runChecks(env: Env, files: { layoutSource: string }): Check[] {
   add({ id: 'S6', area: '보안', name: '상담 세션 서명 키 CONSULT_SESSION_KEY', status: !has(env, 'CONSULT_SESSION_KEY') ? 'MISSING' : b64len(env.CONSULT_SESSION_KEY) >= 32 ? 'OK' : 'INVALID', note: !has(env, 'CONSULT_SESSION_KEY') ? '없음 — 없으면 AI 상담 경로가 닫힘' : b64len(env.CONSULT_SESSION_KEY) >= 32 ? 'base64 32바이트 이상(값 미표시)' : '형식 오류' });
 
   // 4-3. 관리자 데이터 출처 스위치 — 로컬 폐기 시험 DB 전용. 배포 환경에 있으면 안 된다(있어도 코드가 닫지만 제거해야 함)
-  for (const k of ['ADMIN_LEADS_SOURCE', 'ADMIN_POLICY_SOURCE', 'ADMIN_AD_SOURCE']) {
+  for (const k of ['ADMIN_LEADS_SOURCE', 'ADMIN_POLICY_SOURCE', 'ADMIN_AD_SOURCE', 'ADMIN_CRM_SOURCE']) {
     const v = (env[k] ?? '').trim();
     add({ id: `R:${k}`, area: '출처', name: `${k}(로컬 시험 DB 전용)`, status: v === 'db' ? 'POLICY' : 'OFF', note: v === 'db' ? '배포 환경에 db가 설정됨 — 제거. 지정된 로컬 폐기 시험 DB 밖에서는 서버가 503으로 닫지만 설정 자체를 두지 않음' : '미설정 또는 mock(정책대로)' });
   }

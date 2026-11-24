@@ -86,7 +86,7 @@ test('F9 Turnstile·보안 점검: 완비 환경 OK, 누락·형식 오류·시�
 
 test('F10 관리자 출처 스위치: db가 설정되면 정책 표시(제거 안내), 미설정은 OFF', () => {
   const off = runChecks({}, { layoutSource });
-  for (const k of ['ADMIN_LEADS_SOURCE', 'ADMIN_POLICY_SOURCE', 'ADMIN_AD_SOURCE']) assert.equal(byId(off, `R:${k}`).status, 'OFF');
+  for (const k of ['ADMIN_LEADS_SOURCE', 'ADMIN_POLICY_SOURCE', 'ADMIN_AD_SOURCE', 'ADMIN_CRM_SOURCE']) assert.equal(byId(off, `R:${k}`).status, 'OFF');
   const on = runChecks({ ADMIN_POLICY_SOURCE: 'db', ADMIN_AD_SOURCE: 'mock' }, { layoutSource });
   assert.deepEqual([byId(on, 'R:ADMIN_POLICY_SOURCE').status, byId(on, 'R:ADMIN_AD_SOURCE').status], ['POLICY', 'OFF']);
 });
