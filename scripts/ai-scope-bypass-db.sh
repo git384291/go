@@ -29,13 +29,24 @@ for i in $(seq 1 40); do as_role app_public "select api.consult_rate_hit('$IPH',
 eq "SB-D1 허용 5건" "$(cat "$TMP"/s* | grep -c '^true$')" 5
 eq "SB-D1 오류 0건" "$(cat "$TMP"/s* | grep -cvE '^(true|false)$')" 0
 
-# 0024 설계(보수적): IP 한도로 거부된 시도도 전체 한도 1회를 소비한다 — 기록만(잔여 위험: 한 IP가 전체 한도를 소진 가능)
-eq "SB-D1c 전체 집계는 시도 40건 모두 소비(0024 설계)" "$("${SU[@]}" -c "select hits from core.consult_rate where bucket = 'session:all'")" 40
+# 0030: IP 한도로 거부된 시도는 전체 집계를 소비하지 않는다
+eq "SB-D1c 전체 집계는 허용된 5건만(0030)" "$("${SU[@]}" -c "select hits from core.consult_rate where bucket = 'session:all'")" 5
 "${SU[@]}" -c "delete from core.consult_rate"
 echo "== SB-D2 서로 다른 IP 80건 동시 → 전체 1시간 60개"
 for i in $(seq 1 80); do as_role app_public "select api.consult_rate_hit('$(hex64 $((9000 + i)))', 'session')::text" > "$TMP/g$i" & done; wait
 eq "SB-D2 전체 허용 60건" "$(cat "$TMP"/g* | grep -c '^true$')" 60
 eq "SB-D2 오류 0건" "$(cat "$TMP"/g* | grep -cvE '^(true|false)$')" 0
+"${SU[@]}" -c "delete from core.consult_rate"
+
+echo "== SB-D5 정상 고객 과잉 차단 없음: 공격 IP 120건 + 정상 IP 55명 동시(다중 서버) → 정상 55명 전원 허용"
+"${SU[@]}" -c "delete from core.consult_rate"
+ATK=$(hex64 31337)
+for i in $(seq 1 120); do as_role app_public "select api.consult_rate_hit('$ATK', 'session')::text" > "$TMP/x$i" & done
+for i in $(seq 1 55); do as_role app_public "select api.consult_rate_hit('$(hex64 $((20000 + i)))', 'session')::text" > "$TMP/l$i" & done; wait
+eq "SB-D5 정상 55명 허용" "$(cat "$TMP"/l* | grep -c '^true$')" 55
+eq "SB-D5 공격 IP 허용 5건" "$(cat "$TMP"/x* | grep -c '^true$')" 5
+eq "SB-D5 전체 집계 60(상한 그대로)" "$("${SU[@]}" -c "select hits from core.consult_rate where bucket = 'session:all'")" 60
+eq "SB-D5 오류 0건" "$(cat "$TMP"/x* "$TMP"/l* | grep -cvE '^(true|false)$')" 0
 "${SU[@]}" -c "delete from core.consult_rate"
 
 echo "== SB-D3 같은 사용자 키(세션) 100건 동시, 서로 다른 연결 → 1건(0029)"
