@@ -70,6 +70,7 @@ run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
+run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0050, PM 11/25 ③)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 
@@ -698,6 +699,14 @@ D -f db/migrations/0023_lead_followups.sql >/dev/null
 back23=$(D -At -c "select to_regprocedure('api.followup_done(uuid,uuid,text,uuid)') is not null")
 [ "$gone23" = t ] && [ "$back23" = t ] || { echo "FAIL | M23 0023 롤백 gone=$gone23 재적용=$back23" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M23 대표 직접 연락 동의 0023 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0050 날짜별 재연락·수신 거부: 적용 → 롤백(함수 제거, 기록 보존) → 재적용
+D -f db/migrations/0050_recontact_schedule.sql >/dev/null
+D -f db/rollback/0050_down.sql >/dev/null
+gone50=$(D -At -c "select (to_regprocedure('api.recontact_schedule(uuid,uuid,text,uuid,date,text)') is null and to_regprocedure('api.marketing_opt_out(text,text,text)') is null and to_regclass('core.recontact_schedule') is not null)")
+D -f db/migrations/0050_recontact_schedule.sql >/dev/null
+back50=$(D -At -c "select to_regprocedure('api.recontact_sweep(uuid,uuid,text)') is not null")
+[ "$gone50" = t ] && [ "$back50" = t ] || { echo "FAIL | M50 0050 롤백 gone=$gone50 재적용=$back50" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M50 날짜별 재연락 0050 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0024 상담 공용 횟수 제한: 적용 → 롤백(함수 제거, 집계 보존) → 재적용
 D -f db/migrations/0024_consult_rate.sql >/dev/null
 D -f db/rollback/0024_down.sql >/dev/null

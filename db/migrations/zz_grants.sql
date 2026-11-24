@@ -80,7 +80,8 @@ grant execute on function
   security.assert_staff(uuid, uuid, text, text[]),
   security.verify_token(text, text, text[]),
   core.purge_customer_internal(uuid, uuid, text),
-  core.policy_terms_shape(jsonb)   -- 0008: terms 형태 검사(check 제약이 쓴다)
+  core.policy_terms_shape(jsonb),   -- 0008: terms 형태 검사(check 제약이 쓴다)
+  core.recontact_allowed(uuid, text)   -- 0050: 재연락 가능 판정(api 함수 소유자만 실행)
   to fideon_api;
 
 grant execute on function
@@ -92,7 +93,8 @@ grant execute on function
   api.application_save(text, text, text, text),  -- 0017: 서버 서명이 있어야 저장되는 암호화 신청서
   api.followup_request(text, text, text, text),  -- 0023: 서버 서명이 있어야 기록되는 대표 직접 연락 동의
   api.consult_rate_hit(text, text),  -- 0024: 상담 채팅 공용 횟수 제한(IP HMAC만)
-  api.application_amend(text, text, text, text, text, text)  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
+  api.application_amend(text, text, text, text, text, text),  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
+  api.marketing_opt_out(text, text, text)  -- 0050: 서버 서명이 있어야 기록되는 수신 거부
   to app_public;
 
 grant execute on function
@@ -140,7 +142,11 @@ grant execute on function
   api.application_amendments(uuid, uuid, text, uuid),   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
   api.ad_spend_request_window(uuid, uuid, text, text, int, text),   -- 0021: 집행 기간·날짜별 최대 청구액 판정
   api.followup_list(uuid, uuid, text),   -- 0023: 대표 후속 연락 목록(대표만)
-  api.followup_done(uuid, uuid, text, uuid)
+  api.followup_done(uuid, uuid, text, uuid),
+  api.recontact_schedule(uuid, uuid, text, uuid, date, text),   -- 0050: 날짜별 재연락 일정(대표만)
+  api.recontact_due(uuid, uuid, text),
+  api.recontact_close(uuid, uuid, text, bigint, text),
+  api.recontact_sweep(uuid, uuid, text)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
