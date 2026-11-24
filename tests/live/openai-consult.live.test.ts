@@ -58,6 +58,15 @@ test('LIVE0 진단: 실제 응답 시간·결과(시간 15초·출력 200/512토
   }
 });
 
+// 진단: 상담 경로(실제 프롬프트) 그대로 1회, 모델 오류는 코드만 기록(본문·키 미기록). 판정 없음
+test('LIVE0b 진단: 상담 경로 실제 프롬프트 오류 코드', { skip, timeout: 30_000 }, async () => {
+  const inner = model(KEY)!; const codes: string[] = []; const t0 = Date.now();
+  const spy = { ...inner, async generate(...a: Parameters<typeof inner.generate>) { try { const r = await inner.generate(...a); codes.push(`ok:${r.length}chars`); return r; } catch (e) { codes.push(`${(e as { kind?: string }).kind ?? 'error'}:${e instanceof Error ? e.message.slice(0, 40) : 'x'}`); throw e; } } };
+  const { ev } = await run(spy);
+  const line = `LIVE0b ms=${Date.now() - t0} codes=${codes.join(',')} ev=${ev.join(',')}`;
+  assert.ok(!line.includes(KEY)); console.log(line);
+});
+
 test('LIVE1 실제 호출 성공: 예약 1회 → 모델 답변 → usage 기준 확정(1원 이상·예약 이하), 실패 기록 없음, 키 비노출', { skip, timeout: 30_000 }, async () => {
   const { r, ev, log, out } = await run(model(KEY));
   assert.deepEqual(log, [], `실패 기록: ${JSON.stringify(log)}`);
