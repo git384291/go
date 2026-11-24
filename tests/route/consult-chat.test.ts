@@ -325,5 +325,5 @@ test('CH-F1 서버 측 봇 확인·DB 공용 한도: 새 세션은 봇 확인 �
   const route = readFileSync('src/app/api/consult/chat/route.ts', 'utf8');
   assert.match(route, /botCheck: \(token, from\) => verifyTurnstile\(token, from\)/);
   assert.match(route, /api\.consult_rate_hit\(\$\{h\}, \$\{kind\}\)/);
-  assert.match(route, /ipHash\(ip\)/);
+  assert.match(route, /ipHash\(rateLimitIpKey\(ip\)\)/);
 });
