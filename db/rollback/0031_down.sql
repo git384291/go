@@ -1,4 +1,4 @@
--- 0030 롤백: consult_rate_hit를 0024 본문(전체 → IP 순서)으로 되돌린다. 집계 행은 건드리지 않는다.
+-- 0031 롤백: consult_rate_hit를 0024 본문(전체 → IP 순서)으로 되돌린다. 집계 행은 건드리지 않는다.
 begin;
 
 create or replace function api.consult_rate_hit(p_ip_hash text, p_kind text)

@@ -18,11 +18,11 @@ select test.expect_eq($$select count(*) filter (where ok)::text || '/' || count(
 reset role;
 select test.expect_eq($$select hits::text from core.consult_rate where bucket = 'chat:all'$$, '120', 'CR9 전체 집계는 상한을 넘지 않음');
 delete from core.consult_rate;
--- 0030: IP 한도로 거부된 요청은 전체 집계를 소비하지 않는다(한 IP가 전체 한도를 소진해 정상 고객을 막지 못함)
+-- 0031: IP 한도로 거부된 요청은 전체 집계를 소비하지 않는다(한 IP가 전체 한도를 소진해 정상 고객을 막지 못함)
 set role app_public;
 select test.expect_eq($$select count(*) filter (where ok)::text || '/' || count(*) filter (where not ok)::text from (select api.consult_rate_hit(repeat('c3', 32), 'session') as ok from generate_series(1, 100)) x$$, '5/95', 'CR10 같은 IP 새 세션 100회 → 5회만 허용');
 reset role;
-select test.expect_eq($$select hits::text from core.consult_rate where bucket = 'session:all'$$, '5', 'CR11 IP 한도로 거부된 95회는 전체 집계 미소비(0030)');
+select test.expect_eq($$select hits::text from core.consult_rate where bucket = 'session:all'$$, '5', 'CR11 IP 한도로 거부된 95회는 전체 집계 미소비(0031)');
 set role app_public;
 select test.expect_eq($$select count(*) filter (where ok)::text from (select api.consult_rate_hit(lpad(to_hex(g), 64, '0'), 'session') as ok from generate_series(1, 55) g) x$$, '55', 'CR12 그 뒤 다른 정상 IP 55명 모두 새 세션 허용(전체 60 = 5 + 55)');
 select test.expect_eq($$select api.consult_rate_hit(lpad(to_hex(56), 64, '0'), 'session')::text$$, 'false', 'CR13 전체 60 도달 후 새 IP 거부(전체 상한 유지)');

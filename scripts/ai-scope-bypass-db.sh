@@ -29,8 +29,8 @@ for i in $(seq 1 40); do as_role app_public "select api.consult_rate_hit('$IPH',
 eq "SB-D1 허용 5건" "$(cat "$TMP"/s* | grep -c '^true$')" 5
 eq "SB-D1 오류 0건" "$(cat "$TMP"/s* | grep -cvE '^(true|false)$')" 0
 
-# 0030: IP 한도로 거부된 시도는 전체 집계를 소비하지 않는다
-eq "SB-D1c 전체 집계는 허용된 5건만(0030)" "$("${SU[@]}" -c "select hits from core.consult_rate where bucket = 'session:all'")" 5
+# 0031: IP 한도로 거부된 시도는 전체 집계를 소비하지 않는다
+eq "SB-D1c 전체 집계는 허용된 5건만(0031)" "$("${SU[@]}" -c "select hits from core.consult_rate where bucket = 'session:all'")" 5
 "${SU[@]}" -c "delete from core.consult_rate"
 echo "== SB-D2 서로 다른 IP 80건 동시 → 전체 1시간 60개"
 for i in $(seq 1 80); do as_role app_public "select api.consult_rate_hit('$(hex64 $((9000 + i)))', 'session')::text" > "$TMP/g$i" & done; wait
