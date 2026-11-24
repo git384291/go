@@ -7,7 +7,7 @@
 // - 인자 없이 실행하면 도움말만 출력하고 끝난다. `--run` + `--url-env <이름>` + `--ca-env <이름>`가 모두 있어야 실행 경로에 들어간다.
 //   값은 지정한 환경변수 이름에서만 읽는다(DATABASE_URL·.env 파일 자동 읽기 없음, CLI 인자로 원문을 받지 않음).
 // - 대상은 사전에 정한 기대값(PROBE_EXPECT: 정확한 호스트·포트·DB·로그인 역할)과 정확히 같아야 한다.
-//   현재 기대값은 모두 미정(null)이므로 실행 경로에서도 접속 전에 EXPECT_UNSET으로 닫힌다. 실제 값은 프로젝트 설정 확인 뒤 별도 승인으로 정한다.
+//   기대값은 PM 11/25 승인값(아래). 이 값과 한 글자라도 다르면 접속 전에 거부한다. postgres 관리자 계정은 dbRole 불일치로 거부된다.
 // 출력: 고정 검사 ID·상태·허용 값(역할 이름·버전 숫자·boolean)만. 오류 원문·URL·호스트·인증서·키는 출력하지 않는다.
 import { pathToFileURL } from 'node:url';
 
@@ -16,7 +16,8 @@ import { pathToFileURL } from 'node:url';
  * @typedef {{ host: string | null, port: number | null, database: string | null, loginUser: string | null, dbRole: string | null }} ProbeExpect
  */
 /** @type {Readonly<ProbeExpect>} */
-export const PROBE_EXPECT = Object.freeze({ host: null, port: null, database: null, loginUser: null, dbRole: null });
+// PM 11/25 승인값(fideon-dev, 서울 리전 Transaction pooler). loginUser는 풀러 규칙(역할.project ref)에 따른 값 — 접속 전 사용자 화면으로 재확인.
+export const PROBE_EXPECT = Object.freeze({ host: 'aws-0-ap-northeast-2.pooler.supabase.com', port: 6543, database: 'postgres', loginUser: 'app_server.lmxhbhieurnhelhgvjyv', dbRole: 'app_server' });
 /** 출력에 실을 수 있는 역할 이름(고정 허용 목록). 그 밖의 값은 'invalid'로만 표시 */
 export const OUTPUT_ROLES = Object.freeze(['app_server', 'app_staff']);
 export const ENV_NAME_RE = /^FIDEON_PROBE_[A-Z0-9_]{1,40}$/;
