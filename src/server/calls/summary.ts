@@ -72,7 +72,7 @@ export class MockSummaryModel implements SummaryModel {
   }
 }
 
-export function selectSummaryModel(env: NodeJS.ProcessEnv = process.env): SummaryModel {
+export function selectSummaryModel(env: Readonly<Record<string, string | undefined>> = process.env): SummaryModel {
   if ((env.CALL_SUMMARY_MODE ?? 'mock') === 'mock') return new MockSummaryModel(() => ({ summary: '요약 Mock' }));
   throw new Error('LIVE_SUMMARY_NOT_APPROVED');
 }

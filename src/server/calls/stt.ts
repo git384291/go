@@ -34,7 +34,7 @@ export class MockSttProvider implements SttProvider {
 }
 
 /** 운영 STT 업체 선택. 승인 전에는 Mock 외 사용 불가(외부 비용 0 보장). */
-export function selectSttProvider(env: NodeJS.ProcessEnv = process.env): SttProvider {
+export function selectSttProvider(env: Readonly<Record<string, string | undefined>> = process.env): SttProvider {
   const mode = env.CALL_STT_MODE ?? 'mock';
   if (mode === 'mock') return new MockSttProvider();
   throw new SttError('LIVE_STT_NOT_APPROVED', false);
