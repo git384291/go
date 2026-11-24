@@ -79,7 +79,9 @@ eq "D5 200+500+400=1100 > 1000 거부" "$(hold 400)" ""
 eq "D5 입력 오류(0·음수·1001·null) 거부" "$(hold 0)|$(hold -1)|$(hold 1001)|$(as_ai "select api.ai_budget_hold(null, gen_random_uuid()::text, '$SCOPE')::text")" "|||"
 
 echo "== D6 TEST-11 한국 시간(KST) 월 키"
-eq "D6 함수 소스가 Asia/Seoul 월 키를 쓴다" "$("${SU[@]}" -c "select (prosrc like '%at time zone ''Asia/Seoul'', ''YYYY-MM''%')::text from pg_proc where proname='ai_budget_hold'")" true
+# 0032: 예약 본문은 4인자 함수 한 곳, 3인자는 위임만(회선 키 없음) → 두 함수 모두 확인
+eq "D6 함수 소스가 Asia/Seoul 월 키를 쓴다(본문 = 4인자)" "$("${SU[@]}" -c "select (prosrc like '%at time zone ''Asia/Seoul'', ''YYYY-MM''%')::text from pg_proc where oid = 'api.ai_budget_hold(int,text,text,text)'::regprocedure")" true
+eq "D6b 3인자 예약은 4인자로 위임" "$("${SU[@]}" -c "select (prosrc like '%api.ai_budget_hold(p_cost, p_request_id, p_scope, null::text)%')::text from pg_proc where oid = 'api.ai_budget_hold(int,text,text)'::regprocedure")" true
 eq "D6 UTC 11/30 15:30 = KST 12/01 → 월 키 2026-12" "$("${SU[@]}" -c "select to_char(timestamptz '2026-11-30 15:30:00+00' at time zone 'Asia/Seoul','YYYY-MM')")" 2026-12
 eq "D6 같은 순간 UTC 월 키는 2026-11(우회 가능성 비교)" "$("${SU[@]}" -c "select to_char(timestamptz '2026-11-30 15:30:00+00' at time zone 'UTC','YYYY-MM')")" 2026-11
 echo "NOTE | D6은 표현식·함수 소스 검증이다. 실제 시계가 자정을 넘는 순간의 전환은 이 로컬 검증으로 실증하지 못한다(별도 검증 필요)."

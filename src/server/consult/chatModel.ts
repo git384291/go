@@ -37,7 +37,8 @@ export class ModelNotCalledError extends Error {}
 // - uncertain(): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 예약 전액으로 닫고 대표 조정 대기(0028). 없으면 확정으로 처리한다.
 export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(): Promise<void> };
 /** 예약 문맥(0028): 요청 ID(멱등, 같은 ID는 다시 예약하지 않음)와 사용자 키(서버 HMAC 64자리, 사용자별 일·월 한도) */
-export type ReserveContext = { readonly requestId: string; readonly scope: string };
+/** net(0032, 선택): 회선 키(서버 HMAC 64자리). 있으면 회선별 하루 상한도 DB가 같은 잠금 안에서 본다. 형식이 틀리면 예약 거부(fail-closed) */
+export type ReserveContext = { readonly requestId: string; readonly scope: string; readonly net?: string };
 export const REQUEST_ID = /^[A-Za-z0-9-]{16,64}$/;
 export const SCOPE_KEY = /^[0-9a-f]{64}$/;
 export type AiBudget = { reserve(costKrw: number, ctx?: ReserveContext): Promise<Reservation | null> };
@@ -97,9 +98,13 @@ export function createDbAiBudget(run: RunAi): AiBudget {
       // 0028: 요청 ID·사용자 키가 없거나 형식이 틀리면 DB가 거부한다(null). 여기서 지어내지 않는다
       const req = ctx && REQUEST_ID.test(ctx.requestId) ? ctx.requestId : null;
       const scope = ctx && SCOPE_KEY.test(ctx.scope) ? ctx.scope : null;
+      if (ctx && ctx.net !== undefined && !SCOPE_KEY.test(ctx.net)) return null; // 0032: 회선 키가 왔는데 형식이 틀리면 막는다
+      const net = ctx?.net;
       let id: unknown;
       try {
-        const rows = (await run(async (tx) => tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text)::text as id`)) as readonly { id?: unknown }[];
+        const rows = (await run(async (tx) => (net === undefined
+          ? tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text)::text as id`
+          : tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text, ${net}::text)::text as id`))) as readonly { id?: unknown }[];
         id = rows[0]?.id;
       } catch { return null; }
       if (typeof id !== 'string' || !/^\d{1,18}$/.test(id)) return null;

@@ -67,6 +67,11 @@ export type HandlerDeps = {
  * 고객 로그인은 아직 없다 — 생기면 내부 사용자 ID로 바꾼다.
  */
 export const aiScopeFor = (key: Buffer, sessionId: string): string => createHmac('sha256', key).update(`ai-scope|${sessionId}`, 'utf8').digest('hex');
+/**
+ * AI 회선 키(0032, PM 11/24: 회선별 하루 300원): 횟수 제한과 같은 회선 단위(IPv4 그대로·IPv6 /64)를 세션 키로 HMAC.
+ * 세션을 다시 받아도 같은 회선이면 같은 키 → 회선 하루 상한은 초기화되지 않는다. 원문 IP는 DB·기록에 남지 않는다.
+ */
+export const aiNetFor = (key: Buffer, ip: string): string => createHmac('sha256', key).update(`ai-net|${rateLimitIpKey(ip)}`, 'utf8').digest('hex');
 
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
   if (!d.enabled) return json(503, { ok: false, code: 'DISABLED' });
@@ -125,7 +130,8 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
     if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
     const scope = aiScopeFor(d.sessionKey as Buffer, sessionId);
-    const budgetCtx = SCOPE_KEY.test(scope) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope } : undefined;
+    const net = aiNetFor(d.sessionKey as Buffer, d.ip);
+    const budgetCtx = SCOPE_KEY.test(scope) && SCOPE_KEY.test(net) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope, net } : undefined;
     const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, budgetCtx }, d.now());
     if (!r.ok) return json(400, r);
     if (d.recordConsult) { try { await d.recordConsult(sessionId, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }

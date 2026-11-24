@@ -59,5 +59,8 @@ export function rateLimitIpKey(ip: string): string {
   if (parts.length === 2 ? fill < 1 : head.length !== 8) return '0.0.0.0';
   const groups = [...head, ...Array<string>(fill).fill('0'), ...tail];
   if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return '0.0.0.0';
+  // IPv4 대응 IPv6(::ffff:a.b, 16진 표기)는 그 IPv4로 — /64로 묶으면 모든 대응 주소가 한 버킷('0:0:0:0::/64')이 된다(PR #13에서 반영)
+  const n = groups.map((g) => parseInt(g, 16));
+  if (n.slice(0, 5).every((x) => x === 0) && n[5] === 0xffff) return `${n[6]! >> 8}.${n[6]! & 255}.${n[7]! >> 8}.${n[7]! & 255}`;
   return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
 }
