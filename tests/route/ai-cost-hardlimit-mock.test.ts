@@ -324,7 +324,9 @@ test('TEST-14b 광고 생성 어댑터: 예산 없음 → 0회, 예산 거부 �
   assert.deepEqual(s2.log, ['reserve(10)=ok', 'uncertain']);
 });
 test('TEST-14c 정적 점검: Provider 호출 코드는 두 어댑터뿐, 둘 다 게이트를 거치고, 허가는 chatAnswer만 붙인다', () => {
-  assert.deepEqual(grepSrc(/OPENAI_RESPONSES_URL|api\.openai\.com|max_output_tokens:/), ['server/advertising/openAiAdGenerator.ts', 'server/consult/openAiChatModel.ts']);
+  // PM 11/24 ④: 실제 전송 파일(server/ai/openAiTransport, 허용 주소 1곳)은 본문을 만들지 않고 전송만 한다. 라우트만 import해 상담 어댑터(게이트 통과)에 넘긴다
+  assert.deepEqual(grepSrc(/OPENAI_RESPONSES_URL|api\.openai\.com|max_output_tokens:/), ['server/advertising/openAiAdGenerator.ts', 'server/ai/openAiTransport.ts', 'server/consult/openAiChatModel.ts']);
+  assert.deepEqual(grepSrc(/from ['"][^'"]*openAiTransport['"]/), ['app/api/consult/chat/route.ts']);
   assert.match(readFileSync(path.join(SRC, 'server/consult/openAiChatModel.ts'), 'utf8'), /if \(!hasBudgetPermit\(meter\)\) throw new ModelNotCalledError/);
   assert.match(readFileSync(path.join(SRC, 'server/advertising/openAiAdGenerator.ts'), 'utf8'), /const hold = await \(cfg\.budget as AiBudget\)\.reserve\(/);
   assert.deepEqual(grepSrc(/grantBudgetPermit\(/), ['server/consult/chatAnswer.ts', 'server/consult/chatModel.ts']);
