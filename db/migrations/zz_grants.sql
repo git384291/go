@@ -146,7 +146,9 @@ grant execute on function
   api.recontact_schedule(uuid, uuid, text, uuid, date, text),   -- 0050: 날짜별 재연락 일정(대표만)
   api.recontact_due(uuid, uuid, text),
   api.recontact_close(uuid, uuid, text, bigint, text),
-  api.recontact_sweep(uuid, uuid, text)
+  api.recontact_sweep(uuid, uuid, text),
+  api.customer_timeline(uuid, uuid, text, uuid),   -- 0051: 고객 통합 이력(대표만, 가린 값만)
+  api.crm_unhandled(uuid, uuid, text)   -- 0051: 미처리 자동 분류
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
