@@ -81,7 +81,7 @@ export async function runLiveRead(env: Readonly<Record<string, string | undefine
   const st = (s: string) => camps.filter((x) => (x.campaign as Record<string, unknown> | undefined)?.status === s).length;
   const budgets = camps.map((x) => int((x.campaignBudget as Record<string, unknown> | undefined)?.amountMicros)).filter((n): n is number => n !== null);
   const enabled = st('ENABLED');
-  log({ step: 'campaigns', ok: true, total: camps.length, paused: st('PAUSED'), enabled, dailyBudgetsKrw: budgets.map((m) => Math.round(m / 1e6)).sort((a, b) => a - b),
+  log({ step: 'campaigns', ok: true, total: camps.length, paused: st('PAUSED'), enabled, dailyBudgetsKrw: budgets.map((m) => Math.round(m / 1e6)).sort((a, b) => a - b).map(String), // 출력 형식(ProbeLine)이 문자열 배열만 허용
     biddingTypes: [...new Set(camps.map((x) => String((x.campaign as Record<string, unknown> | undefined)?.biddingStrategyType ?? '')).filter((s) => /^[A-Z_]{2,40}$/.test(s)))] });
 
   // ④ 최근 30일 실적: 일별(날짜·캠페인 중복 검사) 합계 = 계정 합계

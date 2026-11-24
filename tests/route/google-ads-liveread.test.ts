@@ -39,7 +39,7 @@ test('GL2 실적 0: 0 그대로 보고(추정 없음), PAUSED 유지 보고, 민
   const m = r.lines.find((l) => l.step === 'metrics_30d')!;
   assert.deepEqual([m.impressions, m.clicks, m.costKrw, m.conversions, m.ok], [0, 0, 0, 0, true]);
   const c = r.lines.find((l) => l.step === 'campaigns')!;
-  assert.deepEqual([c.paused, c.enabled, c.dailyBudgetsKrw], [1, 0, [3000]]);
+  assert.deepEqual([c.paused, c.enabled, c.dailyBudgetsKrw], [1, 0, ['3000']]);
   for (const s of [SECRET, 'tok-ZZZ', '1234567890', '123-456-7890', '98765', ENV.GOOGLE_ADS_CLIENT_SECRET]) assert.ok(!r.out.includes(s), s);
 });
 
