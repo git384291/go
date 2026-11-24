@@ -77,6 +77,6 @@ test('OC5 연결 범위(PM 11/24 ④): createModel은 여전히 mock뿐, 라우�
     assert.ok(!readFileSync(f, 'utf8').includes('openAiChatModel'), f);
   }
   const route = readFileSync('src/app/api/consult/chat/route.ts', 'utf8');
-  assert.match(route, /recoveringModelFor\(consultModelFromEnv\(process\.env, openAiFetchTransport\)\)/);
+  assert.match(route, /recoveringModelFor\(consultModelFromEnv\(process\.env, openAiFetchTransport\), CONSULT_RECOVERY_TIMING\)/);
   assert.equal((route.match(/consultModelFromEnv\(/g) ?? []).length, 1);
 });
