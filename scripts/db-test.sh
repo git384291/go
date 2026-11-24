@@ -321,8 +321,8 @@ apply_sql_file() { # $1 SQL 파일(비어 있으면 실패)
   [ -s "$1" ] || { echo "FAIL | 적용할 SQL이 비어 있음: $1" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
   "${PSQL[@]}" -d "$DB" -f "$1" >/dev/null
 }
-restore_create_lead() { # 0007 검수본(필수 고지 반영)으로 복원하고, 실제 본문이 고정 해시와 같은지 확인
-  extract_create_lead db/migrations/0007_required_notices.sql > "$LOG_DIR/fn-create_lead.sql"
+restore_create_lead() { # 최신 검수본(0051: 0007 + 고객 중복 금지)으로 복원하고, 실제 본문이 고정 해시와 같은지 확인
+  extract_create_lead db/migrations/0051_crm_unify.sql > "$LOG_DIR/fn-create_lead.sql"
   apply_sql_file "$LOG_DIR/fn-create_lead.sql"; rm -f "$LOG_DIR/fn-create_lead.sql"
   [ "$(fn_md5)" = "$PINNED_CREATE_LEAD_MD5" ] || { echo "FAIL | $1 create_lead 복원 실패(본문이 검수본과 다름)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 }
@@ -539,6 +539,7 @@ echo "NOTICE:  PASS | M7 보관본이 있으면 롤백이 실패(덮어쓰지 �
 D -f db/migrations/0007_required_notices.sql >/dev/null
 D -f db/migrations/0008_policy_store.sql >/dev/null
 D -f db/migrations/0009_policy_list.sql >/dev/null
+D -f db/migrations/0051_crm_unify.sql >/dev/null   # create_lead 최신 검수본(0051)으로 되돌림
 D -q -f db/rollback/0007_restore.sql >/dev/null
 D -q -f db/rollback/0008_restore.sql >/dev/null
 r_exp=$(D -At -c "select count(*) from pii.notice_exposures"); r_pol=$(D -At -c "select count(*) from core.policy_versions")
