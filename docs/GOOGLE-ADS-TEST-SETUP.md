@@ -76,9 +76,17 @@ read -rs GOOGLE_ADS_LOGIN_CUSTOMER_ID && export GOOGLE_ADS_LOGIN_CUSTOMER_ID
 node --conditions=react-server --import tsx scripts/google-ads-probe/run.mts; echo "종료 코드: $?"
 ```
 
+**실계정 읽기 전용 점검(PM 11/25, 바른통신 ①~④)** — 변경 0회. 캠페인·예산·상태·최근 30일 실적·키워드 예상 CPC만 읽습니다.
+```bash
+read -rs GOOGLE_ADS_MONTHLY_CAP_KRW && export GOOGLE_ADS_MONTHLY_CAP_KRW   # 월 광고비 하드 한도(원, 숫자만). 비우면 "집행 차단"으로 표시
+node --conditions=react-server --import tsx scripts/google-ads-probe/liveread.mts; echo "종료 코드: $?"
+```
+- 종료 코드: 0 확인 완료 · 2 설정 없음 · 3 인증·권한·조회 실패(오류코드만 표시) · 5 ENABLED 캠페인 발견(바꾸지 않음) · 6 실적 중복·합계 불일치
+- 출력 JSON 줄을 그대로 Claude에게 붙여 넣으면 됩니다(토큰·고객 ID·캠페인 ID는 출력되지 않음).
+
 **값 지우기(끝나면)**
 ```bash
-unset GOOGLE_ADS_CLIENT_ID GOOGLE_ADS_CLIENT_SECRET GOOGLE_ADS_REFRESH_TOKEN GOOGLE_ADS_CUSTOMER_ID GOOGLE_ADS_LOGIN_CUSTOMER_ID
+unset GOOGLE_ADS_CLIENT_ID GOOGLE_ADS_CLIENT_SECRET GOOGLE_ADS_REFRESH_TOKEN GOOGLE_ADS_CUSTOMER_ID GOOGLE_ADS_LOGIN_CUSTOMER_ID GOOGLE_ADS_MONTHLY_CAP_KRW
 ```
 
 ## 4. 결과 읽는 법
