@@ -1,15 +1,15 @@
 // Google Ads 실계정 읽기 전용 점검(PM 11/25: 바른통신 미완료 ①~④). 로컬 Mac mini에서 사람이 직접 실행 — CI·서버는 실행하지 않는다.
 // 하는 일(모두 읽기): 인증 → 계정(통화·시간대·테스트 여부) → 캠페인 상태·예산·입찰 방식 → 최근 30일 노출·클릭·비용·전환(일별 중복·합계 대조)
-//                    → 키워드 플래너 예상 CPC(후보 키워드) → 월 하드 한도 기준 권장 하루예산·예상 클릭.
-// 하지 않는 일: 생성·수정·일시정지·활성화(mutate) 0회. 허용 주소 3곳(토큰·search·generateKeywordIdeas) 밖은 보내지 않는다.
+//                    → 키워드 플래너 과거 지표(후보 키워드별 월 검색량·경쟁도·상단 입찰가 범위) → 월 하드 한도 기준 권장 하루예산·예상 클릭.
+// 하지 않는 일: 생성·수정·일시정지·활성화(mutate) 0회. 허용 주소 3곳(토큰·search·generateKeywordHistoricalMetrics) 밖은 보내지 않는다.
 // 출력: 단계·불리언·숫자·Google 오류코드뿐. credential·토큰·고객 ID·캠페인 ID·오류 원문은 출력하지 않는다. 실적 0이면 0 그대로.
 import { googleErrorCodes, type ProbeLine, type ProbeTransport } from './core';
 import { GOOGLE_ADS_DEFAULT_API_VERSION, GOOGLE_ADS_ENV_NAMES } from '../../src/server/advertising/googleAdsPlatform';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://googleads.googleapis.com';
-/** 후보(AD-LAUNCH-PACK 검색 의도 가설, 통신사 상표 없음). 확정 키워드 아님 — 승인은 사용자 */
-export const CANDIDATE_KEYWORDS = Object.freeze(['이사 인터넷 신청', '이사 인터넷 TV 같이', '새집 인터넷 설치 신청', '입주 인터넷 TV']);
+/** PM 11/25 개발·테스트용 승인 후보 10개(인터넷+TV 결합, EXACT 집행 기준, 통신사 상표 없음). 운영 승인 전 — 집행에 쓰지 않는다 */
+export const CANDIDATE_KEYWORDS = Object.freeze(['인터넷 TV 약정 만료', '인터넷 TV 약정 끝나면', '인터넷 TV 재약정', '약정 만료 인터넷 TV 변경', '이사 인터넷 TV 설치', '이사 인터넷 TV 이전', '전입 인터넷 TV 신청', '새집 인터넷 TV', '인터넷 TV 통신사 변경', '인터넷 TV 갈아타기']);
 const KO = 'languageConstants/1012';
 const KR = 'geoTargetConstants/2410';
 /** Google: 한 달 청구는 평균 하루예산 × 30.4를 넘지 않는다(월 청구 한도). 하드 한도 → 하루예산 = 한도 ÷ 30.4(내림) */
@@ -42,7 +42,7 @@ export async function runLiveRead(env: Readonly<Record<string, string | undefine
   log({ step: 'env', ok: missing.length === 0 && bad.length === 0, missing: [...missing], invalid: bad, monthlyCapSet: cap !== null });
   if (missing.length > 0 || bad.length > 0) return 2;
   const base = `${API}/${version}/customers/${cid}`;
-  const ALLOWED = new Set([TOKEN_URL, `${base}/googleAds:search`, `${base}:generateKeywordIdeas`]);
+  const ALLOWED = new Set([TOKEN_URL, `${base}/googleAds:search`, `${base}:generateKeywordHistoricalMetrics`]);
   // 읽기 전용 강제: 허용 주소 3곳, 본문에 mutate·validateOnly 없음. 어기면 보내지 않는다(status 0)
   const transport: ProbeTransport = async (url, init) => (ALLOWED.has(url) && !/mutate|validateOnly/i.test(init.body) ? raw(url, init) : { status: 0, text: '' });
 
@@ -99,19 +99,28 @@ export async function runLiveRead(env: Readonly<Record<string, string | undefine
   log({ step: 'metrics_30d', ok: dup === 0 && match, rows: daily.length, duplicateRows: dup, totalsMatch: match, impressions: t.impressions, clicks: t.clicks,
     costKrw: Math.round(t.costMicros / 1e6), conversions: t.conversions, firstDate: dates[0] ?? null, lastDate: dates.at(-1) ?? null });
 
-  // ① 예상 CPC(키워드 플래너, 읽기)
-  const kr = await transport(`${base}:generateKeywordIdeas`, { method: 'POST', headers, body: JSON.stringify({ language: KO, geoTargetConstants: [KR], keywordPlanNetwork: 'GOOGLE_SEARCH', keywordSeed: { keywords: [...CANDIDATE_KEYWORDS] } }) });
+  // ① 키워드 과거 지표(키워드 플래너 GenerateKeywordHistoricalMetrics, 읽기). Google은 가까운 변형을 한 결과로 합친다(요청 수보다 결과가 적을 수 있음).
+  //    키워드마다 EXACT(자기 결과, 합쳐진 다른 후보 없음) / COMBINED(자기 결과지만 다른 후보와 합산) / MERGED(다른 결과에 합쳐짐) / MISSING(결과 없음)으로 따로 표시.
+  //    권장 CPC는 EXACT만 계산한다(합산·누락은 추측하지 않음). 이 지표는 검색어 기준이며 매치 유형별 값이 아니다.
+  const kr = await transport(`${base}:generateKeywordHistoricalMetrics`, { method: 'POST', headers,
+    body: JSON.stringify({ keywords: [...CANDIDATE_KEYWORDS], language: KO, geoTargetConstants: [KR], keywordPlanNetwork: 'GOOGLE_SEARCH', historicalMetricsOptions: { includeAverageCpc: true } }) });
   const kj = parse(kr.text);
   if (kr.status !== 200 || !isObj(kj)) log({ step: 'keyword_cpc', ok: false, http: kr.status, googleErrorCodes: googleErrorCodes(kr.text) });
   else {
-    const ideas = (Array.isArray(kj.results) ? kj.results : []).filter(isObj);
+    const results = (Array.isArray(kj.results) ? kj.results : []).filter(isObj);
+    const variants = (x: Record<string, unknown>) => (Array.isArray(x.closeVariants) ? x.closeVariants.filter((v): v is string => typeof v === 'string') : []);
     for (const kw of CANDIDATE_KEYWORDS) {
-      const hit = ideas.find((x) => typeof x.text === 'string' && x.text.replace(/\s+/g, '') === kw.replace(/\s+/g, ''));
-      const km = (hit?.keywordIdeaMetrics ?? {}) as Record<string, unknown>;
-      const low = int(km.lowTopOfPageBidMicros); const high = int(km.highTopOfPageBidMicros);
-      const cpc = recommendCpc(low);
-      log({ step: 'keyword_cpc', ok: hit !== undefined, keyword: kw, avgMonthlySearches: int(km.avgMonthlySearches), competition: typeof km.competition === 'string' ? km.competition : null,
-        lowTopBidKrw: low === null ? null : Math.round(low / 1e6), highTopBidKrw: high === null ? null : Math.round(high / 1e6), recommendedCpcKrw: cpc, maxClicksPerMonthAtCap: capPlan(cap, cpc)?.maxClicksPerMonth ?? null });
+      const own = results.find((x) => x.text === kw);
+      const into = own ? undefined : results.find((x) => variants(x).includes(kw));
+      const others = own ? CANDIDATE_KEYWORDS.filter((k) => k !== kw && variants(own).includes(k)) : [];
+      const kwMatch: 'EXACT' | 'COMBINED' | 'MERGED' | 'MISSING' = own ? (others.length > 0 ? 'COMBINED' : 'EXACT') : into ? 'MERGED' : 'MISSING';
+      const km = (own?.keywordMetrics ?? {}) as Record<string, unknown>;
+      const low = int(km.lowTopOfPageBidMicros); const high = int(km.highTopOfPageBidMicros); const avg = int(km.averageCpcMicros);
+      const cpc = kwMatch === 'EXACT' ? recommendCpc(low) : null;
+      log({ step: 'keyword_cpc', ok: kwMatch === 'EXACT', keyword: kw, match: kwMatch, mergedInto: into && typeof into.text === 'string' ? into.text : null, combinedWith: [...others],
+        avgMonthlySearches: own ? int(km.avgMonthlySearches) : null, competition: own && typeof km.competition === 'string' ? km.competition : null,
+        lowTopBidKrw: low === null ? null : Math.round(low / 1e6), highTopBidKrw: high === null ? null : Math.round(high / 1e6), avgCpcKrw: avg === null ? null : Math.round(avg / 1e6),
+        recommendedCpcKrw: cpc, maxClicksPerMonthAtCap: capPlan(cap, cpc)?.maxClicksPerMonth ?? null });
     }
   }
   log({ step: 'cap', ok: cap !== null, monthlyCapKrw: cap, dailyBudgetKrw: cap === null ? null : Math.floor(cap / MONTH_FACTOR), launchBlocked: cap === null || enabled > 0 });
