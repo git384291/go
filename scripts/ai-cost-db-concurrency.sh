@@ -222,6 +222,20 @@ for i in $(seq 1 100); do ( r=$(holdS 4 "$(sk $((2000+i)))"); [[ "$r" =~ ^[0-9]+
 eq "D20f 예약·확정 섞인 100건 동시: 사용액 ≤ 300(사용자별 다름, 전체 일 3,000 이하)" "$(( $(used) <= 3000 ))" 1
 eq "D20g 오류 0건" "$(errs "$TMP"/s*)" 0
 
+echo "== D21 세션 재발급 제한(0024 consult_rate, 여러 서버 = 서로 다른 DB 연결): 같은 회선 100건 동시 → 5개, 서로 다른 회선 100건 동시 → 전체 60개"
+as_pub() { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_public" -c "$1" -c "commit" 2>&1 | grep -v -E '^(BEGIN|SET|COMMIT)$'; }
+"${SU[@]}" -c "truncate core.consult_rate" >/dev/null
+NET=$(printf 'a%.0s' $(seq 1 64))
+for i in $(seq 1 100); do as_pub "select api.consult_rate_hit('$NET', 'session')::text" > "$TMP/t$i" & done; wait
+eq "D21 같은 회선 성공 5개" "$(cat "$TMP"/t* | grep -c '^true$')" 5
+eq "D21b 오류 0건" "$(cat "$TMP"/t* | grep -cvE '^(true|false)$' || true)" 0
+"${SU[@]}" -c "truncate core.consult_rate" >/dev/null
+for i in $(seq 1 100); do as_pub "select api.consult_rate_hit('$(printf '%064x' $((5000+i)))', 'session')::text" > "$TMP/u$i" & done; wait
+eq "D21c 서로 다른 회선 100개 동시 → 전체 상한 60개" "$(cat "$TMP"/u* | grep -c '^true$')" 60
+eq "D21d 오류 0건" "$(cat "$TMP"/u* | grep -cvE '^(true|false)$' || true)" 0
+eq "D21e 저장 키는 HMAC 형식만(원문 IP 없음)" "$("${SU[@]}" -c "select count(*) from core.consult_rate where bucket !~ '^(chat|session):(all|[0-9a-f]{64})$'")" 0
+"${SU[@]}" -c "truncate core.consult_rate" >/dev/null
+
 # 원상 복구(가상 DB): 한도 0원(기본), 원장 비움
 reset 0 0 0 1
 echo "== 결과: PASS $pass · FAIL $fail"

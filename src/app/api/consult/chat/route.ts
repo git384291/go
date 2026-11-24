@@ -1,4 +1,4 @@
-import { clientIpFrom } from '@/server/http/clientIp';
+import { clientIpFrom, rateKeyIp } from '@/server/http/clientIp';
 import { createLimiter, handleChat } from '@/server/consult/chatHandler';
 import { createDbAiBudget } from '@/server/consult/chatModel';
 import { consultModelFromEnv } from '@/server/consult/openAiChatModel';
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     botCheck: (token, from) => verifyTurnstile(token, from),
     // AI 사용자별 비용 한도 키는 핸들러가 서명 세션 ID로 만든다(aiScopeFor, PM 11/24 ③). IP는 아래 횟수 제한에만 쓴다
     rateLimit: async (kind) => {
-      const h = createPiiCrypto(piiKeysFromEnv(process.env)).ipHash(ip);
+      const h = createPiiCrypto(piiKeysFromEnv(process.env)).ipHash(rateKeyIp(ip)); // 회선 키(IPv6 /64)의 HMAC — 원문 IP 미저장
       const rows = (await withRole('public', (tx) => tx`select api.consult_rate_hit(${h}, ${kind}) as ok`)) as unknown as { ok: unknown }[];
       return rows[0]?.ok === true;
     },

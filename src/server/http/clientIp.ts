@@ -41,3 +41,26 @@ export function clientIpFrom(
   const last = forwarded.at(-1) ?? '';
   return isIp(last) ? last : '0.0.0.0';
 }
+
+/**
+ * 횟수 제한용 회선 키(PM 11/24 세션 재발급 우회 방지). 사람 식별이 아니라 남용 방지 보조 키다(사용자 한도 키는 서명 세션).
+ * - IPv4: 그대로. IPv4 대응 IPv6(::ffff:a.b)는 그 IPv4.
+ * - IPv6: 앞 64비트(/64)로 묶는다. 한 가입 회선은 보통 /64 전체를 받아 주소를 마음대로(또는 자동으로) 바꿀 수 있으므로,
+ *   주소 전체를 키로 쓰면 'IP당 새 세션 시간당 5개'가 무력화된다. 표기 차이(대소문자·0 생략·::)도 같은 키.
+ * - 형식 밖은 '0.0.0.0'(모두 한 버킷 → 안전한 쪽으로 실패).
+ */
+export function rateKeyIp(ip: string): string {
+  if (IPV4.test(ip)) return ip;
+  if (typeof ip !== 'string' || !isIp(ip)) return '0.0.0.0';
+  const parts = ip.toLowerCase().split('::');
+  if (parts.length > 2) return '0.0.0.0';
+  const head = parts[0] ? parts[0].split(':') : [];
+  const tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+  const fill = 8 - head.length - tail.length;
+  if (parts.length === 1 ? fill !== 0 : fill < 1) return '0.0.0.0';
+  const g = [...head, ...Array<string>(parts.length === 2 ? fill : 0).fill('0'), ...tail];
+  if (g.length !== 8 || g.some((h) => !/^[0-9a-f]{1,4}$/.test(h))) return '0.0.0.0';
+  const n = g.map((h) => parseInt(h, 16));
+  if (n.slice(0, 5).every((x) => x === 0) && n[5] === 0xffff) return `${n[6]! >> 8}.${n[6]! & 255}.${n[7]! >> 8}.${n[7]! & 255}`;
+  return `${n.slice(0, 4).map((x) => x.toString(16)).join(':')}::/64`;
+}
