@@ -45,6 +45,16 @@ export type AdPlatform = {
   accountTimeZone(opts: CallOpts): Promise<string>;
   /** 하루치 성과. 보고가 아직 없으면 costKrw를 null(UNKNOWN)로 돌려준다. 형식 검증은 호출측(서버)이 한다 — 어댑터 값은 믿지 않는다 */
   fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts): Promise<unknown>;
+  /**
+   * (선택, PM 11/25 ③) 캠페인 상태 다시 읽기: { status: 'PAUSED' | 'ENABLED' | ... }. 형식 검증은 서버가 한다.
+   * 활성화 전후 확인에 쓴다. 없으면 자동 활성화는 실행되지 않는다(닫힘).
+   */
+  campaignStatus?(ref: PlatformRef, opts: CallOpts): Promise<unknown>;
+  /**
+   * (선택, PM 11/25 ③) PAUSED → ENABLED 전환. 지금은 모의 어댑터만 구현한다. 실제(Google Ads) 어댑터에는 만들지 않는다 — 실제 ENABLED 호출 금지.
+   * 서버(adScheduler)도 live 어댑터면 이 함수를 부르지 않는다(이중 차단).
+   */
+  enable?(ref: PlatformRef, opts: CallOpts): Promise<unknown>;
 };
 
 /** 어댑터가 결과를 분명히 알릴 때 쓰는 오류. outcome이 failed면 '집행·변경이 일어나지 않았음이 확실'하다는 뜻이다 */
@@ -81,11 +91,15 @@ export async function callPlatform<T>(fn: (deadlineAt: number) => Promise<T>, ms
 
 const hash = (s: string) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; };
 
+/** 모의 캠페인 상태(메모리). 모의 launch는 PAUSED로 만든 것으로 본다. 과금·외부 호출 없음 */
+const mockStatus = new Map<string, 'PAUSED' | 'ENABLED'>();
 export const mockPlatform: AdPlatform = Object.freeze({
   name: 'mock',
   live: false,
   async launch(req) { return { externalId: `mock-${hash(req.campaign + req.requestKey).toString(16)}`, dailyBudgetKrw: req.platformDailyBudgetKrw, endVerified: true }; },
-  async pause() { return { paused: true }; },
+  async pause(ref) { if (ref.externalId) mockStatus.set(ref.externalId, 'PAUSED'); return { paused: true }; },
+  async campaignStatus(ref) { return { status: (ref.externalId && mockStatus.get(ref.externalId)) || 'PAUSED' }; },
+  async enable(ref) { if (!ref.externalId) throw new PlatformError('failed', 'NO_EXTERNAL_ID'); mockStatus.set(ref.externalId, 'ENABLED'); return { enabled: true }; },
   async activeCampaignCount() { return 0; },
   async accountTimeZone() { return 'Asia/Seoul'; },
   async fetchPerformance(ref, day) {

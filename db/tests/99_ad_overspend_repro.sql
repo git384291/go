@@ -11,10 +11,11 @@ select test.expect_eq(test.lx('owner', 'ad_spend_request', $$'camp-os-a', 1, 're
 reset role;
 select test.expect_eq($$select coalesce(sum(amount_krw), 0)::text from core.ad_spend_ledger$$, '10000', 'OS-DB4 계정 원장 당일 합계 1만(2만이 되지 않음)');
 
--- 누적: 지난날 B 1만+1만, A 5천(원장 직접 기록) + 오늘 A 5천 = 계정 누적 3만 → 다음 1원은 차단
+-- 누적(0036부터 KST 월별): 다른 날 B 1만+1만, A 5천(원장 직접 기록) + 오늘 A 5천 = 계정 누적 3만 → 다음 1원은 차단
+-- 다른 날은 오늘 뒤 날짜로 둔다(월초에 지난날이 지난달이 되어 판정이 날짜에 따라 달라지지 않게. 이번 달 이후 예약은 이번 판정에 포함)
 \ir reset_ad_account.sql
 insert into core.ad_spend_ledger (campaign_key, approval_id, spend_date, amount_krw, request_key, recorded_by)
-select c, (select id from core.ad_budget_approvals where campaign_key = c and state = 'active'), (now() at time zone 'Asia/Seoul')::date - d, amt, k, '00000000-0000-4000-8000-000000000001'
+select c, (select id from core.ad_budget_approvals where campaign_key = c and state = 'active'), (now() at time zone 'Asia/Seoul')::date + d, amt, k, '00000000-0000-4000-8000-000000000001'
 from (values ('camp-os-b', 1, 10000, 'req-os-b-pre000001'), ('camp-os-b', 2, 10000, 'req-os-b-pre000002'), ('camp-os-a', 1, 5000, 'req-os-a-pre000001')) v(c, d, amt, k);
 set role app_staff;
 select test.expect_eq(test.lx('owner', 'ad_spend_request', $$'camp-os-a', 5000, 'req-os-a-000000003'$$, 'decision'), 'ALLOW', 'OS-DB5 계정 누적 3만까지 허용');

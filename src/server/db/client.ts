@@ -32,6 +32,7 @@ const ROLE_SQL = {
   staff: 'set local role app_staff',
   ai: 'set local role app_ai',
   adMonitor: 'set local role app_ad_monitor', // 0021 광고 정기 감시 전용(감시 함수 3개만)
+  adScheduler: 'set local role app_ad_scheduler', // 0035 광고 활성화 예약 실행 전용(잡기·판정·결과 기록·중지 기록)
 } as const;
 
 export type DbRole = keyof typeof ROLE_SQL;

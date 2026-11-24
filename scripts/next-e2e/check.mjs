@@ -334,7 +334,16 @@ try {
   const hs = await adm(`/api/admin/leads/${lid}/handoff`, ownerC, { method: 'POST', body: JSON.stringify({ event: 'sent', note: 'A총판' }) });
   const hl = await pj(await adm(`/api/admin/leads/${lid}/handoff`, ownerC));
   check('AP4 복사 기록 200, 전달 완료는 메모 없음·전화번호 메모 400, 고지 확인 미완료 건은 409(PACKET_NOT_READY)로 막힘, 이력에 열람·복사 순서 보존', hc.status === 200 && hs0.status === 400 && hsp.status === 400 && hs.status === 409 && ['viewed', 'copied'].every((e) => hl.items?.some((i) => i.event === e)) && !hl.items?.some((i) => i.event === 'sent'), `sent=${hs.status}`);
-  check('AP5 감사 로그: 열람은 고정 사유 코드, 복사 기록 있음, 전달 완료는 막혀 기록 없음, 감사 로그 어디에도 이름·주소·이메일·전화 원문 없음, 이력 변조 불가', (await n(`select count(*)::int as n from core.audit_logs where action = 'pii.reveal' and detail ->> 'via' = 'dealer_packet' and target_id = '${lid}' and reason = 'dealer_handoff'`)) >= 1 && (await n(`select count(*)::int as n from core.audit_logs where action = 'handoff.copied' and target_id = '${lid}'`)) === 1 && (await n(`select count(*)::int as n from core.audit_logs where action = 'handoff.sent' and target_id = '${lid}'`)) === 0 && (await n(`select count(*)::int as n from core.audit_logs a where to_jsonb(a)::text like '%시험로%' or to_jsonb(a)::text like '%김플로우%' or to_jsonb(a)::text like '%e2e.test%' or to_jsonb(a)::text like '%8888%'`)) === 0 && await sql.unsafe(`update core.dealer_handoffs set note = 'x'`).then(() => false, () => true));
+  // AP5: 원문 검사는 감사 내용(동작·사유·상세)만 본다. 행 전체(to_jsonb)는 기록 시각(마이크로초)·무작위 ID에 우연히 '8888'이 들어가 거짓 실패가 났다(PR #20 CI 1회).
+  // 시각·ID 열에는 개인정보가 들어갈 수 없으므로 검사 범위를 줄여도 원문 노출 검출력은 같다. 어느 조건이 틀렸는지 결과에 남긴다.
+  const ap5 = {
+    reveal: await n(`select count(*)::int as n from core.audit_logs where action = 'pii.reveal' and detail ->> 'via' = 'dealer_packet' and target_id = '${lid}' and reason = 'dealer_handoff'`),
+    copied: await n(`select count(*)::int as n from core.audit_logs where action = 'handoff.copied' and target_id = '${lid}'`),
+    sent: await n(`select count(*)::int as n from core.audit_logs where action = 'handoff.sent' and target_id = '${lid}'`),
+    pii: await n(`select count(*)::int as n from core.audit_logs a where (a.action || ' ' || a.target_type || ' ' || coalesce(a.reason, '') || ' ' || coalesce(a.detail::text, '')) ~ '(시험로|김플로우|e2e\\.test|8888)'`),
+    locked: await sql.unsafe(`update core.dealer_handoffs set note = 'x'`).then(() => false, () => true),
+  };
+  check('AP5 감사 로그: 열람은 고정 사유 코드, 복사 기록 있음, 전달 완료는 막혀 기록 없음, 감사 로그 어디에도 이름·주소·이메일·전화 원문 없음, 이력 변조 불가', ap5.reveal >= 1 && ap5.copied === 1 && ap5.sent === 0 && ap5.pii === 0 && ap5.locked, JSON.stringify(ap5));
   const pgp = await adm(`/admin/leads/${lid}/packet`, ownerC, { redirect: 'manual' }); const pgh = await pgp.text();
   const pgn = await adm(`/admin/leads/${lid}/packet`, null, { redirect: 'manual' });
   check('AP6 관리자 화면 셸: 대표는 열람 사유 선택 화면(본문은 열기 전 없음), 무인증은 로그인으로 이동', pgp.status === 200 && pgh.includes('신청서 열기') && !pgh.includes('시험로') && !pgh.includes('김플로우') && [302, 303, 307, 308, 401].includes(pgn.status));

@@ -75,6 +75,8 @@ run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_ad_monthly_cap.sql >/dev/null   # 광고 월 예산 하드 한도(0034, PM 11/25 M1~M14)
+run db/tests/99_ad_account_monthly.sql >/dev/null   # 계정 누적 3만원 평생 → 월별(0036, PM 11/25 ①)
+run db/tests/99_ad_enable_scheduler.sql >/dev/null   # 광고 자동 스케줄러·PAUSED→ENABLED 안전 자동전환(0035, PM 11/25 ②③)
 echo "== 광고 월 예산 동시 요청(0034 M5·M14): 판정 한도 8,000원에 100원 × 100건 동시, 같은 요청 키 20건 동시 — 여러 연결(서버) 경합"
 "${PSQL[@]}" -d "$DB" -q -f db/tests/reset_ad_account.sql >/dev/null
 "${PSQL[@]}" -d "$DB" -q -c "update core.ad_month_config set monthly_limit_krw = 10000, margin_pct = 20" >/dev/null
@@ -108,6 +110,18 @@ d2a=$(cat "$LOG_DIR"/mc-dup2-*.out | grep -c '"ALLOW"' || true); d2b=$(cat "$LOG
 [ "$d2a" = 1 ] && [ "$d2b" = 19 ] || { echo "FAIL | M14b 같은 키 동시 20건 허용=$d2a 중복=$d2b" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M14b 같은 요청 키 20건 동시(여러 연결): 정확히 1건 허용·19건 DUPLICATE_REQUEST" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d "$DB" -q -f db/tests/reset_ad_account.sql >/dev/null
+echo "== 광고 활성화 예약 동시 실행(0035 ②): 실행 시각 지난 예약 1건에 스케줄러 100회 동시 호출(여러 서버) → 1회만 잡음"
+"${PSQL[@]}" -d "$DB" -q -c "insert into core.ad_enable_jobs (campaign_key, launch_request_key, run_at, keywords, creative_sha256, max_cpc_krw, created_by, reason) values ('camp-sch-par', 'req-sch-par-000001', now() - interval '1 second', array['새집 인터넷'], repeat('c', 64), 100, '00000000-0000-4000-8000-000000000001', '동시 시험')" >/dev/null
+for i in $(seq 1 100); do
+  "${PSQL[@]}" -d "$DB" -At -c "set role app_ad_scheduler; select api.ad_sched_claim(gen_random_uuid())" > "$LOG_DIR/sch-par-$i.out" 2>&1 &
+done
+wait
+sch_got=$(cat "$LOG_DIR"/sch-par-*.out | grep -c '"campaign": "camp-sch-par"' || true)
+sch_none=$(cat "$LOG_DIR"/sch-par-*.out | grep -c '"job": null' || true)
+sch_state=$("${PSQL[@]}" -d "$DB" -At -c "select state || '/' || (select count(*) from core.audit_logs where action = 'ad.enable_claim' and detail->>'campaign' = 'camp-sch-par') from core.ad_enable_jobs where campaign_key = 'camp-sch-par'")
+[ "$sch_got" = 1 ] && [ "$sch_none" = 99 ] && [ "$sch_state" = "running/1" ] || { echo "FAIL | SCH-par 동시 100회 잡음=$sch_got 없음=$sch_none 상태=$sch_state" | tee -a "$LOG_DIR/db-test.log"; head -3 "$LOG_DIR"/sch-par-1.out; exit 1; }
+echo "NOTICE:  PASS | SCH-par 스케줄러 100회 동시(여러 연결): 예약 1건을 정확히 1회만 잡음, 99회 없음, 감사 1건" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DB" -q -c "set session_replication_role = replica; delete from core.ad_enable_jobs where campaign_key = 'camp-sch-par'" >/dev/null
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
@@ -824,6 +838,20 @@ D -f db/migrations/0034_ad_monthly_cap.sql >/dev/null; back34=$(has34); def34=$(
 [ "$on34" = truetruetruetrue ] && [ "$off34" = falsefalsefalsefalse ] && [ "$back34" = truetruetruetrue ] && [ "$l34a" = "$l34b" ] && [ "$def34" = 0 ] \
   || { echo "FAIL | M34 0034 롤백 적용=$on34 롤백=$off34 재적용=$back34 원장=$l34a→$l34b 재적용기본=$def34" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M34 광고 월 예산 0034 롤백: 0021 판정·감시 본문 복원·설정 표 제거·원장 보존($l34a건), 재적용 시 기본 0원" >> "$LOG_DIR/db-test.log"
+# 0036 계정 누적 월별: 적용 → 롤백(평생 합계·월 예산만 판정 한도 복원) → 재적용
+D -f db/migrations/0036_ad_account_monthly.sql >/dev/null
+has36() { D -At -c "select (position('date_trunc' in (select prosrc from pg_proc where oid = 'core.ad_account_total()'::regprocedure)) > 0)::text || (position('30000' in (select prosrc from pg_proc where oid = 'core.ad_month_effective_limit()'::regprocedure)) > 0)::text"; }
+on36=$(has36); D -f db/rollback/0036_down.sql >/dev/null; off36=$(has36); D -f db/migrations/0036_ad_account_monthly.sql >/dev/null; back36=$(has36)
+[ "$on36" = truetrue ] && [ "$off36" = falsefalse ] && [ "$back36" = truetrue ] || { echo "FAIL | M36 0036 롤백 적용=$on36 롤백=$off36 재적용=$back36" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M36 계정 누적 월별 0036 롤백: 평생 합계·월 예산만 한도 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0035 광고 자동 스케줄러·활성화: 적용 → 롤백(함수 제거, 예약·키워드·CPC 기록 보존) → 재적용
+D -f db/migrations/0035_ad_enable_scheduler.sql >/dev/null
+D -f db/rollback/0035_down.sql >/dev/null
+gone35=$(D -At -c "select (to_regprocedure('api.ad_sched_claim(uuid)') is null and to_regprocedure('api.ad_enable_schedule(uuid,uuid,text,text,text,timestamptz,text[],text,int,text)') is null and to_regclass('core.ad_enable_jobs') is not null and to_regclass('core.ad_keyword_registry') is not null)")
+D -f db/migrations/0035_ad_enable_scheduler.sql >/dev/null
+back35=$(D -At -c "select to_regprocedure('api.ad_sched_gate(uuid,uuid)') is not null and (select max_cpc_krw from core.ad_cpc_policy) = 0")
+[ "$gone35" = t ] && [ "$back35" = t ] || { echo "FAIL | M35 0035 롤백 gone=$gone35 재적용=$back35" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M35 광고 스케줄러·활성화 0035 롤백: 함수 제거·기록 보존, 재적용 일치(CPC 기본 0원)" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null

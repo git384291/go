@@ -75,7 +75,7 @@ select test.expect_eq(test.lx('owner', 'ad_spend_request', $$'camp-mc-b', 1000, 
 select test.expect_eq(test.lx('owner', 'ad_spend_request', $$'camp-mc-b', 500, 'req-mc-b-00000004'$$, 'decision'), 'ALLOW', 'M8f 9,000 + 500 = 9,500 허용');
 select test.expect_eq(test.lx0('owner', 'ad_monthly_budget_get', 'used_krw'), '9500', 'M8g 조회: 이번 달 사용액 9,500');
 -- M13 기존 일·계정 일 한도 유지: 월 예산을 넉넉히 올려도 캠페인 일 1만·계정 일 1만은 그대로
-select test.expect_eq(test.lx('owner', 'ad_monthly_budget_set', $$1000000, 10, '넉넉한 월 예산'$$, 'effective_limit_krw'), '900000', 'M13 월 예산 100만원(판정 90만)');
+select test.expect_eq(test.lx('owner', 'ad_monthly_budget_set', $$1000000, 10, '넉넉한 월 예산'$$, 'effective_limit_krw'), '30000', 'M13 월 예산 100만원이어도 판정 한도는 계정 월 3만원(0036)');
 select test.expect_eq(test.lx('owner', 'ad_spend_request', $$'camp-mc-b', 7000, 'req-mc-b-00000005'$$, 'reason'), 'DAILY_CAP_EXCEEDED', 'M13b B 캠페인 일 한도(3,500 + 7,000 > 1만) 유지');
 select test.expect_eq(test.lx('owner', 'ad_spend_request', $$'camp-mc-b', 2000, 'req-mc-b-00000006'$$, 'reason'), 'ACCOUNT_DAILY_CAP_EXCEEDED', 'M13c 계정 일 한도(8,500 + 2,000 > 1만) 유지');
 -- M14 같은 요청 반복
