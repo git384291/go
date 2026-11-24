@@ -41,11 +41,26 @@ export async function runPolicyScreen({ sql, n, check, adm, pj, chat, BASE, owne
     await ed.waitForTimeout(300);
     const badMsg = await ed.locator('section[aria-label="정책 업로드"]').innerText();
     check('PS1 화면 입력 오류: 깨진 JSON은 "JSON 형식이 올바르지 않습니다", 서버 요청·DB 저장 없음', badMsg.includes('JSON 형식이 올바르지 않습니다') && (await rowsOf(UI)).length === 0);
-    await ed.fill('textarea[aria-label="정책 JSON"]', JSON.stringify({ ...v1, terms: { ...v1.terms, monthlyFee: { known: true, value: { amountKrw: '27,700', vat: 'included' } } } }, null, 2));
-    await ed.click('button:has-text("초안 저장")');
-    await ed.waitForTimeout(800);
-    const rej = await ed.locator('section[aria-label="정책 업로드"]').innerText();
-    check('PS2 화면 데이터 검증: 금액이 숫자가 아니면 "거부됨"으로 막히고 DB 0건', rej.includes('거부됨') && (await rowsOf(UI)).length === 0, rej.slice(0, 80));
+    // 설계(기존): 형식(키·known)만 맞으면 견적 불가 초안도 저장되고 사유를 보여 준다. 다른 상품 ID로 분리(본 흐름 개정 번호에 섞이지 않게)
+    const BAD = 'next-e2e-ui0';
+    const vb = src(BAD, 1, 1); vb.terms.monthlyFee = { known: true, value: { amountKrw: '27,700', vat: 'included' } };
+    await ed.fill('textarea[aria-label="정책 JSON"]', JSON.stringify(vb, null, 2));
+    await Promise.all([ed.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => null), ed.click('button:has-text("초안 저장")')]);
+    const rb = await rowsOf(BAD);
+    const dryBad = await pj(await adm('/api/admin/policies', editor, { method: 'POST', body: JSON.stringify({ ...vb, dryRun: true }) }));
+    check('PS2 화면 데이터 검증: 금액이 숫자가 아니면 "견적 불가"로 판정(사유 표시), 초안은 저장되나 견적 가능 아님', rb.length === 1 && rb[0].state === 'draft' && dryBad.quotable === false && Array.isArray(dryBad.reasons) && dryBad.reasons.length > 0,
+      `rows=${rb.length} quotable=${dryBad.quotable} reasons=${(dryBad.reasons ?? []).join('|')}`);
+    // 진단(판정 없음): 견적 불가 초안을 대표가 승인할 수 있는지, 승인되면 고객 상담이 어떻게 되는지 기록만 한다(결과는 보고서에)
+    {
+      const polD = (c, body, p) => adm(p, c, { method: 'POST', body: JSON.stringify(body) });
+      const sub = await polD(editor, { action: 'submit' }, `/api/admin/policies/${rb[0]?.id}`);
+      const apr = await polD(owner, { action: 'approve', reason: '견적 불가 초안 승인 시도(진단)', checks: { source_matched: true, validity: true, vat: true, benefit_terms: true, region_bundle: true } }, `/api/admin/policies/${rb[0]?.id}`);
+      const st = (await rowsOf(BAD))[0]?.state;
+      await sql.unsafe(`update core.feature_flags set enabled = true where key = 'policy_publish'`);
+      const rq = await chat({ productId: BAD }, '198.51.100.149');
+      await sql.unsafe(`update core.feature_flags set enabled = ${flag0 === true} where key = 'policy_publish'`);
+      console.log(`INFO | PS2d 견적 불가 초안: submit=${sub.status} approve=${apr.status} state=${st} chat=${rq.status} next=${rq.j?.next ?? '-'} amount=${NUM.test(String(rq.j?.text ?? ''))}`);
+    }
     await ed.fill('textarea[aria-label="정책 JSON"]', JSON.stringify(v1, null, 2));
     await ed.click('button:has-text("검증만")');
     await ed.locator('section[aria-label="정책 업로드"]', { hasText: '검증 완료' }).waitFor({ timeout: 15000 });
