@@ -81,8 +81,8 @@ export function createAiBudget(env: Record<string, string | undefined>, log: Con
       used += cost;
       let done = false;
       const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
-      // 확정은 1원 이상(호출이 나간 뒤 0원으로 지우지 못함, DB 0028와 같음). 0원은 취소(호출 안 함)뿐
-      return { async confirm(a) { settle(Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain() { settle(cost); } };
+      // 확정은 1원 이상 예약 금액 이하(호출이 나간 뒤 0원으로 지우지 못함·예약 초과 확정 불가, DB 0028·0030과 같음). 0원은 취소(호출 안 함)뿐
+      return { async confirm(a) { settle(Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain() { settle(cost); } };
     },
   };
 }
@@ -111,7 +111,7 @@ export function createDbAiBudget(run: RunAi): AiBudget {
         }
       };
       return {
-        confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(actual) ? actual : cost)))}::int)`),
+        confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(actual) ? actual : cost)))}::int)`), // 0030: 예약 초과 확정은 DB도 거부
         cancel: () => settle((tx) => tx`select api.ai_budget_release(${id as string}::bigint)`),
         uncertain: () => settle((tx) => tx`select api.ai_budget_uncertain(${id as string}::bigint)`),
       };

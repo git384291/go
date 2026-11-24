@@ -343,7 +343,7 @@ test('RC13 정적: 서버 상한·클라이언트 timeout·중복 잠금·무한
   assert.ok(/AbortController/.test(ui) && /CLIENT_TIMEOUT_MS/.test(ui) && /sending\.current/.test(ui), '브라우저 timeout·동기 잠금');
   assert.ok(!/setInterval|while\s*\(/.test(ui) && (ui.match(/fetch\(/g) ?? []).length === 1, '브라우저 자동 재시도 없음');
   assert.ok(/guard\.leave\(key\)/.test(rd('src/server/consult/chatHandler.ts')), '잠금은 finally에서 해제');
-  assert.ok(/recoveringModelFor\(createModel\(process\.env\)\)/.test(rd('src/app/api/consult/chat/route.ts')));
+  assert.ok(/recoveringModelFor\(consultModelFromEnv\(process\.env, null\)\)/.test(rd('src/app/api/consult/chat/route.ts')));
   // 같은 모델 객체는 같은 복구 상태(차단기)를 쓴다
   const m = script(['ok']).m;
   assert.equal(recoveringModelFor(m), recoveringModelFor(m));

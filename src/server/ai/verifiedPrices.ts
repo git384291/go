@@ -1,5 +1,5 @@
-// 공식 확인된 AI 모델 단가 기록(PM 11/24 ②). **기록일 뿐 연결하지 않는다**: 상담 경로는 여전히 mock 모델만(createModel), 실제 어댑터 연결·운영 활성화는
-// 실제 접근 권한·모델 품질 검증과 별도 승인 뒤에만. 가격이 바뀌면 공식 문서를 다시 확인해 이 기록과 확인일을 함께 고친다.
+// 공식 확인된 AI 모델 단가 기록(PM 11/24 ②). 상담 경로 가격표로 연결(openAiChatModel.consultModelFromEnv, PM 11/24 후속). 실제 전송·운영 활성화는
+// 실제 접근 권한·모델 품질 검증과 별도 승인 뒤에만(라우트 transport null). 가격이 바뀌면 공식 문서를 다시 확인해 이 기록과 확인일을 함께 고친다.
 // - 원화 가격표는 비용 계산용 보수적 환율(1,800원/USD, 실제 청구 환율 아님)로 바꾼 값이다(krwPriceFromUsd, 원 단위 올림).
 // - 여기 없는 모델은 가격 불확실 → 호출 금지(priceFor null).
 import { krwPriceFromUsd, type ModelPrice, type UsdModelPrice } from './costModel';
