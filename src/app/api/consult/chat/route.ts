@@ -2,6 +2,7 @@ import { clientIpFrom, rateLimitIpKey } from '@/server/http/clientIp';
 import { createLimiter, handleChat } from '@/server/consult/chatHandler';
 import { createDbAiBudget } from '@/server/consult/chatModel';
 import { consultModelFromEnv } from '@/server/consult/openAiChatModel';
+import { openAiFetchTransport } from '@/server/ai/openAiTransport';
 import { recoveringModelFor } from '@/server/consult/modelRecovery';
 import { sessionKeyFromEnv } from '@/server/consult/consultSession';
 import { dbPolicyProvider } from '@/server/consult/publishedPolicies';
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
   return handleChat(req, {
     enabled: process.env.CONSULT_CHAT_ENABLED === 'true',
     chat: {
-      supplierId, model: recoveringModelFor(consultModelFromEnv(process.env, null)), budget,
+      supplierId, model: recoveringModelFor(consultModelFromEnv(process.env, openAiFetchTransport)), budget,
       provider: dbPolicyProvider(async () => {
         const rows = await withRole('public', (tx) => tx`select api.policy_published() as p`);
         return (rows as unknown as { p: unknown }[]).map((r) => r.p);

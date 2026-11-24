@@ -6,7 +6,8 @@
  */
 export type ModelInput = { readonly system: string; readonly user: string; readonly approved: string };
 /** 재시도 포함 호출에서 실제로 보낸 횟수(복구 래퍼가 올린다). 모델이 세지 않으면 0이고, 그때는 예약 비용 전액을 확정한다 */
-export type CallMeter = { sent: number };
+export type CallMeter = { sent: number; usageKrw?: number; usageCount?: number };
+// usageKrw·usageCount: 응답 usage로 실제 비용을 안 전송의 합계·개수(실제 어댑터만 채운다). 나머지 전송은 1회 예약 비용으로 센다(보수적)
 export type ChatModel = {
   readonly name: string;
   /** 1회 상담 답변에 예약하는 최대 비용(재시도 포함) */
