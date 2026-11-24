@@ -119,3 +119,30 @@ set session_replication_role = replica;
 delete from core.ad_enable_jobs;
 set session_replication_role = origin;
 update core.ad_cpc_policy set max_cpc_krw = 0;
+
+-- EN14 경합: 최종 판정(ALLOW) 직후 대표가 예산 승인을 철회하면, 매체 활성화 뒤 결과 기록(enabled)을 거부해야 한다(성공으로 남기지 않음 → 서버가 즉시 중지)
+set role app_ad_monitor;
+select api.ad_monitor_record(true, '{}'::jsonb);
+reset role;
+update core.ad_cpc_policy set max_cpc_krw = 300;
+set role app_staff;
+select test.expect_ok(test.adapprove('owner', 'camp-rv', 4000, 12000, 72, '경합 재현 승인'), 'EN14a 예산 승인');
+select test.expect_eq(test.lx('owner', 'ad_launch_begin', $$'camp-rv', 'req-rv-launch-00001', 4000$$, 'ok'), 'true', 'EN14b launch');
+select test.expect_eq(test.lx('owner', 'ad_spend_request_window', $$'camp-rv', 4000, 'req-rv-launch-00001'$$, 'decision'), 'ALLOW', 'EN14c 예약');
+select test.expect_ok(test.adcall('owner', 'ad_launch_finish', $$'req-rv-launch-00001', 'active', 'mock-rv-1', null$$), 'EN14d active');
+select test.expect_eq(test.lx('owner', 'ad_enable_schedule', format('%L, %L, now() + interval ''1 hour'', array[%L], %L, 100, %L', 'camp-rv', 'req-rv-launch-00001', '새집 인터넷', repeat('d', 64), '경합 예약'), 'ok'), 'true', 'EN14e 예약');
+reset role;
+update core.ad_enable_jobs set run_at = now() - interval '1 second' where campaign_key = 'camp-rv';
+select api.ad_sched_claim('dddddddd-0000-4000-8000-000000000001');
+select test.expect_eq($$select api.ad_sched_gate((select id from core.ad_enable_jobs where campaign_key = 'camp-rv' limit 1), 'dddddddd-0000-4000-8000-000000000001') ->> 'decision'$$, 'ALLOW', 'EN14f 최종 판정 통과');
+set role app_staff;
+select test.expect_ok(test.adcall('owner', 'ad_budget_revoke', $$'camp-rv', '판정 직후 승인 철회'$$), 'EN14g 판정 직후 대표가 승인 철회');
+reset role;
+select test.expect_error($$select api.ad_sched_finish((select id from core.ad_enable_jobs where campaign_key = 'camp-rv' limit 1), 'dddddddd-0000-4000-8000-000000000001', 'enabled', 'ENABLED')$$, '55000', 'EN14h 활성화 뒤 결과 기록 시 다시 판정: 승인 철회면 enabled 기록 거부(서버가 즉시 중지)');
+select test.expect_eq($$select state from core.ad_enable_jobs where campaign_key = 'camp-rv'$$, 'running', 'EN14i 거부 뒤 예약은 실행 중으로 남아 10분 뒤 unknown·경고(EN13 경로)');
+select test.expect_ok($$select api.ad_sched_finish((select id from core.ad_enable_jobs where campaign_key = 'camp-rv' limit 1), 'dddddddd-0000-4000-8000-000000000001', 'unknown', 'STOPPED')$$, 'EN14j 실패·불명 기록은 다시 판정 없이 허용(중지 기록이 막히지 않음)');
+\ir reset_ad_account.sql
+set session_replication_role = replica;
+delete from core.ad_enable_jobs;
+set session_replication_role = origin;
+update core.ad_cpc_policy set max_cpc_krw = 0;

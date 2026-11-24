@@ -348,9 +348,15 @@ begin
      or (p_code is not null and p_code !~ '^[A-Z_]{2,40}$') then
     raise exception 'INVALID_SCHEDULER' using errcode = '22023';
   end if;
+  perform pg_advisory_xact_lock(hashtextextended('adspend:account', 0));
   select * into v_job from core.ad_enable_jobs j where j.id = p_job for update;
   if not found or v_job.state <> 'running' or v_job.run_id is distinct from p_run_id then
     raise exception 'JOB_NOT_CLAIMED' using errcode = '55000';
+  end if;
+  -- 판정(gate)과 활성화 사이에 승인 철회·키워드 철회·한도 변화가 생길 수 있다: enabled는 지금 다시 판정을 통과할 때만 기록.
+  -- 통과하지 못하면 기록하지 않고 오류 → 서버가 즉시 중지(pause + 승인 철회), 예약은 running으로 남아 10분 뒤 unknown·경고
+  if p_state = 'enabled' and core.ad_enable_check(v_job.campaign_key, v_job.launch_request_key, v_job.keywords, v_job.max_cpc_krw, now()) is not null then
+    raise exception 'ENABLE_REVOKED' using errcode = '55000';
   end if;
   update core.ad_enable_jobs set state = p_state, result_code = p_code, updated_at = now() where id = p_job;
   if p_state = 'unknown' and not exists (select 1 from core.ad_alerts al where al.campaign_key = v_job.campaign_key and al.state = 'open') then
