@@ -1,4 +1,4 @@
--- 0052 롤백: 신청 1건 파기 함수 제거, 고객 파기·만료 파기 0002 정의 복원
+-- 0062 롤백: 신청 1건 파기 함수 제거, 고객 파기·만료 파기 0002 정의 복원
 begin;
 drop function if exists api.purge_lead(uuid, uuid, text, uuid, text);
 drop function if exists core.purge_lead_internal(uuid, uuid, text);

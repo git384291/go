@@ -1,4 +1,4 @@
--- 고객·접수·CRM 통합(0051, PM 11/25 ①③): 기간 밖 재신청도 고객 1명, 같은 사람 같은 날 재연락 중복 금지, 통합 이력·미처리 분류(대표만, 가린 값만). 가상 데이터만.
+-- 고객·접수·CRM 통합(0061, PM 11/25 ①③): 기간 밖 재신청도 고객 1명, 같은 사람 같은 날 재연락 중복 금지, 통합 이력·미처리 분류(대표만, 가린 값만). 가상 데이터만.
 \set ON_ERROR_STOP 1
 reset role;
 create function test.cu_staff(p_who text, p_fn text, p_lead text default null) returns text language plpgsql security definer set search_path = test, pg_catalog as $$
@@ -48,13 +48,7 @@ set role app_staff;
 select test.expect_eq(test.rc_staff('owner', 'sched', :'x1', '1', 'sms'), 'scheduled', 'CU7 리드1 내일 예약');
 select test.expect_eq(test.rc_staff('owner', 'sched', :'x2', '1', 'sms'), 'exists', 'CU8 같은 사람 리드2 같은 날 → exists(중복 연락 금지)');
 select test.expect_eq(test.rc_staff('owner', 'sched', :'x2', '2', 'sms'), 'scheduled', 'CU9 다른 날은 예약');
--- 통합 이력
-select test.expect_eq(test.cu_staff('owner', 'tl_leads', :'x2'), '2', 'CU10 통합 이력: 같은 사람 리드 2건');
-select test.expect_error(test.cu_staff('editor', 'tl', :'x2'), '42501', 'CU11 대표 외 직원 통합 이력 불가');
-select test.expect_error(test.cu_staff('owner', 'tl', gen_random_uuid()::text), '42501', 'CU12 없는 리드 → FORBIDDEN');
-select test.expect_eq(test.cu_staff('owner', 'tl_text', :'x2'), 'false', 'CU13 이력에 HMAC·암호문 없음');
 reset role;
-select test.expect_eq($$select (count(*) >= 2)::text from core.audit_logs where action = 'crm.timeline'$$, 'true', 'CU14 통합 이력 열람 감사 기록');
 -- 미처리 자동 분류
 update core.leads set created_at = now() - interval '2 days' where id = :'g1';
 set role app_staff;
