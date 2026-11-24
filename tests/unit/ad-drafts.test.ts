@@ -78,6 +78,8 @@ test('AD4 정적: 초안·캠페인 모듈은 네트워크·환경·저장·로�
     'src/server/advertising/video/storyboard.ts',
     'src/server/advertising/youtubeAdPreparation.ts', 'src/server/advertising/youtubePrivatePublisher.ts',
     // PM 11/22 4c7f269 지시 9: 상담 AI 모델 어댑터(미연결 준비 코드)가 범용 HTTP 상한 모듈(boundedHttp)만 재사용(새 사용처 1개, 검수 필요)
+    // PM 11/24 ④: 상담 AI 실제 전송(허용 주소 1곳)이 BodyTransport 타입만 import(새 사용처 1개)
+    'src/server/ai/openAiTransport.ts',
     'src/server/consult/openAiChatModel.ts',
   ], '광고 서버 모듈을 import하는 화면·API·route 없음(정확 목록)');
 });
