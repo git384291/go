@@ -47,7 +47,14 @@ export async function ingestCall(deps: CallIngestDeps, input: CallIngestInput): 
   // 안내를 재생하지 않은 통화의 음성은 저장소에 올리지도 않는다
   const enc = input.audio && input.noticeVersion ? encryptRecording(deps.keys, input.audio) : null;
   const storagePath = enc ? newRecordingPath() : null;
-  if (enc && storagePath) await deps.store.put(storagePath, enc.data);
+  // 저장 실패: DB에 아무것도 남기지 않고 오류 → 통신사 재전송으로 다시 처리(파일 없음)
+  if (enc && storagePath) {
+    try {
+      await deps.store.put(storagePath, enc.data);
+    } catch {
+      throw new CallIngestError('STORE_FAILED');
+    }
+  }
   const args: CallIngestArgs = {
     provider: input.provider, providerCallId: input.providerCallId, direction: input.direction, phoneHmac,
     startedEpoch: input.startedEpoch, durationSec: input.durationSec, noticeVersion: input.noticeVersion,
@@ -57,5 +64,16 @@ export async function ingestCall(deps: CallIngestDeps, input: CallIngestInput): 
   const token = deps.sign(['call-ingest', args.provider, args.providerCallId, args.direction, args.phoneHmac,
     String(args.startedEpoch), String(args.durationSec), args.noticeVersion, args.storagePath, args.audioSha256,
     args.audioBytes === null ? null : String(args.audioBytes), args.keyVersion, args.agentId]);
-  return deps.ingest(token, args);
+  try {
+    return await deps.ingest(token, args);
+  } catch (e) {
+    // DB 기록 실패: 방금 올린 암호화 파일이 DB 삭제 대기열에도 없는 '고아 파일'로 남지 않게 즉시 지운다.
+    if (!storagePath) throw e;
+    try {
+      await deps.store.delete(storagePath);
+    } catch {
+      throw new CallIngestError(`ORPHAN_RECORDING:${storagePath}`);   // 경로만(개인정보 없음) — 운영 알림·수동 삭제 대상
+    }
+    throw e;
+  }
 }
