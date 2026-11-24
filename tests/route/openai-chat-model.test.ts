@@ -71,8 +71,10 @@ test('OC4 상담 흐름에 넣어도 가드 유지: 승인 밖 금액을 말하�
   const r2 = await answerChat({ ...rec, model: broken } as never, { message: '요금이 궁금해요', carrier: 'carrier-x', productId: 'p', regionCode: 'r' }, new Date());
   assert.ok(r2.ok && r2.source === 'fallback');
 });
-test('OC5 미연결: createModel은 mock 외에 모델을 만들지 않고, 상담 경로·라우트가 이 어댑터를 가져다 쓰지 않음', () => {
+test('OC5 연결 경로 고정(PM 11/24 ④): createModel은 mock만, 실제 어댑터는 liveModel.createConsultModel만 만들고 라우트는 그것만 쓴다', () => {
   for (const v of ['openai', 'gpt', 'real', '']) assert.equal(createModel({ CONSULT_AI_MODEL: v }), null);
+  assert.match(readFileSync('src/server/consult/liveModel.ts', 'utf8'), /createOpenAiChatModel\(/);
+  assert.match(readFileSync('src/app/api/consult/chat/route.ts', 'utf8'), /recoveringModelFor\(createConsultModel\(process\.env\)\)/);
   for (const f of ['src/server/consult/chatModel.ts', 'src/server/consult/chatAnswer.ts', 'src/server/consult/chatHandler.ts', 'src/app/api/consult/chat/route.ts']) {
     assert.ok(!readFileSync(f, 'utf8').includes('openAiChatModel'), f);
   }

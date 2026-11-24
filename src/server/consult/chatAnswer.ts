@@ -119,7 +119,12 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const meter: CallMeter = { sent: 0 };
   grantBudgetPermit(meter); // 공통 비용 게이트: 예약이 성공한 이 호출에만 전송 허가
   // 확정 비용: 재시도 래퍼가 센 전송 횟수만큼(예약 이하). 세지 않는 모델은 예약 전액(보수적)
-  const spent = () => (model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw);
+  // PM 11/24 ④: 응답 usage를 아는 전송은 실제 비용, 모르는 전송(실패·시간 초과 등)은 1회 예약 비용. 합계는 예약 이하·1원 이상
+  const spent = () => {
+    const known = Math.min(meter.sent, meter.usageCount ?? 0);
+    if (known > 0) return Math.max(1, Math.min(model.costPerCallKrw, (meter.usageKrw ?? 0) + (meter.sent - known) * (model.attemptCostKrw ?? model.costPerCallKrw)));
+    return model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw;
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const reply = await Promise.race([

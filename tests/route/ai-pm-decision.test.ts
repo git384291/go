@@ -54,7 +54,7 @@ test('PD4 단가 미확인 모델은 호출 차단(전송 0회), 기록은 상�
   const files: string[] = [];
   const walk = (d: string) => { for (const n of readdirSync(d)) { const f = path.join(d, n); if (statSync(f).isDirectory()) walk(f); else if (/\.(ts|tsx)$/.test(n)) files.push(f); } };
   walk('src');
-  assert.deepEqual(files.filter((f) => /from ['"][^'"]*verifiedPrices['"]/.test(readFileSync(f, 'utf8'))), []);
+  assert.deepEqual(files.filter((f) => /from ['"][^'"]*verifiedPrices['"]/.test(readFileSync(f, 'utf8'))), [path.join('src', 'server', 'consult', 'liveModel.ts')], '확인 기록은 실제 모델 선택(liveModel)에서만(PM 11/24 ④)');
   assert.match(readFileSync('src/server/ai/costModel.ts', 'utf8'), /실제 청구 환율 아님/);
   assert.match(readFileSync('src/server/consult/chatModel.ts', 'utf8'), /CONSULT_AI_MODEL === 'mock' \? mockModel : null/, '상담 모델은 여전히 mock뿐');
 });
