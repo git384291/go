@@ -35,8 +35,8 @@ export function createModel(env: Record<string, string | undefined>): ChatModel 
 export class ModelNotCalledError extends Error {}
 
 /** 사용료 예약 → 호출 → 확정(실제 비용)/취소(호출 안 함). 정산이 오지 않은 예약은 DB가 예약 비용 전액으로 센다. */
-// - uncertain(): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 예약 전액으로 닫고 대표 조정 대기(0028). 없으면 확정으로 처리한다.
-export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(): Promise<void> };
+// - uncertain(금액?): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 금액(1원 이상·예약 이하, 없으면 예약 전액)으로 닫고 대표 조정 대기(0028·0033). 없으면 확정으로 처리한다.
+export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(amountKrw?: number): Promise<void> };
 /** 예약 문맥(0028): 요청 ID(멱등, 같은 ID는 다시 예약하지 않음)와 사용자 키(서버 HMAC 64자리, 사용자별 일·월 한도) */
 /** net(0032, 선택): 회선 키(서버 HMAC 64자리). 있으면 회선별 하루 상한도 DB가 같은 잠금 안에서 본다. 형식이 틀리면 예약 거부(fail-closed) */
 export type ReserveContext = { readonly requestId: string; readonly scope: string; readonly net?: string };
@@ -84,7 +84,7 @@ export function createAiBudget(env: Record<string, string | undefined>, log: Con
       let done = false;
       const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
       // 확정은 1원 이상 예약 금액 이하(호출이 나간 뒤 0원으로 지우지 못함·예약 초과 확정 불가, DB 0028·0030과 같음). 0원은 취소(호출 안 함)뿐
-      return { async confirm(a) { settle(Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain() { settle(cost); } };
+      return { async confirm(a) { settle(Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain(a?: number) { settle(a === undefined ? cost : Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))); } };
     },
   };
 }
@@ -119,7 +119,7 @@ export function createDbAiBudget(run: RunAi): AiBudget {
       return {
         confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(actual) ? actual : cost)))}::int)`), // 0030: 예약 초과 확정은 DB도 거부
         cancel: () => settle((tx) => tx`select api.ai_budget_release(${id as string}::bigint)`),
-        uncertain: () => settle((tx) => tx`select api.ai_budget_uncertain(${id as string}::bigint)`),
+        uncertain: (a?: number) => settle((tx) => (a === undefined ? tx`select api.ai_budget_uncertain(${id as string}::bigint)` : tx`select api.ai_budget_uncertain(${id as string}::bigint, ${Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))}::int)`)), // 0033
       };
     },
   };

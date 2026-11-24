@@ -1,9 +1,9 @@
 // PM 11/24 후속: 공식 확인 가격표를 상담 경로에 연결(consultModelFromEnv) — 단가 불확실 차단·비용 한도 초과 방지. 가짜 transport만, 실제 AI 호출 0회.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { consultModelFromEnv, CONSULT_CALL_LIMITS } from '../../src/server/consult/openAiChatModel';
+import { consultModelFromEnv, CONSULT_CALL_LIMITS, CONSULT_RECOVERY_TIMING } from '../../src/server/consult/openAiChatModel';
 import { createAiBudget, mockModel, type AiBudget, type ChatModel } from '../../src/server/consult/chatModel';
-import { answerChat } from '../../src/server/consult/chatAnswer';
+import { answerChat, CHAT_TIMEOUT_DEFAULT_MS } from '../../src/server/consult/chatAnswer';
 import { withRecovery } from '../../src/server/consult/modelRecovery';
 import { estimateMaxKrw, priceFor, type ModelPrice } from '../../src/server/ai/costModel';
 import { VERIFIED_USD_PRICES, verifiedKrwPrices } from '../../src/server/ai/verifiedPrices';
@@ -32,7 +32,7 @@ function tracked(limit: number) {
       return {
         async confirm(a) { log.spent += Math.max(1, Math.min(c, Math.trunc(a))); await r.confirm(a); },
         async cancel() { log.cancels++; await r.cancel(); },
-        async uncertain() { log.uncertain++; log.spent += c; await r.uncertain!(); },
+        async uncertain(a?: number) { log.uncertain++; log.spent += a === undefined ? c : Math.max(1, Math.min(c, Math.trunc(a))); await r.uncertain!(a); },
       };
     },
   };
@@ -131,4 +131,23 @@ test('PW6 비용 한도 초과 방지(시간 초과): 과금 불확실 = 예약 
 test('PW7 PM 하드 한도 대비(계산 확인, PM 11/24 A안): 1요청 최대 6원 → 사용자 하루 300원 = 최대 50요청, 전체 하루 3,000원 = 최대 500요청, 월 50,000원 = 최대 8,333요청', () => {
   const r = withRecovery(consultModelFromEnv(ON, fake().t)!);
   assert.deepEqual([300, 3000, 50000].map((l) => Math.floor(l / r.costPerCallKrw)), [50, 500, 8333]);
+});
+
+test('PW8 시간 초과 정산(PM 11/24 보완): 라우트 재시도 시간(1회 = 전체)이면 첫 시도 시간 초과 뒤 재시도 없음 → 보낸 1회분 3원만 불확실 정산(예약 6원 전액 아님)', async () => {
+  assert.equal(CONSULT_RECOVERY_TIMING.attemptMs, CONSULT_RECOVERY_TIMING.totalMs);
+  assert.ok(CONSULT_CALL_LIMITS.timeoutMs >= CONSULT_RECOVERY_TIMING.attemptMs, '어댑터 시간 한도 ≥ 1회 시도 시간');
+  assert.ok(CONSULT_RECOVERY_TIMING.totalMs + 500 <= CHAT_TIMEOUT_DEFAULT_MS, '상담 전체 제한 안에서 끝남');
+  assert.ok(CONSULT_RECOVERY_TIMING.attemptMs >= 2 * 3500, '실측 최대 약 4초 대비 여유(이전 3.5초의 2배 이상)');
+  const f = fake('hang');
+  const { budget, log } = tracked(10);
+  const m = withRecovery(consultModelFromEnv(ON, f.t)!, { sleep: async () => {}, attemptMs: 50, totalMs: 50, baseDelayMs: 0, maxDelayMs: 0, log: () => {} }); // 라우트와 같은 비율(1회 = 전체)
+  const r = await ask(m, budget);
+  assert.ok(r.ok && r.source === 'fallback');
+  assert.equal(f.calls, 1, '재시도 없음');
+  assert.deepEqual([log.holds, log.uncertain, log.spent], [1, 1, 3], '보낸 1회 × 3원');
+  // 이어서: 매번 보낸 횟수 × 3원만 쌓이고(전액 6원 아님), 한도 10원을 넘기지 않는다
+  for (let i = 0; i < 5; i++) await ask(m, budget);
+  assert.equal(log.spent, 3 * log.uncertain);
+  assert.equal(f.calls, log.uncertain, '불확실 1건 = 전송 1회');
+  assert.ok(log.spent <= 10 && log.denied >= 1);
 });

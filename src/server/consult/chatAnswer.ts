@@ -141,7 +141,7 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     // 0028: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)
     const f = failureCode(e);
     if (e instanceof ModelNotCalledError) { await hold.cancel(); note({ stage: 'not_called', ...f, sent: meter.sent, settle: 'cancel' }); }
-    else if (isUncertain(e) && hold.uncertain) { await hold.uncertain(); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'uncertain' }); }
+    else if (isUncertain(e) && hold.uncertain) { await hold.uncertain(spent()); // PM 11/24 보완: 보낸 횟수 × 1회 최대 비용(예약 전액 아님) note({ stage: 'failed', ...f, sent: meter.sent, settle: 'uncertain' }); }
     else { await hold.confirm(spent()); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'confirm' }); }
     return unavailable();
   } finally {

@@ -65,7 +65,7 @@ function spyBudget(inner: AiBudget) {
       const w: Reservation = {
         async confirm(a) { log.push(`confirm(${a})`); return r.confirm(a); },
         async cancel() { log.push('cancel'); return r.cancel(); },
-        async uncertain() { log.push('uncertain'); return r.uncertain ? r.uncertain() : r.confirm(cost); },
+        async uncertain(a?: number) { log.push(a === undefined ? 'uncertain' : `uncertain(${a})`); return r.uncertain ? r.uncertain(a) : r.confirm(a ?? cost); },
       };
       return w;
     },
@@ -154,15 +154,16 @@ test('TEST-05 Provider 무응답: 전송 1회, 환불하지 않고 "불확실"�
   const r = await answerChat(deps({ model: createOpenAiChatModel(cfg(p.t)), budget: s.b, timeoutMs: 40 }), input(), NOW);
   assert.ok(r.ok && r.source === 'fallback');
   assert.equal(p.calls.length, 1);
-  assert.deepEqual(s.log, ['reserve(10)=ok', 'uncertain']);
+  assert.deepEqual(s.log, ['reserve(10)=ok', 'uncertain(10)']);
   assert.equal(await s.b.reserve(991), null); // 불확실 10원이 그대로 잡혀 있다
 });
-test('TEST-05r 복구 래퍼 + 무응답: 추가 시도 없이 1회, 불확실(재시도 포함 예약 20원 전액 보존)', async () => {
+test('TEST-05r 복구 래퍼 + 무응답: 추가 시도 없이 1회, 불확실은 보낸 1회분 10원(재시도 포함 예약 20원 전액 아님, PM 11/24 보완 0033)', async () => {
   const p = mockProvider({ hang: true });
   const s = spyBudget(mem('1000'));
   await answerChat(deps({ model: recovering(p.t), budget: s.b, timeoutMs: 40 }), input(), NOW);
   assert.equal(p.calls.length, 1);
-  assert.deepEqual(s.log, ['reserve(20)=ok', 'uncertain']);
+  assert.deepEqual(s.log, ['reserve(20)=ok', 'uncertain(10)']);
+  assert.ok(await s.b.reserve(990), '불확실 10원만 잡힘 → 990원 예약 가능');
 });
 test('TEST-06 Provider 429·500·503: 상한 안에서만 재시도(기본 2회, 최대 3회), 재시도 비용 사전 예약·실제 전송분 확정, 안전 안내문', async () => {
   for (const status of [429, 500, 503]) {
