@@ -145,6 +145,83 @@ for i in $(seq 1 100); do hold 1 > "$TMP/p$i" & done; wait
 eq "D15 성공 1건" "$(cat "$TMP"/p* | grep -cE '^[0-9]+$')" 1
 eq "D15 오류 0건" "$(errs "$TMP"/p*)" 0
 
+# ───── PM 11/24 AI 비용 하드 한도 최종검증(B1~B4) ─────
+holdS()  { as_ai "select api.ai_budget_hold($1, '$(cat /proc/sys/kernel/random/uuid)', '$2')::text"; }  # 사용자 키 지정
+sk()     { printf '%064x' "$1"; }  # 시험용 사용자 키(64자리 16진)
+# PM 확정 한도: 전체 일 3,000 · 월 50,000 · 사용자 일 300 · 월 1,500 · 전체 동시 5 · 사용자 동시 1
+pm_limits() { "${SU[@]}" -c "truncate core.ai_usage_adjustments, core.ai_usage_closures, core.ai_usage_ledger" -c "update core.ai_budget_config set paused = false, monthly_limit_krw = 50000, daily_limit_krw = 3000, scope_daily_limit_krw = 300, scope_monthly_limit_krw = 1500, max_inflight = 5, scope_max_inflight = 1"; }
+# 지난 시각(한국 시간 기준)으로 확정 사용액을 넣는다: $1 금액 $2 사용자 키(빈 값 = 없음) $3 created_at 식
+seed_at() {
+  local left=$1 sc=${2:+"'$2'"} ; sc=${sc:-null}
+  while [ "$left" -gt 0 ]; do
+    local c=$(( left > 1000 ? 1000 : left ))
+    "${SU[@]}" -c "with i as (insert into core.ai_usage_ledger(month,cost_krw,scope_key,created_at) values (to_char(($3) at time zone 'Asia/Seoul','YYYY-MM'),$c,$sc,$3) returning id) insert into core.ai_usage_closures(reservation_id,kind,actual_cost_krw) select id,'confirm',$c from i" >/dev/null
+    left=$((left-c))
+  done
+}
+KST_DAY=$("${SU[@]}" -c "select extract(day from now() at time zone 'Asia/Seoul')::int")
+YESTERDAY="(now() - interval '1 day')"          # 같은 달 어제(오늘이 1일이면 지난달 → 아래에서 구분)
+LAST_MONTH="(now() - interval '40 days')"
+
+echo "== D16 B4 초과 확정 차단: 예약 10원 뒤 900원 확정 시도"
+reset 100
+id=$(hold 10)
+eq "D16 900원 확정 거부(예약 초과)" "$(as_ai "select api.ai_budget_confirm($id, 900)")" f
+eq "D16b 거부 뒤 사용액 = 예약 10원(초과 0)" "$(used)" 10
+eq "D16c 11원(예약+1)도 거부" "$(as_ai "select api.ai_budget_confirm($id, 11)")" f
+eq "D16d 예약 이하 확정은 1회 허용" "$(as_ai "select api.ai_budget_confirm($id, 7)")" t
+eq "D16e 이중 확정 반영 안 됨" "$(as_ai "select api.ai_budget_confirm($id, 3)")" f
+eq "D16f 확정 뒤 취소(환불) 반영 안 됨" "$(as_ai "select api.ai_budget_release($id)")" f
+eq "D16g 사용액 7원" "$(used)" 7
+
+echo "== D17 B2 PM 사용자 한도(일 300·월 1,500), 1회 4원(gpt-5.6-luna 재시도 포함 예약)"
+pm_limits
+U1=$(sk 1); n=0
+for i in $(seq 1 80); do r=$(holdS 4 "$U1"); if [[ "$r" =~ ^[0-9]+$ ]]; then n=$((n+1)); as_ai "select api.ai_budget_confirm($r, 4)" >/dev/null; fi; done
+eq "D17 같은 사용자 순차 80요청 → 75건(4×75=300) 뒤 거부" "$n" 75
+eq "D17b 사용자 일 사용액 300원(초과 0)" "$(used)" 300
+eq "D17c 다른 사용자는 별도 한도" "$([[ "$(holdS 4 "$(sk 2)")" =~ ^[0-9]+$ ]] && echo ok)" ok
+if [ "$KST_DAY" -ge 2 ]; then
+  pm_limits; U3=$(sk 3); seed_at 1497 "$U3" "$YESTERDAY"
+  eq "D17d 사용자 월 1,497원(어제) → 오늘 4원 거부(월 1,500 초과)" "$(holdS 4 "$U3")" ""
+  eq "D17e 같은 사용자 3원은 허용(1,500 정확히)" "$([[ "$(holdS 3 "$U3")" =~ ^[0-9]+$ ]] && echo ok)" ok
+  pm_limits; U4=$(sk 4); seed_at 300 "$U4" "$YESTERDAY"
+  eq "D18 B1 일 한도 초기화: 어제 300원 쓴 사용자도 오늘 4원 허용(같은 달)" "$([[ "$(holdS 4 "$U4")" =~ ^[0-9]+$ ]] && echo ok)" ok
+else
+  echo "SKIP | D17d·D17e·D18: 오늘(한국 시간)이 1일이라 '같은 달 어제'를 만들 수 없음"
+fi
+pm_limits; U5=$(sk 5); seed_at 1500 "$U5" "$LAST_MONTH"
+eq "D18b B1 월 초기화: 지난달 1,500원 쓴 사용자도 이번 달 4원 허용" "$([[ "$(holdS 4 "$U5")" =~ ^[0-9]+$ ]] && echo ok)" ok
+
+echo "== D19 B1 PM 전체 한도(일 3,000·월 50,000)"
+pm_limits; seed_at 2998 "" "now()"
+eq "D19 전체 오늘 2,998원 → 4원 거부(일 3,000 초과)" "$(holdS 4 "$(sk 6)")" ""
+eq "D19b 2원은 허용(3,000 정확히)" "$([[ "$(holdS 2 "$(sk 6)")" =~ ^[0-9]+$ ]] && echo ok)" ok
+if [ "$KST_DAY" -ge 2 ]; then
+  pm_limits; seed_at 49998 "" "$YESTERDAY"
+  eq "D19c 전체 이번 달 49,998원(어제) → 오늘 4원 거부(월 50,000 초과)" "$(holdS 4 "$(sk 7)")" ""
+  eq "D19d 2원은 허용(50,000 정확히)" "$([[ "$(holdS 2 "$(sk 7)")" =~ ^[0-9]+$ ]] && echo ok)" ok
+else
+  echo "SKIP | D19c·D19d: 오늘(한국 시간)이 1일"
+fi
+pm_limits; seed_at 3000 "" "$LAST_MONTH"
+eq "D19e 지난달 사용액은 이번 달 전체 한도에 안 들어감" "$([[ "$(holdS 4 "$(sk 8)")" =~ ^[0-9]+$ ]] && echo ok)" ok
+
+echo "== D20 B3 PM 동시 한도: 서로 다른 사용자 100건 동시 → 전체 5건, 같은 사용자 100건 동시 → 1건"
+pm_limits
+for i in $(seq 1 100); do holdS 4 "$(sk $((1000+i)))" > "$TMP/q$i" & done; wait
+eq "D20 성공 5건(전체 동시 5)" "$(cat "$TMP"/q* | grep -cE '^[0-9]+$')" 5
+eq "D20b 예약 총액 20원" "$(reserved_sum)" 20
+eq "D20c 오류 0건" "$(errs "$TMP"/q*)" 0
+pm_limits; U9=$(sk 9)
+for i in $(seq 1 100); do holdS 4 "$U9" > "$TMP/r$i" & done; wait
+eq "D20d 같은 사용자 성공 1건(사용자 동시 1)" "$(cat "$TMP"/r* | grep -cE '^[0-9]+$')" 1
+eq "D20e 오류 0건" "$(errs "$TMP"/r*)" 0
+pm_limits
+for i in $(seq 1 100); do ( r=$(holdS 4 "$(sk $((2000+i)))"); [[ "$r" =~ ^[0-9]+$ ]] && as_ai "select api.ai_budget_confirm($r, 4)" >/dev/null; echo "$r" ) > "$TMP/s$i" & done; wait
+eq "D20f 예약·확정 섞인 100건 동시: 사용액 ≤ 300(사용자별 다름, 전체 일 3,000 이하)" "$(( $(used) <= 3000 ))" 1
+eq "D20g 오류 0건" "$(errs "$TMP"/s*)" 0
+
 # 원상 복구(가상 DB): 한도 0원(기본), 원장 비움
 reset 0 0 0 1
 echo "== 결과: PASS $pass · FAIL $fail"

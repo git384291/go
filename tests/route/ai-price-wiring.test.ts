@@ -30,7 +30,7 @@ function tracked(limit: number) {
       if (!r) { log.denied++; return null; }
       log.holds++;
       return {
-        async confirm(a) { log.spent += Math.max(1, Math.min(1000, Math.trunc(a))); await r.confirm(a); },
+        async confirm(a) { log.spent += Math.max(1, Math.min(c, Math.trunc(a))); await r.confirm(a); },
         async cancel() { log.cancels++; await r.cancel(); },
         async uncertain() { log.uncertain++; log.spent += c; await r.uncertain!(); },
       };
