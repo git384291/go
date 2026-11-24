@@ -37,6 +37,7 @@ grant select, insert, update, delete on all tables in schema pii to fideon_api;
 grant select, insert, update on security.staff_sessions to fideon_api;
 grant usage on all sequences in schema core, pii to fideon_api;
 revoke update, delete on core.audit_logs from fideon_api;          -- 감사 로그는 추가 전용
+grant delete on core.lead_notes to fideon_api;   -- 0063: 파기 시 상담 메모 삭제(api.purge_* 안에서만)
 revoke all on security.server_keys from fideon_api;
 
 -- 5) RLS: core·pii·security 모든 테이블 enable + force, 허용 정책은 fideon_api만
@@ -80,6 +81,8 @@ grant execute on function
   security.assert_staff(uuid, uuid, text, text[]),
   security.verify_token(text, text, text[]),
   core.purge_customer_internal(uuid, uuid, text),
+  core.purge_lead_internal(uuid, uuid, text),   -- 0062: 신청 1건 파기(api 함수 소유자만)
+  core.legal_hold(uuid),   -- 0063: 계약 완료 5년 보존 판정
   core.policy_terms_shape(jsonb),   -- 0008: terms 형태 검사(check 제약이 쓴다)
   core.recontact_allowed(uuid, text)   -- 0060: 재연락 가능 판정(api 함수 소유자만 실행)
   to fideon_api;
@@ -146,7 +149,9 @@ grant execute on function
   api.recontact_schedule(uuid, uuid, text, uuid, date, text),   -- 0060: 날짜별 재연락 일정(대표만)
   api.recontact_due(uuid, uuid, text),
   api.recontact_close(uuid, uuid, text, bigint, text),
-  api.recontact_sweep(uuid, uuid, text)
+  api.recontact_sweep(uuid, uuid, text),
+  api.crm_unhandled(uuid, uuid, text),   -- 0061: 미처리 자동 분류
+  api.purge_lead(uuid, uuid, text, uuid, text)   -- 0062: 신청 1건 파기(대표만)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
