@@ -75,6 +75,7 @@ run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_ad_monthly_cap.sql >/dev/null   # 광고 월 예산 하드 한도(0034, PM 11/25 M1~M14)
+run db/tests/99_ad_account_monthly.sql >/dev/null   # 계정 누적 3만원 평생 → 월별(0036, PM 11/25 ①)
 run db/tests/99_ad_enable_scheduler.sql >/dev/null   # 광고 자동 스케줄러·PAUSED→ENABLED 안전 자동전환(0035, PM 11/25 ②③)
 echo "== 광고 월 예산 동시 요청(0034 M5·M14): 판정 한도 8,000원에 100원 × 100건 동시, 같은 요청 키 20건 동시 — 여러 연결(서버) 경합"
 "${PSQL[@]}" -d "$DB" -q -f db/tests/reset_ad_account.sql >/dev/null
@@ -837,6 +838,12 @@ D -f db/migrations/0034_ad_monthly_cap.sql >/dev/null; back34=$(has34); def34=$(
 [ "$on34" = truetruetruetrue ] && [ "$off34" = falsefalsefalsefalse ] && [ "$back34" = truetruetruetrue ] && [ "$l34a" = "$l34b" ] && [ "$def34" = 0 ] \
   || { echo "FAIL | M34 0034 롤백 적용=$on34 롤백=$off34 재적용=$back34 원장=$l34a→$l34b 재적용기본=$def34" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M34 광고 월 예산 0034 롤백: 0021 판정·감시 본문 복원·설정 표 제거·원장 보존($l34a건), 재적용 시 기본 0원" >> "$LOG_DIR/db-test.log"
+# 0036 계정 누적 월별: 적용 → 롤백(평생 합계·월 예산만 판정 한도 복원) → 재적용
+D -f db/migrations/0036_ad_account_monthly.sql >/dev/null
+has36() { D -At -c "select (position('date_trunc' in (select prosrc from pg_proc where oid = 'core.ad_account_total()'::regprocedure)) > 0)::text || (position('30000' in (select prosrc from pg_proc where oid = 'core.ad_month_effective_limit()'::regprocedure)) > 0)::text"; }
+on36=$(has36); D -f db/rollback/0036_down.sql >/dev/null; off36=$(has36); D -f db/migrations/0036_ad_account_monthly.sql >/dev/null; back36=$(has36)
+[ "$on36" = truetrue ] && [ "$off36" = falsefalse ] && [ "$back36" = truetrue ] || { echo "FAIL | M36 0036 롤백 적용=$on36 롤백=$off36 재적용=$back36" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M36 계정 누적 월별 0036 롤백: 평생 합계·월 예산만 한도 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0035 광고 자동 스케줄러·활성화: 적용 → 롤백(함수 제거, 예약·키워드·CPC 기록 보존) → 재적용
 D -f db/migrations/0035_ad_enable_scheduler.sql >/dev/null
 D -f db/rollback/0035_down.sql >/dev/null
