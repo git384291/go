@@ -106,6 +106,18 @@ for i in $(seq 1 30); do holdN "$(hex64 $((7400 + i)))" "$(hex64 $((7500 + i)))"
 eq "SB-D6m 회선이 모두 달라도 전체 일 한도(5원)는 그대로 최종 차단" "$(oks "$TMP"/q*)" 5
 eq "SB-D6n 원장에 저장된 회선 키는 64자리 HMAC 형식뿐(원문 IP 없음)" "$("${SU[@]}" -c "select count(*) from core.ai_usage_ledger where net_key is not null and net_key !~ '^[0-9a-f]{64}$'")" 0
 
+echo "== SB-D7 0033 실행 권한: 실제 앱 경로(app_server 로그인 → set local role app_ai)만, 다른 역할·직접 실행 불가"
+cfg 1000000 1000000 1000000 1000000 1000 100 300
+r=$(holdN "$(hex64 7601)" "$(hex64 7602)" 6)
+eq "SB-D7a 앱 경로(app_ai) 불확실 3원 정산" "$(as_role app_ai "select api.ai_budget_uncertain($r, 3)::text")" true
+eq "SB-D7b 정산 금액 3원(예약 6원 전액 아님)" "$("${SU[@]}" -c "select actual_cost_krw from core.ai_usage_closures where reservation_id = $r")" 3
+for role in app_public app_staff app_ad_monitor; do
+  eq "SB-D7c $role 실행 불가" "$(as_role $role "select api.ai_budget_uncertain($r, 1)" | grep -c 'permission denied')" 1
+done
+eq "SB-D7d app_server 로그인 그대로(역할 전환 없음) 실행 불가(NOINHERIT)" "$(psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -c "select api.ai_budget_uncertain($r, 1)" 2>&1 | grep -c 'permission denied')" 1
+eq "SB-D7e PUBLIC 실행 불가" "$("${SU[@]}" -c "select has_function_privilege('public', 'api.ai_budget_uncertain(bigint,int)', 'execute')")" f
+eq "SB-D7f 소유자 fideon_api(슈퍼유저 아님)" "$("${SU[@]}" -c "select proowner::regrole from pg_proc where oid = 'api.ai_budget_uncertain(bigint,int)'::regprocedure")" fideon_api
+
 # 원상 복구(가상 DB): 0028·0029 기본값(0원 = 호출 금지, 사용자 동시 1), 원장·횟수 집계 비움
 cfg 0 0 0 0 0 1 300
 "${SU[@]}" -c "delete from core.consult_rate"
