@@ -170,3 +170,19 @@ test('CA9 요약 비용: 한도 없으면 모델 호출 0, 작업 없으면 예�
   assert.equal((await runSummaryOnce(h.deps)).result, 'done');
   assert.deepEqual(h.log, ['hold:20', 'confirm:r1:0', 'complete:internet_tv:callback_requested']);
 });
+
+test('CA8 저장 실패 처리: 업로드 실패 → DB 호출 없음, DB 실패 → 올린 파일 즉시 삭제, 삭제도 실패 → ORPHAN 경로 보고', async () => {
+  const base = { provider: 'mock', providerCallId: 'call-f001', direction: 'inbound' as const, customerPhone: '010-1234-5678',
+    startedEpoch: 1_764_000_000, durationSec: 60, noticeVersion: 'rec-v1', audio: AUDIO, agentId: null };
+  let dbCalls = 0;
+  const failPut = new MemoryRecordingStore();
+  failPut.put = async () => { throw new Error('net'); };
+  await assert.rejects(ingestCall({ pii, keys: KEYS, store: failPut, sign: () => 't', ingest: async () => { dbCalls++; return 'stored'; } }, base), /STORE_FAILED/);
+  assert.equal(dbCalls, 0);
+  const store = new MemoryRecordingStore();
+  await assert.rejects(ingestCall({ pii, keys: KEYS, store, sign: () => 't', ingest: async () => { throw new Error('db down'); } }, base), /db down/);
+  assert.equal(store.files.size, 0);
+  const sticky = new MemoryRecordingStore();
+  sticky.delete = async () => { throw new Error('net'); };
+  await assert.rejects(ingestCall({ pii, keys: KEYS, store: sticky, sign: () => 't', ingest: async () => { throw new Error('db down'); } }, base), /ORPHAN_RECORDING:calls\/[0-9a-f-]{36}\.bin/);
+});
