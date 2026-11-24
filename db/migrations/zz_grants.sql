@@ -152,7 +152,7 @@ grant execute on function core.ad_account_day(date), core.ad_account_total(), co
 grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb), api.ad_monitor_begin(uuid) to app_ad_monitor;  -- 0022: 중복 실행 방지
 
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
-grant execute on function api.ai_budget_hold(int, text, text), api.ai_budget_hold(int, text, text, text), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint), api.ai_budget_uncertain(bigint) to app_ai;  -- 0028: 한도 4종·멱등 예약, 불확실 정산
+grant execute on function api.ai_budget_hold(int, text, text), api.ai_budget_hold(int, text, text, text), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint), api.ai_budget_uncertain(bigint), api.ai_budget_uncertain(bigint, int) to app_ai;  -- 0028: 한도 4종·멱등 예약, 불확실 정산 / 0033: 불확실 정산 금액 지정
 grant execute on function core.ai_spent(text, date, text) to fideon_api;  -- 0028: 사용액 계산 보조(api 함수 소유자만)
 grant execute on function api.ad_funnel_full(uuid, uuid, text, date, date) to app_staff;
 

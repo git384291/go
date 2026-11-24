@@ -65,7 +65,7 @@ function spyBudget(inner: AiBudget) {
       const w: Reservation = {
         async confirm(a) { log.push(`confirm(${a})`); return r.confirm(a); },
         async cancel() { log.push('cancel'); return r.cancel(); },
-        async uncertain() { log.push('uncertain'); return r.uncertain ? r.uncertain() : r.confirm(cost); },
+        async uncertain(a?: number) { log.push(a === undefined ? 'uncertain' : `uncertain(${a})`); return r.uncertain ? r.uncertain(a) : r.confirm(a ?? cost); },
       };
       return w;
     },
@@ -154,15 +154,16 @@ test('TEST-05 Provider 무응답: 전송 1회, 환불하지 않고 "불확실"�
   const r = await answerChat(deps({ model: createOpenAiChatModel(cfg(p.t)), budget: s.b, timeoutMs: 40 }), input(), NOW);
   assert.ok(r.ok && r.source === 'fallback');
   assert.equal(p.calls.length, 1);
-  assert.deepEqual(s.log, ['reserve(10)=ok', 'uncertain']);
+  assert.deepEqual(s.log, ['reserve(10)=ok', 'uncertain(10)']);
   assert.equal(await s.b.reserve(991), null); // 불확실 10원이 그대로 잡혀 있다
 });
-test('TEST-05r 복구 래퍼 + 무응답: 추가 시도 없이 1회, 불확실(재시도 포함 예약 20원 전액 보존)', async () => {
+test('TEST-05r 복구 래퍼 + 무응답: 추가 시도 없이 1회, 불확실은 보낸 1회분 10원(재시도 포함 예약 20원 전액 아님, PM 11/24 보완 0033)', async () => {
   const p = mockProvider({ hang: true });
   const s = spyBudget(mem('1000'));
   await answerChat(deps({ model: recovering(p.t), budget: s.b, timeoutMs: 40 }), input(), NOW);
   assert.equal(p.calls.length, 1);
-  assert.deepEqual(s.log, ['reserve(20)=ok', 'uncertain']);
+  assert.deepEqual(s.log, ['reserve(20)=ok', 'uncertain(10)']);
+  assert.ok(await s.b.reserve(990), '불확실 10원만 잡힘 → 990원 예약 가능');
 });
 test('TEST-06 Provider 429·500·503: 상한 안에서만 재시도(기본 2회, 최대 3회), 재시도 비용 사전 예약·실제 전송분 확정, 안전 안내문', async () => {
   for (const status of [429, 500, 503]) {
@@ -324,7 +325,9 @@ test('TEST-14b 광고 생성 어댑터: 예산 없음 → 0회, 예산 거부 �
   assert.deepEqual(s2.log, ['reserve(10)=ok', 'uncertain']);
 });
 test('TEST-14c 정적 점검: Provider 호출 코드는 두 어댑터뿐, 둘 다 게이트를 거치고, 허가는 chatAnswer만 붙인다', () => {
-  assert.deepEqual(grepSrc(/OPENAI_RESPONSES_URL|api\.openai\.com|max_output_tokens:/), ['server/advertising/openAiAdGenerator.ts', 'server/consult/openAiChatModel.ts']);
+  // PM 11/24 ④: 실제 전송 파일(server/ai/openAiTransport, 허용 주소 1곳)은 본문을 만들지 않고 전송만 한다. 라우트만 import해 상담 어댑터(게이트 통과)에 넘긴다
+  assert.deepEqual(grepSrc(/OPENAI_RESPONSES_URL|api\.openai\.com|max_output_tokens:/), ['server/advertising/openAiAdGenerator.ts', 'server/ai/openAiTransport.ts', 'server/consult/openAiChatModel.ts']);
+  assert.deepEqual(grepSrc(/from ['"][^'"]*openAiTransport['"]/), ['app/api/consult/chat/route.ts']);
   assert.match(readFileSync(path.join(SRC, 'server/consult/openAiChatModel.ts'), 'utf8'), /if \(!hasBudgetPermit\(meter\)\) throw new ModelNotCalledError/);
   assert.match(readFileSync(path.join(SRC, 'server/advertising/openAiAdGenerator.ts'), 'utf8'), /const hold = await \(cfg\.budget as AiBudget\)\.reserve\(/);
   assert.deepEqual(grepSrc(/grantBudgetPermit\(/), ['server/consult/chatAnswer.ts', 'server/consult/chatModel.ts']);

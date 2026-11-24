@@ -156,3 +156,19 @@ select test.expect_eq($$select column_default from information_schema.columns wh
 select api.ai_budget_confirm(u.id, 1) from core.ai_usage_ledger u left join core.ai_usage_closures x on x.reservation_id = u.id
  where x.reservation_id is null and u.request_id like 'req-h12-%';
 update core.ai_budget_config set paused = false, monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0, scope_max_inflight = 1 where singleton;
+-- H13 0033 불확실 정산 금액 지정(PM 11/24 보완): 시간 초과는 보낸 횟수 × 1회 최대 비용만(예약 전액 아님), 1원 이상·예약 이하, 한 번만
+update core.ai_budget_config set paused = false, monthly_limit_krw = 1000000, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000, scope_max_inflight = 100 where singleton;
+set role app_ai;
+select test.expect_eq($$select (api.ai_budget_hold(6, 'req-h13-000000000001', repeat('c1', 32)) is not null)::text$$, 'true', 'H13 6원 예약(재시도 2회분)');
+select test.expect_eq($$select api.ai_budget_uncertain(test.hid('req-h13-000000000001'), 3)::text$$, 'true', 'H13b 시간 초과 1회 전송 → 3원으로 불확실 정산');
+select test.expect_eq($$select (api.ai_budget_uncertain(test.hid('req-h13-000000000001'), 3) or api.ai_budget_uncertain(test.hid('req-h13-000000000001')) or api.ai_budget_confirm(test.hid('req-h13-000000000001'), 1))::text$$, 'false', 'H13c 다시 닫기 불가(이중 정산 없음)');
+select test.expect_eq($$select (api.ai_budget_hold(6, 'req-h13-000000000002', repeat('c1', 32)) is not null and api.ai_budget_uncertain(test.hid('req-h13-000000000002'), 99))::text$$, 'true', 'H13d 예약 초과 금액 요청');
+select test.expect_eq($$select (api.ai_budget_hold(6, 'req-h13-000000000003', repeat('c1', 32)) is not null and api.ai_budget_uncertain(test.hid('req-h13-000000000003'), 0))::text$$, 'true', 'H13e 0원 요청');
+select test.expect_error($$select api.ai_budget_uncertain(1, null)$$, '22023', 'H13f 금액 null 거부');
+reset role;
+select test.expect_eq($$select string_agg(x.kind || ':' || x.actual_cost_krw, ',' order by u.request_id) from core.ai_usage_ledger u join core.ai_usage_closures x on x.reservation_id = u.id where u.request_id like 'req-h13-%'$$, 'uncertain:3,uncertain:6,uncertain:1', 'H13g 금액: 3원 / 예약 초과 → 예약(6원) / 0 → 1원');
+select test.expect_eq($$select split_part(test.spent_now(repeat('c1', 32)), '|', 4)$$, '10', 'H13h 사용자 사용액 = 3 + 6 + 1(예약 전액 18원 아님)');
+set role app_public;
+select test.expect_error($$select api.ai_budget_uncertain(1, 1)$$, '42501', 'H13i app_public 실행 불가');
+reset role;
+update core.ai_budget_config set paused = false, monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0, scope_max_inflight = 1 where singleton;

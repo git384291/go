@@ -1,6 +1,7 @@
 import 'server-only';
 // 상담 AI 실제 모델 어댑터(PM 11/22 4c7f269 지시 9). PM 11/24: 공식 확인 가격표(verifiedPrices)를 상담 경로에 연결(consultModelFromEnv).
-// - **실제 전송은 여전히 0회**: 라우트는 transport를 null로 넘긴다(실제 전송 코드 없음). 실제 전송 연결·운영 활성화는 모델 접근·품질 검증과 별도 승인 뒤에만.
+// - PM 11/24 ④: 라우트는 server/ai/openAiTransport(허용 주소 1곳)를 넘긴다. 실제 전송은 CONSULT_AI_EXECUTION=allow + 키 + 주소가 모두 있을 때만.
+// - 성공 응답의 usage(입력·캐시·출력 토큰) → 실제 비용(settleKrw) → meter. chatAnswer가 그 값으로 확정(confirm)한다.
 // - 가격표에 없는(단가 불확실) 모델 이름은 모델 없음(null) → 안전 안내문, 호출 0회.
 // - 요청·응답 형식은 광고 소재 생성 어댑터와 같은 Responses API 형식(store:false, tools 없음)을 가정한다.
 //   **실제 업체·주소·모델명·가격은 정하지 않았다**: 주소(endpoint)도 주입이며 코드에 실제 서비스 주소를 두지 않는다(정적 시험 RD2·CH10).
@@ -11,7 +12,7 @@ import 'server-only';
 // - 1요청 1호출(재시도는 이 어댑터 밖의 modelRecovery.withRecovery가 하드 상한 안에서만), 응답 크기 상한, 마감 시각 초과 시 중단. 오류 본문·헤더·키는 반사하지 않는다.
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
 import { hasBudgetPermit, ModelNotCalledError, type CallMeter, type ChatModel, type ModelInput } from './chatModel';
-import { estimateMaxKrw, inputTokenUpperBound, priceFor, type ModelPrice } from '@/server/ai/costModel';
+import { estimateMaxKrw, inputTokenUpperBound, priceFor, settleKrw, type ModelPrice } from '@/server/ai/costModel';
 import { verifiedKrwPrices } from '@/server/ai/verifiedPrices';
 import { createModel } from './chatModel';
 import { ModelCallError } from './modelRecovery';
@@ -91,6 +92,17 @@ export function parseChatReply(raw: string): string {
   return t;
 }
 
+/** 응답 usage(불신) → 토큰 수. 형식이 틀리면 null(= 사용량 모름 → 호출자는 예약 기준으로 보수 정산) */
+export function parseUsage(raw: string): { inputTokens: number; outputTokens: number; cachedInputTokens: number } | null {
+  const j = parseJsonSafe(raw);
+  const u = isObj(j) ? j.usage : null;
+  if (!isObj(u)) return null;
+  const cached = isObj(u.input_tokens_details) ? u.input_tokens_details.cached_tokens : 0;
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 10_000_000;
+  if (!ok(u.input_tokens) || !ok(u.output_tokens) || !ok(cached) || cached > u.input_tokens) return null;
+  return { inputTokens: u.input_tokens, outputTokens: u.output_tokens, cachedInputTokens: cached };
+}
+
 const enc = new TextEncoder();
 /** 설정이 유효하지 않아도 객체는 만든다(호출 시 ModelNotCalledError). 상담 경로 연결은 별도 승인 */
 export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): ChatModel {
@@ -112,13 +124,22 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
       // 실패 종류만 구분한다(재시도 여부는 modelRecovery가 정한다): 429·5xx·timeout·네트워크 = 재시도 가능, 4xx·응답 형식·거절 = 불가
       if (r.kind === 'http') throw new ModelCallError(r.status === 429 ? 'HTTP_RATE_LIMITED' : 'HTTP_ERROR', r.status === 429 ? 'rate_limited' : r.status >= 500 ? 'server' : 'client', r.status, r.retryAfterSec === undefined ? undefined : r.retryAfterSec * 1000);
       if (r.kind === 'error') throw new ModelCallError(r.code, r.code === 'TIMEOUT' ? 'timeout' : r.code === 'TRANSPORT_ERROR' ? 'network' : 'response');
+      // 실제 사용량 비용(원, 올림): 1원 이상·이 호출 예약 이하로 자른다. 모르면 meter에 남기지 않는다(→ 예약 기준 보수 정산)
+      const p = priceFor(config.prices, config.model);
+      const usage = parseUsage(r.text);
+      const k = p && usage ? settleKrw(p, usage) : null;
+      if (meter && k !== null) { meter.usageKrw = (meter.usageKrw ?? 0) + Math.max(1, Math.min(config.costPerCallKrw, k)); meter.usageCount = (meter.usageCount ?? 0) + 1; }
       try { return parseChatReply(r.text); } catch (e) { throw new ModelCallError(e instanceof Error ? e.message : 'BAD_RESPONSE', 'response'); }
     },
   });
 }
 
 /** 상담 1회 호출 상한(코드 고정, 환경변수로 바꾸지 않는다). 예약 비용 = 이 상한으로 계산한 예상 최대 비용(원, 올림) */
-export const CONSULT_CALL_LIMITS = Object.freeze({ maxInputTokens: 4000, maxOutputTokens: 200, timeoutMs: 3500, maxResponseBytes: 8192 });
+export const CONSULT_CALL_LIMITS = Object.freeze({ maxInputTokens: 4000, maxOutputTokens: 512, // PM 11/24 A안: 200은 실제 상담 프롬프트에서 답 잘림(INCOMPLETE) → 512(1회 예약 3원)
+  timeoutMs: 7000, maxResponseBytes: 32768 }); // PM 11/24 보완: 실측 2.4~4.0초 → 3.5초는 정상 지연에도 실패, 1회 7초 // 응답 바이트 상한: 실제 Responses API 응답(메타데이터 포함)이 8KB를 넘음 → 32KB(PM 11/24 ④ LIVE0 실측, 비용 무관)
+
+/** 상담 라우트 재시도 시간(PM 11/24 보완): 1회 7초·전체 7초 — 첫 시도가 시간 초과면 재시도 없음(보낸 1회분만 정산), 빠른 5xx면 남은 시간 안에서 1회 재시도. 상담 전체 제한(8초) 이내 */
+export const CONSULT_RECOVERY_TIMING = Object.freeze({ attemptMs: 7000, totalMs: 7000 });
 
 const VERIFIED_KRW_PRICES = verifiedKrwPrices(); // 공식 확인 기록 → 원화 가격표(모듈당 1번, 고정)
 let last: { sig: string; transport: BodyTransport | null; prices: readonly ModelPrice[]; model: ChatModel } | null = null;
@@ -132,7 +153,7 @@ let last: { sig: string; transport: BodyTransport | null; prices: readonly Model
  */
 export function consultModelFromEnv(env: Record<string, string | undefined>, transport: BodyTransport | null, prices: readonly ModelPrice[] = VERIFIED_KRW_PRICES): ChatModel | null {
   const name = env.CONSULT_AI_MODEL;
-  if (name === 'mock') return createModel(env);
+  if (name === 'mock') return env.VERCEL_ENV === 'production' ? null : createModel(env); // PM 11/24 ④: 모의 모델은 운영 배포 금지(시험·로컬·미리보기 전용)
   if (typeof name !== 'string') return null;
   const p = priceFor(prices, name);
   if (!p) return null;

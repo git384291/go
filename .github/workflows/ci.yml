@@ -39,6 +39,10 @@ jobs:
       - run: npm run test:unit
       - name: API route test (reserved products → 403 PRODUCT_NOT_ACTIVE, no server/DB/external calls)
         run: npm run test:route
+      - name: Live AI integration (real OpenAI call only when CI secret CONSULT_AI_API_KEY exists; otherwise SKIP)
+        env:
+          CONSULT_AI_API_KEY: ${{ secrets.CONSULT_AI_API_KEY }}
+        run: npm run test:live-ai
       - name: DB security tests (local virtual DB, PostgreSQL from runner image)
         run: npm run test:db
       - run: npx playwright install --with-deps chromium   # 관리자 화면 E2E(AP7)·모바일 화면 검수 공용
