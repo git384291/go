@@ -10,12 +10,12 @@ const kst = (s: string) => new Date(`${s}+09:00`);
 const RID = '11111111-2222-4333-8444-555555555555';
 const L = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-m', state: 'active', external_id: '4242', valid_until: '2026-11-25T13:00:00+09:00', end_date: '2026-11-24',
   days: [{ date: '2026-11-22', max_krw: 10000 }, { date: '2026-11-23', max_krw: 10000 }, { date: '2026-11-24', max_krw: 10000 }], ...o });
-function db(launches: unknown[], o: { fail?: 'targets' | 'stop' | 'record' | 'begin'; busy?: boolean; total?: number } = {}) {
+function db(launches: unknown[], o: { fail?: 'targets' | 'stop' | 'record' | 'begin'; busy?: boolean; total?: number; monthUsed?: number; monthLimit?: unknown } = {}) {
   const calls: { q: string; v: unknown[] }[] = [];
   const runAsMonitor = async <T,>(fn: (tx: MonitorTx) => Promise<T>): Promise<T> => fn((async (s: TemplateStringsArray, ...v: unknown[]) => {
     const q = s.join('?'); calls.push({ q, v });
     if (q.includes('ad_monitor_begin')) { if (o.fail === 'begin') throw new Error('db down'); return [{ r: !o.busy }]; }
-    if (q.includes('ad_monitor_targets')) { if (o.fail === 'targets') throw new Error('db down'); return [{ r: { today: 'x', account_total_krw: o.total ?? 30000, launches } }]; }
+    if (q.includes('ad_monitor_targets')) { if (o.fail === 'targets') throw new Error('db down'); return [{ r: { today: 'x', account_total_krw: o.total ?? 30000, month_used_krw: o.monthUsed ?? 0, month_limit_krw: 'monthLimit' in o ? o.monthLimit : 800000, launches } }]; }
     if (q.includes('ad_monitor_stop')) { if (o.fail === 'stop') throw new Error('x'); return [{ r: {} }]; }
     if (q.includes('ad_monitor_record')) { if (o.fail === 'record') throw new Error('x'); return []; }
     throw new Error('unexpected');
@@ -146,4 +146,54 @@ test('AM12 계정 시간대: Asia/Seoul이 아니면 열린 캠페인 전부 중
   const b = db([L()]); const q = plat({ tz: new Error('x') });
   const r2 = await runAdMonitor({ platform: q.p, now: () => kst('2026-11-22T12:00:00'), runAsMonitor: b.runAsMonitor, runId: RID });
   assert.equal(r2.ok, false); assert.ok(r2.unknown.some((u) => u.code === 'ACCOUNT_CHECK_FAILED'));
+});
+
+// PM 11/25 광고 월 예산(0034) — M9·M10·M7: 가짜 DB·가짜 플랫폼만
+test('AM13(M9) 이번 달 사용액이 판정 한도 이상이면 열린 캠페인 전부 MONTHLY_CAP_REACHED 중지, 한도 미만이면 계속, 미설정(0원)이면 MONTHLY_BUDGET_UNSET 중지', async () => {
+  const now = () => kst('2026-11-23T12:00:00');
+  const two = [L(), L({ campaign: 'camp-n', external_id: '4343' })];
+  const a = db(two, { monthUsed: 7999, monthLimit: 8000 }); const pa = plat({ cost: () => 0 });
+  const r1 = await runAdMonitor({ platform: pa.p, now, runAsMonitor: a.runAsMonitor, runId: RID });
+  assert.deepEqual([r1.ok, r1.stopped.length], [true, 0], '한도 1원 전: 계속');
+  for (const [used, limit, code] of [[8000, 8000, 'MONTHLY_CAP_REACHED'], [9000, 8000, 'MONTHLY_CAP_REACHED'], [0, 0, 'MONTHLY_BUDGET_UNSET']] as const) {
+    const b = db(two, { monthUsed: used, monthLimit: limit }); const pb = plat({ cost: () => 0 });
+    const r = await runAdMonitor({ platform: pb.p, now, runAsMonitor: b.runAsMonitor, runId: RID });
+    assert.deepEqual(r.stopped.map((s) => [s.campaign, s.code, s.paused]), [['camp-m', code, true], ['camp-n', code, true]], `${used}/${limit}`);
+    assert.deepEqual(b.stops(), [['camp-m', code, true], ['camp-n', code, true]], 'DB 승인 철회 기록');
+    assert.equal(pb.c.pause, 2);
+  }
+});
+
+test('AM14(M8) 지연 보고: DB 사용액에 아직 없는 이번 달 보고 초과분을 더해 판정(7,000 + 초과 1,500 ≥ 8,000 → 중지), 지난달 날짜 초과분은 이번 달에 넣지 않음', async () => {
+  const two = [L(), L({ campaign: 'camp-n', external_id: '4343' })];
+  const a = db(two, { monthUsed: 7000, monthLimit: 8000 }); const pa = plat({ cost: (d) => (d === '2026-11-22' && pa.c.fetch.length === 1 ? 11500 : 0) });
+  const r = await runAdMonitor({ platform: pa.p, now: () => kst('2026-11-23T12:00:00'), runAsMonitor: a.runAsMonitor, runId: RID });
+  assert.deepEqual(r.stopped.map((s) => [s.campaign, s.code]), [['camp-m', 'DAY_OVER_MAX'], ['camp-n', 'MONTHLY_CAP_REACHED']], '초과 캠페인은 기존대로, 다른 캠페인은 월 예산으로 중지');
+  const c = db(two, { monthUsed: 6000, monthLimit: 8000 }); const pc = plat({ cost: (d) => (d === '2026-11-22' && pc.c.fetch.length === 1 ? 11500 : 0) });
+  const r3 = await runAdMonitor({ platform: pc.p, now: () => kst('2026-11-23T12:00:00'), runAsMonitor: c.runAsMonitor, runId: RID });
+  assert.deepEqual(r3.stopped.map((s) => [s.campaign, s.code]), [['camp-m', 'DAY_OVER_MAX']], '6,000 + 1,500 < 8,000 → 다른 캠페인은 계속');
+  const cross = [L({ days: [{ date: '2026-10-31', max_krw: 10000 }, { date: '2026-11-01', max_krw: 10000 }], end_date: '2026-11-01', valid_until: '2026-11-02T13:00:00+09:00' })];
+  const b = db(cross, { monthUsed: 7000, monthLimit: 8000 }); const pb = plat({ cost: (d) => (d === '2026-10-31' ? 10000 : 500) });
+  const r2 = await runAdMonitor({ platform: pb.p, now: () => kst('2026-11-01T12:00:00'), runAsMonitor: b.runAsMonitor, runId: RID });
+  assert.deepEqual([r2.ok, r2.stopped.length], [true, 0], '10월 날짜 값은 11월 사용액에 더하지 않음');
+});
+
+test('AM15(M10) 월 예산 중지에서 매체 pause 실패 → paused=false 기록(경고·계정 전체 STOP_PENDING), 결과 ok=false·STOP_FAILED(성공으로 표시하지 않음)', async () => {
+  const a = db([L()], { monthUsed: 8000, monthLimit: 8000 }); const pa = plat({ cost: () => 0, pauseOk: false });
+  const r = await runAdMonitor({ platform: pa.p, now: () => kst('2026-11-23T12:00:00'), runAsMonitor: a.runAsMonitor, runId: RID });
+  assert.equal(r.ok, false);
+  assert.deepEqual(a.stops(), [['camp-m', 'MONTHLY_CAP_REACHED', false]]);
+  assert.ok(r.unknown.some((u) => u.code === 'STOP_FAILED'));
+  assert.equal((a.record() as unknown[])[0], false, '실행 기록 ok=false → DB가 새 집행 MONITOR_NOT_OK 차단');
+});
+
+test('AM16(M7) 월 값 없음·음수·소수·문자 = 대상 조회 실패(TARGETS_UNAVAILABLE): 중지·기록 없이 ok=false(2시간 뒤 MONITOR_STALE로 새 집행 차단)', async () => {
+  for (const bad of [undefined, -1, 1.5, '8000', null]) {
+    const a = db([L()], { monthLimit: bad }); const pa = plat();
+    const r = await runAdMonitor({ platform: pa.p, now: () => kst('2026-11-23T12:00:00'), runAsMonitor: a.runAsMonitor, runId: RID });
+    assert.equal(r.ok, false, String(bad));
+    assert.deepEqual(r.unknown, [{ campaign: '-', code: 'TARGETS_UNAVAILABLE' }]);
+    assert.equal(a.record(), undefined);
+    assert.equal(pa.c.fetch.length, 0);
+  }
 });

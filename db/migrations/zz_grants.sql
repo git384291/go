@@ -144,11 +144,14 @@ grant execute on function
   api.application_amendments(uuid, uuid, text, uuid),   -- 0019: 변경 요청 열람(대표, 방금 열람한 경우만)
   api.ad_spend_request_window(uuid, uuid, text, text, int, text),   -- 0021: 집행 기간·날짜별 최대 청구액 판정
   api.followup_list(uuid, uuid, text),   -- 0023: 대표 후속 연락 목록(대표만)
-  api.followup_done(uuid, uuid, text, uuid)
+  api.followup_done(uuid, uuid, text, uuid),
+  api.ad_monthly_budget_set(uuid, uuid, text, int, int, text),   -- 0034: 광고 월 예산 설정(대표만, 사유·감사)
+  api.ad_monthly_budget_get(uuid, uuid, text)   -- 0034: 광고 월 예산·이번 달 사용액 조회(대표·검토자)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
 grant execute on function core.ad_account_day(date), core.ad_account_total(), core.ad_window_end(date, timestamptz) to fideon_api;
+grant execute on function core.ad_account_month(date), core.ad_month_effective_limit(), core.ad_month_check(date, date, int) to fideon_api;  -- 0034 월 예산 보조
 -- 0021 광고 정기 감시: 전용 역할 app_ad_monitor만(대상 조회·중지·실행 기록 3개, 테이블 권한 없음)
 grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, text, boolean), api.ad_monitor_record(boolean, jsonb), api.ad_monitor_begin(uuid) to app_ad_monitor;  -- 0022: 중복 실행 방지
 

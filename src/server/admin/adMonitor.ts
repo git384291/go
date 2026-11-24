@@ -7,6 +7,8 @@ import { callPlatform, type AdPlatform } from '../advertising/platform';
  * - 보고 지연(비용 null)·조회 실패·불명 launch는 UNKNOWN: 실행 기록을 '정상 아님'으로 남겨 새 집행을 막는다(DB: MONITOR_NOT_OK).
  * - 중지는 매체 pause → DB 승인 철회. pause가 실패하면 중지 실패 경고(계정 전체 STOP_PENDING). 실행 자체가 실패하면 기록이 끊겨 2시간 뒤 MONITOR_STALE.
  * - 키·토큰·외부 ID·고객 정보는 결과·기록에 넣지 않는다(캠페인 키와 고정 코드만).
+ * - 0034 월 예산: 이번 달(KST) 사용액(DB, 미확정 = 최대 청구 가능액)에 이번 회차 보고값의 초과분을 더해 판정 한도 이상이면,
+ *   또는 월 예산 미설정(0원)이면 열린 캠페인 전부 중지(MONTHLY_CAP_REACHED·MONTHLY_BUDGET_UNSET). 월 값이 없거나 형식이 틀리면 대상 조회 실패로 본다.
  */
 export type MonitorTx = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
 export type MonitorDeps = {
@@ -17,7 +19,7 @@ export type MonitorDeps = {
   readonly runId: string;
 };
 export type MonitorCode =
-  | 'NO_ACTIVE_APPROVAL' | 'APPROVAL_EXPIRED' | 'WINDOW_ENDED' | 'NO_WINDOW' | 'DAY_OVER_MAX' | 'ACCOUNT_TOTAL_REACHED'
+  | 'NO_ACTIVE_APPROVAL' | 'MONTHLY_CAP_REACHED' | 'MONTHLY_BUDGET_UNSET' | 'APPROVAL_EXPIRED' | 'WINDOW_ENDED' | 'NO_WINDOW' | 'DAY_OVER_MAX' | 'ACCOUNT_TOTAL_REACHED'
   | 'ACCOUNT_TIMEZONE_MISMATCH' | 'ACCOUNT_CHECK_FAILED' | 'SPEND_UNKNOWN' | 'FETCH_FAILED' | 'LAUNCH_UNKNOWN' | 'PLATFORM_UNAVAILABLE' | 'STOP_FAILED' | 'STOP_RECORD_FAILED' | 'TARGETS_UNAVAILABLE' | 'RECORD_FAILED';
 export type MonitorResult = {
   readonly ok: boolean;
@@ -37,8 +39,9 @@ const kstDay = (d: Date) => new Date(d.getTime() + 9 * 3_600_000).toISOString().
 
 type Launch = { campaign: string; state: string; externalId: string | null; validUntil: number | null; endDate: string | null; days: { date: string; maxKrw: number }[] };
 
-function parseTargets(v: unknown): { launches: Launch[]; accountTotal: number } | null {
-  if (!isObj(v) || !Array.isArray(v.launches) || typeof v.account_total_krw !== 'number') return null;
+const isKrw = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+function parseTargets(v: unknown): { launches: Launch[]; accountTotal: number; monthUsed: number; monthLimit: number } | null {
+  if (!isObj(v) || !Array.isArray(v.launches) || typeof v.account_total_krw !== 'number' || !isKrw(v.month_used_krw) || !isKrw(v.month_limit_krw)) return null;
   const launches: Launch[] = [];
   for (const l of v.launches) {
     if (!isObj(l) || typeof l.campaign !== 'string' || !CAMPAIGN.test(l.campaign) || typeof l.state !== 'string' || !Array.isArray(l.days)) return null;
@@ -53,7 +56,7 @@ function parseTargets(v: unknown): { launches: Launch[]; accountTotal: number } 
       validUntil: vu !== null && Number.isFinite(vu) ? vu : null, endDate: typeof l.end_date === 'string' && DAY.test(l.end_date) ? l.end_date : null, days,
     });
   }
-  return { launches, accountTotal: v.account_total_krw };
+  return { launches, accountTotal: v.account_total_krw, monthUsed: v.month_used_krw, monthLimit: v.month_limit_krw };
 }
 
 export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
@@ -80,6 +83,8 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
   }
   const platform = deps.platform;
   let knownTotal = 0;
+  let monthExtra = 0; // 이번 달 날짜의 보고 비용이 그날 최대 청구액을 넘은 만큼(DB 사용액에 아직 없을 수 있음)
+  const month = today.slice(0, 7);
   // 계정 시간대 확인(실제 플랫폼, 열린 launch가 있을 때): Asia/Seoul이 아니면 열린 캠페인 전부 중지, 조회 실패는 UNKNOWN
   let tzBad: MonitorCode | null = null;
   if (platform && platform.live && targets.launches.length > 0) {
@@ -120,11 +125,17 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
       if (cost === null) { unknown.push({ campaign: l.campaign, code: 'SPEND_UNKNOWN' }); continue; }
       if (typeof cost !== 'number' || !Number.isSafeInteger(cost) || cost < 0) { unknown.push({ campaign: l.campaign, code: 'FETCH_FAILED' }); continue; }
       knownTotal += cost;
+      if (d.date.startsWith(month) && cost > d.maxKrw) monthExtra += cost - d.maxKrw;
       if (cost > d.maxKrw) { code = 'DAY_OVER_MAX'; break; }
     }
     if (code) { await stop(l.campaign, l.externalId, code); continue; }
   }
-  // 3) 계정 실제 보고 합계가 누적 상한에 닿으면 열린 캠페인 전부 중지
+  // 3) 월 예산(0034): 미설정이거나 이번 달 사용액(+ 보고 초과분)이 판정 한도 이상이면 열린 캠페인 전부 중지
+  const monthCode: MonitorCode | null = targets.monthLimit <= 0 ? 'MONTHLY_BUDGET_UNSET' : targets.monthUsed + monthExtra >= targets.monthLimit ? 'MONTHLY_CAP_REACHED' : null;
+  if (monthCode) {
+    for (const l of targets.launches) if (l.state === 'active' && l.externalId && platform && !stopped.some((s) => s.campaign === l.campaign)) await stop(l.campaign, l.externalId, monthCode);
+  }
+  // 4) 계정 실제 보고 합계가 누적 상한에 닿으면 열린 캠페인 전부 중지
   if (knownTotal >= ACCOUNT_TOTAL_CAP_KRW) {
     for (const l of targets.launches) if (l.state === 'active' && !stopped.some((s) => s.campaign === l.campaign)) await stop(l.campaign, l.externalId, 'ACCOUNT_TOTAL_REACHED');
   }
