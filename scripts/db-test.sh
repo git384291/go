@@ -73,6 +73,7 @@ run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·�
 run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0050, PM 11/25 ③)
 run db/tests/99_crm_unify.sql >/dev/null   # 고객·접수·CRM 통합(0051, PM 11/25 ①③)
 run db/tests/99_purge_scope.sql >/dev/null   # 파기 범위 분리(0052, PM 11/25 B)
+run db/tests/99_purge_notes_retention.sql >/dev/null   # 메모 파기·5년 보존 분리(0053)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 
@@ -724,6 +725,13 @@ D -f db/migrations/0052_purge_scope.sql >/dev/null
 back52=$(D -At -c "select to_regprocedure('api.purge_lead(uuid,uuid,text,uuid,text)') is not null and position('LEGAL_HOLD' in pg_get_functiondef('api.purge_customer(uuid,uuid,text,uuid,text)'::regprocedure)) > 0")
 [ "$gone52" = t ] && [ "$back52" = t ] || { echo "FAIL | M52 0052 롤백 gone=$gone52 재적용=$back52" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M52 파기 범위 0052 롤백: 함수 제거·0002 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0053 메모 파기·보존 분리: 롤백(보존 판정 제거·0002/0052 복원) → 재적용
+D -f db/rollback/0053_down.sql >/dev/null
+gone53=$(D -At -c "select to_regprocedure('core.legal_hold(uuid)') is null and position('lead_notes' in pg_get_functiondef('core.purge_lead_internal(uuid,uuid,text)'::regprocedure)) = 0")
+D -f db/migrations/0053_purge_notes_retention.sql >/dev/null
+back53=$(D -At -c "select to_regprocedure('core.legal_hold(uuid)') is not null and position('lead_notes' in pg_get_functiondef('core.purge_customer_internal(uuid,uuid,text)'::regprocedure)) > 0")
+[ "$gone53" = t ] && [ "$back53" = t ] || { echo "FAIL | M53 0053 롤백 gone=$gone53 재적용=$back53" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M53 메모 파기·보존 분리 0053 롤백: 함수 제거·이전 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0024 상담 공용 횟수 제한: 적용 → 롤백(함수 제거, 집계 보존) → 재적용
 D -f db/migrations/0024_consult_rate.sql >/dev/null
 D -f db/rollback/0024_down.sql >/dev/null
