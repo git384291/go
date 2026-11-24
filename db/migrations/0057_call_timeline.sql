@@ -89,7 +89,9 @@ begin
   end if;
   insert into core.audit_logs (actor_id, action, target_type, target_id, detail)
   values (v_staff.user_id, 'timeline.view', 'lead', p_lead, jsonb_build_object('leads', cardinality(v_leads), 'from', p_from, 'to', p_to));
-  return query select e.* from core.timeline_events(v_leads,
+  return query select e.at, e.kind, e.lead_id, e.ref,
+                       case when v_staff.role = 'reviewer' then e.detail #- '{summary,text}' else e.detail end
+                  from core.timeline_events(v_leads,
                                 (p_from::timestamp at time zone 'Asia/Seoul'), ((p_to + 1)::timestamp at time zone 'Asia/Seoul')) e
                 order by e.at desc, e.kind, e.ref limit 500;
 end
@@ -128,7 +130,8 @@ begin
   insert into core.audit_logs (actor_id, action, target_type, detail)
   values (v_staff.user_id, 'timeline.by_date', 'lead', jsonb_build_object('from', p_from, 'to', p_to, 'leads', coalesce(cardinality(v_leads), 0)));
   return query
-    select e.* from (
+    select e.at, e.kind, e.lead_id, e.ref, case when v_staff.role = 'reviewer' then e.detail #- '{summary,text}' else e.detail end
+      from (
       select * from core.timeline_events(coalesce(v_leads, '{}'::uuid[]), v_from, v_to)
       union all
       select c.started_at, 'call_unmatched', null::uuid, c.id::text,

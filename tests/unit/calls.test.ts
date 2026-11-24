@@ -68,6 +68,10 @@ test('CA4 통화 수신: 연락처 원문 대신 HMAC, 안내 재생 시에만 �
   assert.equal(seen[1].args.storagePath, null);
   assert.equal(store.files.size, 1);
   await assert.rejects(ingestCall(deps, { ...base, providerCallId: 'x' }), /INVALID_INPUT/);
+  // DB 기록 실패: 올린 파일 즉시 삭제(고아 파일 없음)
+  const failing = { ...deps, ingest: async () => { throw new Error('FORBIDDEN'); } };
+  await assert.rejects(ingestCall(failing, { ...base, providerCallId: 'call-0003' }), /FORBIDDEN/);
+  assert.equal(store.files.size, 1);
 });
 
 function sttHarness(provider: MockSttProvider, data?: Buffer) {
@@ -137,6 +141,10 @@ test('CA8 추측 금지: 근거가 변환문에 없으면 unknown/null', () => {
   const far = sanitizeSummary({ summary: 's1', callbackEpoch: NOW + 365 * 86400, evidence: { callback: '내일 오후 3시' } }, T, NOW)!;
   assert.equal(far.callbackEpoch, null);
   assert.equal(sanitizeSummary({ summary: '번호 010-1111-2222' }, T, NOW)!.summary, '번호 [전화]');
+  // 근거가 변환문에 있어도 값과 뜻이 안 맞으면 인정 안 함(예: CCTV에 '같이 신청')
+  const mis = sanitizeSummary({ summary: 's', product: 'cctv_security', outcome: 'declined', evidence: { product: '같이 신청하고', outcome: '신청하고 싶어요' } }, T, NOW)!;
+  assert.equal(mis.product, 'unknown');
+  assert.equal(mis.outcome, 'unknown');
 });
 
 function sumHarness(opts: { hold?: string | null; job?: boolean; output?: unknown; throws?: boolean }) {

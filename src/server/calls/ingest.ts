@@ -57,5 +57,11 @@ export async function ingestCall(deps: CallIngestDeps, input: CallIngestInput): 
   const token = deps.sign(['call-ingest', args.provider, args.providerCallId, args.direction, args.phoneHmac,
     String(args.startedEpoch), String(args.durationSec), args.noticeVersion, args.storagePath, args.audioSha256,
     args.audioBytes === null ? null : String(args.audioBytes), args.keyVersion, args.agentId]);
-  return deps.ingest(token, args);
+  try {
+    return await deps.ingest(token, args);
+  } catch (e) {
+    // DB 기록 실패 시 올린 파일을 바로 지운다(삭제 대기열에 없는 고아 파일 방지)
+    if (storagePath) await deps.store.delete(storagePath).catch(() => undefined);
+    throw e;
+  }
 }

@@ -79,6 +79,31 @@ begin
 end
 $$;
 
+-- AI 예약 1건 = 요약 작업 1건(동시 요청도 DB가 막음)
+create unique index if not exists call_jobs_ai_reservation on core.call_jobs (ai_reservation) where ai_reservation is not null;
+
+-- 근거 문장 뜻 검사(추측 금지 보강): 값마다 근거에 들어 있어야 하는 낱말. 하나도 없으면 근거로 인정하지 않는다.
+create or replace function core.call_evidence_ok(p_kind text, p_value text, p_evidence text)
+returns boolean
+language sql immutable set search_path = '' as $$
+  select length(btrim(coalesce(p_evidence, ''))) >= 4 and exists (
+    select 1 from unnest(case
+      when p_kind = 'product' and p_value = 'internet_tv'    then array['티비', 'TV', 'tv', '티브이', '테레비', '방송']
+      when p_kind = 'product' and p_value = 'internet_phone' then array['전화', '집전화', '인터넷전화']
+      when p_kind = 'product' and p_value = 'internet_only'  then array['인터넷']
+      when p_kind = 'product' and p_value = 'cctv_security'  then array['CCTV', 'cctv', '씨씨티비', '보안', '카메라']
+      when p_kind = 'product' and p_value = 'other'          then array['다른', '기타', '그 외']
+      when p_kind = 'outcome' and p_value = 'interested'     then array['관심', '궁금', '알아보', '하고 싶', '해보고']
+      when p_kind = 'outcome' and p_value = 'applied'        then array['신청', '가입', '접수']
+      when p_kind = 'outcome' and p_value = 'declined'       then array['안 할', '안할', '안 해', '않', '싫', '필요 없', '필요없', '괜찮습니다', '됐어요']
+      when p_kind = 'outcome' and p_value = 'no_answer'      then array['부재', '안 받', '통화 불가', '연결이 안']
+      when p_kind = 'outcome' and p_value = 'callback_requested' then array['다시', '연락', '전화 주', '전화 줘']
+      when p_kind = 'outcome' and p_value = 'undecided'      then array['생각해', '고민', '나중', '상의']
+      when p_kind = 'callback'                               then array['내일', '모레', '오늘', '시에', '시쯤', '요일', '다음 주', '다음주', '오전', '오후', '저녁']
+      else array[]::text[] end) w
+    where strpos(p_evidence, w) > 0)
+$$;
+
 -- 요약 작업 가져가기(작업자 전용). 서버는 먼저 AI 비용을 예약(app_ai)하고 그 예약 번호를 넘긴다.
 create or replace function api.call_summary_claim(p_ai_reservation bigint)
 returns table (job_id bigint, lease_token uuid, call_id uuid, transcript_masked text)
@@ -87,13 +112,13 @@ declare
   v_job   core.call_jobs;
   v_token uuid := gen_random_uuid();
 begin
+  perform pg_advisory_xact_lock(hashtextextended('callsummary', 0));   -- 예약 재사용 검사보다 먼저 잠근다(동시 요청 우회 방지)
   if p_ai_reservation is null or not exists (
        select 1 from core.ai_usage_ledger u where u.id = p_ai_reservation
           and not exists (select 1 from core.ai_usage_closures s where s.reservation_id = u.id))
      or exists (select 1 from core.call_jobs j where j.ai_reservation = p_ai_reservation) then
     raise exception 'INVALID_RESERVATION' using errcode = '22023';   -- 정산 안 된 새 예약만(한 작업에 한 번)
   end if;
-  perform pg_advisory_xact_lock(hashtextextended('callsummary', 0));
   perform core.call_jobs_reclaim('summary');
   if not coalesce((select s.summary_enabled from core.call_settings s where s.singleton), false) then
     return;
@@ -149,7 +174,8 @@ begin
     raise exception 'UNSUPPORTED_CLAIM' using errcode = '22023';
   end if;
   for k in select jsonb_object_keys(p_evidence) loop
-    if strpos(v_text, p_evidence->>k) = 0 then
+    if strpos(v_text, p_evidence->>k) = 0
+       or not core.call_evidence_ok(k, case k when 'product' then p_product when 'outcome' then p_outcome else 'set' end, p_evidence->>k) then
       raise exception 'UNSUPPORTED_CLAIM' using errcode = '22023';
     end if;
   end loop;
@@ -210,6 +236,7 @@ begin
 end
 $$;
 
+revoke all on function core.call_evidence_ok(text, text, text) from public;
 revoke all on function core.call_summaries_guard(), core.call_summaries_on_delete(),
   core.call_summary_check(text, text, timestamptz, text) from public;
 

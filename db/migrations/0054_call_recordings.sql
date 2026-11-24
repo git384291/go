@@ -401,6 +401,23 @@ $$;
 drop trigger if exists calls_on_lead_purge on core.leads;
 create trigger calls_on_lead_purge after update of purged_at on core.leads for each row execute function core.calls_on_lead_purge();
 
+-- 고객 전체 파기(pii.customers 삭제) 시: 같은 연락처의 다른 리드 연결·미연결 통화도 삭제(같은 연락처 고객 행이 더 없을 때)
+create or replace function core.calls_on_customer_delete() returns trigger
+language plpgsql set search_path = '' as $$
+declare
+  r record;
+begin
+  if not exists (select 1 from pii.customers c where c.phone_hmac = old.phone_hmac and c.id <> old.id) then
+    for r in select x.call_id from pii.call_recordings x where x.phone_hmac = old.phone_hmac loop
+      perform core.call_purge_internal(r.call_id, null, 'customer_purged');
+    end loop;
+  end if;
+  return null;
+end
+$$;
+drop trigger if exists calls_on_customer_delete on pii.customers;
+create trigger calls_on_customer_delete after delete on pii.customers for each row execute function core.calls_on_customer_delete();
+
 -- 저장소 삭제 대기열(서버 작업 전용)
 create or replace function api.call_object_deletion_next(p_limit int)
 returns table (storage_path text)
@@ -423,7 +440,7 @@ end
 $$;
 
 revoke all on function core.calls_guard(), core.call_purge_internal(uuid, uuid, text), core.purge_expired_calls(),
-  core.calls_on_lead_purge(), core.call_visible(core.staff, uuid) from public;
+  core.calls_on_lead_purge(), core.calls_on_customer_delete(), core.call_visible(core.staff, uuid) from public;
 
 alter table core.call_settings enable row level security;
 alter table core.call_settings force row level security;

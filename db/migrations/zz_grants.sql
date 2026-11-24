@@ -168,7 +168,7 @@ grant execute on function api.ad_funnel_full(uuid, uuid, text, date, date) to ap
 -- 0054~0057 통화 녹취·STT·요약·이력: api 함수 소유자가 쓰는 내부 보조 함수
 grant execute on function core.call_purge_internal(uuid, uuid, text), core.call_visible(core.staff, uuid),
   core.call_text_unmasked(text), core.call_jobs_reclaim(text), core.call_stt_month_used(text),
-  core.call_summary_check(text, text, timestamptz, text),
+  core.call_summary_check(text, text, timestamptz, text), core.call_evidence_ok(text, text, text),
   core.timeline_leads(core.staff, uuid), core.timeline_events(uuid[], timestamptz, timestamptz) to fideon_api;
 -- 통화 작업자 전용 역할 app_call: 수신·변환·요약 작업·저장소 삭제 대기열만(테이블 권한 없음, 관리자 함수 없음)
 grant execute on function

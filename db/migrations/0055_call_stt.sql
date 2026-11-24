@@ -86,7 +86,13 @@ begin
   update core.call_stt_ledger l set actual_krw = l.reserved_krw, closed_at = now()
     from core.call_jobs j
    where j.kind = p_kind and j.status = 'processing' and j.lease_until < now()
-     and l.job_id = j.id and l.attempt = j.attempts and l.closed_at is null;
+     and l.job_id = j.id and l.closed_at is null;
+  -- 요약 작업: 걸려 있던 AI 비용 예약을 예약액 그대로 확정(청구 여부 모름 → 보수적, 예약이 매달리지 않게)
+  insert into core.ai_usage_closures (reservation_id, kind, actual_cost_krw)
+  select j.ai_reservation, 'confirm', u.cost_krw
+    from core.call_jobs j join core.ai_usage_ledger u on u.id = j.ai_reservation
+   where j.kind = p_kind and p_kind = 'summary' and j.status = 'processing' and j.lease_until < now()
+  on conflict (reservation_id) do nothing;
   update core.call_jobs j set
       attempts = j.attempts + 1,
       status = case when j.attempts + 1 >= 3 then 'dead' else 'queued' end,
@@ -130,7 +136,9 @@ begin
   if core.call_stt_month_used(v_month) + v_cost > v_set.stt_monthly_cap_krw then
     return;   -- 한도 초과: 작업은 대기 유지, 외부 호출 없음
   end if;
-  insert into core.call_stt_ledger (job_id, attempt, month, reserved_krw) values (v_job.id, v_job.attempts, v_month, v_cost);
+  -- 원장 번호는 작업별 증가값(재처리로 attempts가 0이 돼도 충돌하지 않음)
+  insert into core.call_stt_ledger (job_id, attempt, month, reserved_krw)
+  values (v_job.id, coalesce((select max(l.attempt) + 1 from core.call_stt_ledger l where l.job_id = v_job.id), 0), v_month, v_cost);
   update core.call_jobs j set status = 'processing', lease_token = v_token, lease_until = now() + interval '10 minutes',
          reserved_krw = v_cost, updated_at = now()
    where j.id = v_job.id;
@@ -160,7 +168,7 @@ begin
     return 'stale';
   end if;
   update core.call_stt_ledger set actual_krw = p_actual_krw, closed_at = now()
-   where job_id = p_job and attempt = v_job.attempts and closed_at is null;
+   where job_id = p_job and closed_at is null;
   if not exists (select 1 from pii.call_recordings r where r.call_id = v_job.call_id and r.storage_path is not null) then
     update core.call_jobs set status = 'cancelled', lease_token = null, lease_until = null, updated_at = now() where id = p_job;
     return 'cancelled';
@@ -193,7 +201,7 @@ begin
     return 'stale';
   end if;
   update core.call_stt_ledger set actual_krw = p_charged_krw, closed_at = now()
-   where job_id = p_job and attempt = v_job.attempts and closed_at is null;
+   where job_id = p_job and closed_at is null;
   v_dead := not p_retryable or v_job.attempts + 1 >= 3;
   update core.call_jobs j set
       attempts = j.attempts + 1,

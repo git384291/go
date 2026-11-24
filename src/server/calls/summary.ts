@@ -21,6 +21,24 @@ export type SummaryValue = {
   evidence: { product?: string; outcome?: string; callback?: string };
 };
 
+/** DB core.call_evidence_ok 와 같은 낱말표: 근거에 값과 맞는 낱말이 하나는 있어야 한다 */
+const EVIDENCE_WORDS: Record<string, readonly string[]> = {
+  'product:internet_tv': ['티비', 'TV', 'tv', '티브이', '테레비', '방송'],
+  'product:internet_phone': ['전화', '집전화', '인터넷전화'],
+  'product:internet_only': ['인터넷'],
+  'product:cctv_security': ['CCTV', 'cctv', '씨씨티비', '보안', '카메라'],
+  'product:other': ['다른', '기타', '그 외'],
+  'outcome:interested': ['관심', '궁금', '알아보', '하고 싶', '해보고'],
+  'outcome:applied': ['신청', '가입', '접수'],
+  'outcome:declined': ['안 할', '안할', '안 해', '않', '싫', '필요 없', '필요없', '괜찮습니다', '됐어요'],
+  'outcome:no_answer': ['부재', '안 받', '통화 불가', '연결이 안'],
+  'outcome:callback_requested': ['다시', '연락', '전화 주', '전화 줘'],
+  'outcome:undecided': ['생각해', '고민', '나중', '상의'],
+  'callback:set': ['내일', '모레', '오늘', '시에', '시쯤', '요일', '다음 주', '다음주', '오전', '오후', '저녁'],
+};
+export const evidenceOk = (kind: string, value: string, ev: string) =>
+  ev.trim().length >= 4 && (EVIDENCE_WORDS[`${kind}:${value}`] ?? []).some((w) => ev.includes(w));
+
 const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim().length >= 2 && v.trim().length <= max ? v.trim() : null);
 
 /** 모델 결과(형식 모름)를 규칙에 맞게 정리. 근거가 변환문에 없으면 그 항목은 unknown/null. */
@@ -38,18 +56,18 @@ export function sanitizeSummary(raw: unknown, transcriptMasked: string, nowEpoch
   };
   const out: SummaryValue = { product: 'unknown', outcome: 'unknown', callbackEpoch: null, summary, evidence: {} };
   const pe = grounded('product');
-  if (pe && typeof o.product === 'string' && (PRODUCTS as readonly string[]).includes(o.product) && o.product !== 'unknown') {
+  if (pe && typeof o.product === 'string' && (PRODUCTS as readonly string[]).includes(o.product) && o.product !== 'unknown' && evidenceOk('product', o.product, pe)) {
     out.product = o.product as Product;
     out.evidence.product = pe;
   }
   const oe = grounded('outcome');
-  if (oe && typeof o.outcome === 'string' && (OUTCOMES as readonly string[]).includes(o.outcome) && o.outcome !== 'unknown') {
+  if (oe && typeof o.outcome === 'string' && (OUTCOMES as readonly string[]).includes(o.outcome) && o.outcome !== 'unknown' && evidenceOk('outcome', o.outcome, oe)) {
     out.outcome = o.outcome as Outcome;
     out.evidence.outcome = oe;
   }
   const ce = grounded('callback');
   const cb = o.callbackEpoch;
-  if (ce && typeof cb === 'number' && Number.isSafeInteger(cb) && cb >= nowEpoch - 86_400 && cb <= nowEpoch + 180 * 86_400) {
+  if (ce && evidenceOk('callback', 'set', ce) && typeof cb === 'number' && Number.isSafeInteger(cb) && cb >= nowEpoch - 86_400 && cb <= nowEpoch + 180 * 86_400) {
     out.callbackEpoch = cb;
     out.evidence.callback = ce;
   }

@@ -179,6 +179,10 @@ select test.expect_error(format($$select api.call_job_requeue(%s, %L, 'stt', '�
 select test.expect_ok(format($$select api.call_job_requeue(%s, %L, 'stt', '장애 복구 후 재처리')$$, test.cs('owner'), :'j2call'), 'ST17 대표 재처리(dead → queued)');
 select test.expect_eq(format($$select used_krw::text || '/' || cap_krw::text from api.call_stt_status(%s)$$, test.cs('rv')), current_setting('t.used'), 'ST18 검토자: 사용액/한도 조회');
 reset role;
+set role app_call;
+select test.expect_eq($$select job_id::text from api.call_stt_claim()$$, :'j2', 'ST19 재처리한 작업 다시 가져감(원장 번호 충돌 없음, 큐 멈춤 없음)');
+reset role;
+select test.expect_eq(format($$select string_agg(attempt::text, ',' order by attempt) from core.call_stt_ledger where job_id = %s$$, :'j2'), '0,1,2', 'ST19b 원장 번호는 작업별 증가값(가져갈 때마다 +1)');
 
 -- ============ ③ AI 요약 ============
 update core.ai_budget_config set monthly_limit_krw = 100000 where singleton;
@@ -198,6 +202,7 @@ select test.expect_error_msg(format($$select * from api.call_summary_claim(%s)$$
 select test.expect_error_msg(format($$select api.call_summary_complete(%s, %L, 'internet_tv', 'unknown', null, '인터넷 TV 문의', '{}')$$, :'s1', :'sl1'), '22023', 'UNSUPPORTED_CLAIM', 'SM5 근거 없는 상품 분류 거부(추측 금지)');
 select test.expect_error_msg(format($$select api.call_summary_complete(%s, %L, 'internet_tv', 'unknown', null, '인터넷 TV 문의', '{"product": "인터넷 TV 3년 약정"}')$$, :'s1', :'sl1'), '22023', 'UNSUPPORTED_CLAIM', 'SM6 변환문에 없는 근거 거부');
 select test.expect_error_msg(format($$select api.call_summary_complete(%s, %L, 'unknown', 'unknown', null, '문의', '{"product": "인터넷 티비"}')$$, :'s1', :'sl1'), '22023', 'UNSUPPORTED_CLAIM', 'SM7 근거와 값 불일치 거부');
+select test.expect_error_msg(format($$select api.call_summary_complete(%s, %L, 'cctv_security', 'declined', null, '문의', '{"product": "같이 신청하고", "outcome": "신청하고 싶어요"}')$$, :'s1', :'sl1'), '22023', 'UNSUPPORTED_CLAIM', 'SM7b 변환문에 있는 문장이어도 값과 뜻이 안 맞으면 거부(CCTV·거절에 "신청" 근거)');
 select test.expect_error_msg(format($$select api.call_summary_complete(%s, %L, 'unknown', 'unknown', null, '연락처 010 1234 5678', '{}')$$, :'s1', :'sl1'), '22023', 'UNMASKED_PII', 'SM8 요약에 전화번호 남으면 거부');
 select test.expect_eq(format($$select api.call_summary_complete(%s, %L, 'internet_tv', 'callback_requested', %s, '인터넷+TV 신청 희망, 내일 오후 재연락 요청', '{"product": "인터넷 티비 같이 신청하고 싶어요", "outcome": "다시 전화 주세요", "callback": "내일 오후 3시에 다시 전화"}')$$,
   :'s1', :'sl1', floor(extract(epoch from now() + interval '1 day'))::bigint), 'done', 'SM9 근거 있는 분류 저장');
@@ -232,6 +237,8 @@ select test.expect_eq(format($$select count(*)::text from api.customer_history(%
    where detail::text ~ '[0-9a-f]{64}' or detail::text like '%%calls/%%' or detail::text like '%%v1:%%' or detail::text ~ '010-?[0-9]{4}'$$, test.cs('owner')), '0', 'TL6 이력에 연락처 해시·녹취 위치·암호문·전화번호 없음');
 select test.expect_eq(format($$select detail->'summary'->>'version' from api.customer_history(%s, 'c1000000-0000-4000-8000-0000000000a1', current_date - 60, current_date + 2) where kind = 'call'$$, test.cs('c2')),
   '2', 'TL7 통화 이력은 최신 요약 판(관리자 수정) 표시');
+select test.expect_eq(format($$select coalesce(detail->'summary'->>'text', '없음') || '|' || (detail->'summary'->>'version') from api.customer_history(%s, 'c1000000-0000-4000-8000-0000000000a1', current_date - 60, current_date + 2) where kind = 'call' and ref = %L$$, test.cs('rv'), :'call_ok'),
+  '없음|2', 'TL7b 검토자: 요약 분류는 보이되 본문은 제외(요약 판 열람 불가와 같은 정책)');
 select test.expect_eq(format($$select count(*)::text from api.timeline_by_date(%s, current_date - 1, current_date + 2) where kind = 'call_unmatched'$$, test.cs('owner')), '1', 'TL8 대표 날짜별 조회: 미연결 통화 표시');
 select test.expect_eq(format($$select count(*)::text from api.timeline_by_date(%s, current_date - 1, current_date + 2) where kind = 'call_unmatched'$$, test.cs('c2')), '0', 'TL9 상담원 날짜별 조회: 미연결 통화 없음');
 select test.expect_eq(format($$select count(*)::text from api.timeline_by_date(%s, current_date - 1, current_date + 2) where lead_id = 'c1000000-0000-4000-8000-0000000000a2'$$, test.cs('c2')), '0', 'TL10 상담원 날짜별 조회: 남의 담당 리드 제외');
@@ -268,11 +275,21 @@ reset role;
 update pii.call_recordings set retention_until = now() - interval '1 second' where call_id = :'call_un2';
 select test.expect_eq($$select core.purge_expired_calls()::text$$, '1', 'DL11 보존 기한 지난 녹취 1건 삭제');
 select test.expect_eq(format($$select recording_state || '|' || (select status from core.call_jobs j where j.call_id = %L and j.kind = 'stt') from core.calls where id = %L$$, :'call_un2', :'call_un2'), 'deleted|cancelled', 'DL12 만료 삭제 시 남은 작업 취소');
+-- 고객 전체 파기: 같은 연락처 통화가 다른 리드에 연결돼 있어도 삭제
+select set_config('t.c_cb', test.call_sql('call-cb-0001', repeat('cb', 32), 'rec-notice-v1', 'calls/00000000-0000-4000-8000-0000000c0009.bin', 30), false);
+set role app_call;
+select test.expect_eq(current_setting('t.c_cb'), 'stored', 'DL12b 같은 연락처(b) 통화 저장');
+reset role;
+select id::text as call_cb from core.calls where provider_call_id = 'call-cb-0001' \gset
+set role app_staff;
+select test.expect_eq(format($$select api.call_link(%s, %L, 'c1000000-0000-4000-8000-0000000000a1', '시험: 다른 고객 리드로 연결')$$, test.cs('owner'), :'call_cb'), 'manual_override', 'DL12c 다른 고객 리드로 연결');
+reset role;
 -- 리드 파기 시 연결된 녹취도 삭제(call_un → 리드 b1)
 set role app_staff;
 select test.expect_ok(format($$select api.purge_customer(%s, 'c1000000-0000-4000-8000-0000000000b1', '고객 파기 요청 처리')$$, test.cs('owner')), 'DL13 대표 고객 파기');
 reset role;
 select test.expect_eq(format($$select recording_state from core.calls where id = %L$$, :'call_un'), 'deleted', 'DL14 파기된 리드의 통화 녹취도 삭제');
+select test.expect_eq(format($$select recording_state || '|' || (select count(*) from pii.call_recordings r where r.call_id = %L)::text from core.calls where id = %L$$, :'call_cb', :'call_cb'), 'deleted|0', 'DL14b 고객 전체 파기: 다른 리드에 연결된 같은 연락처 통화도 삭제');
 select test.expect_eq($$select count(*)::text from core.audit_logs where action like 'call.%' and (detail::text ~ '[0-9a-f]{64}' or detail::text like '%calls/%' or detail::text like '%v1:%')$$, '0', 'DL15 감사 기록에 연락처 해시·파일 위치·암호문 없음');
 
 -- 정리: 이 시험이 바꾼 AI 한도·통화 설정 되돌리기
