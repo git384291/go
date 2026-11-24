@@ -15,7 +15,7 @@ create function test.set_limits(p_month_room int, p_day_room int, p_scope_day in
          scope_daily_limit_krw = p_scope_day, scope_monthly_limit_krw = p_scope_month, max_inflight = 1000 where singleton $$;
 
 -- H1 새 한도의 기본값 0원 = 호출 금지(0028 적용 직후 구성)
-update core.ai_budget_config set daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 1000, monthly_limit_krw = 1000000 where singleton;
+update core.ai_budget_config set daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 1000, scope_max_inflight = 100, monthly_limit_krw = 1000000 where singleton;
 set role app_ai;
 select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h1-0000000000001', repeat('c', 64)) is null)::text$$, 'true', 'H1 일·사용자 한도 미설정(0원)이면 월 한도가 넉넉해도 거부');
 reset role;
@@ -139,3 +139,17 @@ reset role;
 
 -- 원상 복구: 한도 0원(기본 = 호출 금지)
 update core.ai_budget_config set paused = false, monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0 where singleton;
+
+-- H12 (0029) 사용자별 동시 처리 1건: 같은 사용자 키의 미정산 예약이 있으면 거부, 다른 사용자는 통과, 정산 뒤 다시 허용
+select test.set_limits(1000, 1000, 1000, 1000);
+update core.ai_budget_config set scope_max_inflight = 1 where singleton;
+select set_config('t.h12', api.ai_budget_hold(1, 'req-h12-000000000001', repeat('b7', 32))::text, false);
+select test.expect_eq($$select (current_setting('t.h12') <> '')::text$$, 'true', 'H12 사용자 A 첫 예약');
+select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h12-000000000002', repeat('b7', 32)) is null)::text$$, 'true', 'H12b 같은 사용자 A 동시 두 번째 거부(미정산 1건)');
+select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h12-000000000003', repeat('b8', 32)) is not null)::text$$, 'true', 'H12c 다른 사용자 B는 허용');
+select api.ai_budget_confirm(current_setting('t.h12')::bigint, 1);
+select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h12-000000000004', repeat('b7', 32)) is not null)::text$$, 'true', 'H12d A 정산 뒤 다시 허용');
+update core.ai_budget_config set scope_max_inflight = 0 where singleton;
+select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h12-000000000005', repeat('b9', 32)) is null)::text$$, 'true', 'H12e 상한 0 = 호출 금지');
+select test.expect_eq($$select column_default from information_schema.columns where table_schema = 'core' and table_name = 'ai_budget_config' and column_name = 'scope_max_inflight'$$, '1', 'H12f 기본값 1(PM 결정)');
+update core.ai_budget_config set scope_max_inflight = 1 where singleton;

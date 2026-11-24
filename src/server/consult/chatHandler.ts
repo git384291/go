@@ -3,7 +3,7 @@ import { answerChat } from './chatAnswer';
 import type { ChatDeps } from './chatAnswer';
 import { issueSession, verifySession } from './consultSession';
 import { REQUEST_ID, SCOPE_KEY } from './chatModel';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 /**
  * POST /api/consult/chat 처리(주입형). 스위치(CONSULT_CHAT_ENABLED)·크기·형식·IP별 횟수 제한을 모델 호출 전에 모두 거른다.
@@ -58,9 +58,14 @@ export type HandlerDeps = {
   rateLimit: (kind: 'chat' | 'session') => Promise<boolean>;
   /** 처리 중 중복 요청 방어(없으면 프로세스 기본값) */
   inflight?: InflightGuard;
-  /** 0028: 사용자별 AI 비용 한도 키(서버 IP HMAC 64자리). 없거나 실패하면 DB 예약이 거부된다(호출 금지) */
-  budgetScope?: () => string;
 };
+
+/**
+ * AI 사용자별 한도 키(PM 11/24 최종 결정 ③, 0029): 서버가 서명해 발급한 상담 세션 ID의 HMAC(세션 키 + 용도 구분 문자열).
+ * IP 단독 식별은 쓰지 않는다(IP는 횟수 제한·봇 확인 같은 보조 남용 방지에만). 원문 세션 ID·IP는 DB·기록에 남지 않는다.
+ * 고객 로그인은 아직 없다 — 생기면 내부 사용자 ID로 바꾼다.
+ */
+export const aiScopeFor = (key: Buffer, sessionId: string): string => createHmac('sha256', key).update(`ai-scope|${sessionId}`, 'utf8').digest('hex');
 
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
   if (!d.enabled) return json(503, { ok: false, code: 'DISABLED' });
@@ -117,8 +122,7 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     const chatOk = await d.rateLimit('chat').catch(() => null);
     if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
     if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
-    let scope = '';
-    try { scope = d.budgetScope ? d.budgetScope() : ''; } catch { scope = ''; }
+    const scope = aiScopeFor(d.sessionKey as Buffer, sessionId);
     const budgetCtx = SCOPE_KEY.test(scope) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope } : undefined;
     const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, budgetCtx }, d.now());
     if (!r.ok) return json(400, r);

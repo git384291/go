@@ -16,7 +16,7 @@ ok()  { echo "PASS | $1"; pass=$((pass+1)); }
 bad() { echo "FAIL | $1"; fail=$((fail+1)); }
 eq()  { if [ "$2" = "$3" ]; then ok "$1 ($2)"; else bad "$1 — 기대 [$3] 실제 [$2]"; fi; }
 
-reset()  { "${SU[@]}" -c "truncate core.ai_usage_adjustments, core.ai_usage_closures, core.ai_usage_ledger" -c "update core.ai_budget_config set paused = false, monthly_limit_krw = $1, daily_limit_krw = ${2:-1000000}, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = ${3:-1000}"; }  # 가상 DB 전용
+reset()  { "${SU[@]}" -c "truncate core.ai_usage_adjustments, core.ai_usage_closures, core.ai_usage_ledger" -c "update core.ai_budget_config set paused = false, monthly_limit_krw = $1, daily_limit_krw = ${2:-1000000}, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = ${3:-1000}, scope_max_inflight = ${4:-100}"; }  # 가상 DB 전용
 month()  { "${SU[@]}" -c "select to_char(now() at time zone 'Asia/Seoul','YYYY-MM')"; }
 # 앱 경로와 같은 역할(app_server 로그인 → app_ai로 전환)로 실행
 as_ai()  { psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 -c "begin" -c "set local role app_ai" -c "$1" -c "commit" 2>&1 | grep -v -E '^(BEGIN|SET|COMMIT)$'; }
@@ -139,7 +139,13 @@ for i in $(seq 1 100); do hold 1 > "$TMP/n$i" & done; wait
 eq "D14 성공 5건" "$(cat "$TMP"/n* | grep -cE '^[0-9]+$')" 5
 eq "D14 오류 0건" "$(errs "$TMP"/n*)" 0
 
+echo "== D15 사용자별 동시 1건(0029): 같은 사용자 키로 100건 동시 → 1건, 전역 상한은 넉넉"
+reset 100000 1000000 1000 1
+for i in $(seq 1 100); do hold 1 > "$TMP/p$i" & done; wait
+eq "D15 성공 1건" "$(cat "$TMP"/p* | grep -cE '^[0-9]+$')" 1
+eq "D15 오류 0건" "$(errs "$TMP"/p*)" 0
+
 # 원상 복구(가상 DB): 한도 0원(기본), 원장 비움
-reset 0 0 0
+reset 0 0 0 1
 echo "== 결과: PASS $pass · FAIL $fail"
 [ "$fail" = 0 ]
