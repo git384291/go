@@ -9,7 +9,7 @@ do $$
 declare
   r text;
 begin
-  foreach r in array array['public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor'] loop
+  foreach r in array array['public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'app_call'] loop
     if r = 'public' or exists (select 1 from pg_roles where rolname = r) then
       execute format('revoke all on schema core, pii, security, api from %s', r);
       execute format('revoke all on all tables in schema core, pii, security from %s', r);
@@ -28,6 +28,7 @@ alter default privileges in schema core, pii, security revoke all on sequences f
 -- 3) 스키마 USAGE
 grant usage on schema api to app_public, app_staff, app_ai;
 do $$ begin if exists (select 1 from pg_roles where rolname = 'app_ad_monitor') then execute 'grant usage on schema api to app_ad_monitor'; end if; end $$;  -- 0021 정기 감시 전용
+do $$ begin if exists (select 1 from pg_roles where rolname = 'app_call') then execute 'grant usage on schema api to app_call'; end if; end $$;  -- 0050 통화 수신·변환 작업 전용
 grant usage on schema core, pii, security, api, extensions to fideon_api;
 grant create on schema api to fideon_api;
 
@@ -163,6 +164,29 @@ grant execute on function api.ad_monitor_targets(), api.ad_monitor_stop(text, te
 -- 0011 AI 사용료 예약: 전용 역할 app_ai만(app_public 아님, REV-004 SEC-04)
 grant execute on function api.ai_budget_reserve(int), api.ai_budget_hold(int), api.ai_budget_confirm(bigint, int), api.ai_budget_release(bigint) to app_ai;
 grant execute on function api.ad_funnel_full(uuid, uuid, text, date, date) to app_staff;
+
+-- 0054~0057 통화 녹취·STT·요약·이력: api 함수 소유자가 쓰는 내부 보조 함수
+grant execute on function core.call_purge_internal(uuid, uuid, text), core.call_visible(core.staff, uuid),
+  core.call_text_unmasked(text), core.call_jobs_reclaim(text), core.call_stt_month_used(text),
+  core.call_summary_check(text, text, timestamptz, text),
+  core.timeline_leads(core.staff, uuid), core.timeline_events(uuid[], timestamptz, timestamptz) to fideon_api;
+-- 통화 작업자 전용 역할 app_call: 수신·변환·요약 작업·저장소 삭제 대기열만(테이블 권한 없음, 관리자 함수 없음)
+grant execute on function
+  api.call_ingest(text, text, text, text, text, bigint, int, text, text, text, int, text, uuid),
+  api.call_stt_claim(), api.call_stt_complete(bigint, uuid, text, text, text, int),
+  api.call_job_fail(bigint, uuid, text, boolean, int),
+  api.call_summary_claim(bigint), api.call_summary_complete(bigint, uuid, text, text, bigint, text, jsonb),
+  api.call_object_deletion_next(int), api.call_object_deletion_done(text)
+  to app_call;
+grant execute on function
+  api.call_settings_get(uuid, uuid, text), api.call_settings_set(uuid, uuid, text, jsonb, text),
+  api.call_recording_access(uuid, uuid, text, uuid, text), api.call_link(uuid, uuid, text, uuid, uuid, text),
+  api.call_recording_delete(uuid, uuid, text, uuid, text), api.call_job_requeue(uuid, uuid, text, uuid, text, text),
+  api.call_stt_status(uuid, uuid, text), api.call_summary_edit(uuid, uuid, text, uuid, text, text, bigint, text, text),
+  api.call_summary_versions(uuid, uuid, text, uuid),
+  api.customer_history(uuid, uuid, text, uuid, date, date), api.timeline_by_date(uuid, uuid, text, date, date)
+  to app_staff;
+-- core.purge_expired_calls()도 예약 작업 전용(앱 역할 부여 없음)
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.
 -- AI 예산 함수(3단계)는 app_public이 아닌 서버 내부 전용 역할에만 부여한다(REV-004 SEC-04).
