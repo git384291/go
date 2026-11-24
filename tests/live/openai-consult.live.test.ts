@@ -3,7 +3,8 @@
 // 키는 환경변수로만 받고, 결과·기록·콘솔 출력에 나오지 않는지 확인한다. 운영 DB 사용 안 함(메모리 예산).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { consultModelFromEnv, createOpenAiChatModel, CONSULT_CALL_LIMITS } from '../../src/server/consult/openAiChatModel';
+import { consultModelFromEnv, createOpenAiChatModel, CONSULT_CALL_LIMITS, parseUsage } from '../../src/server/consult/openAiChatModel';
+import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 import { verifiedKrwPrices } from '../../src/server/ai/verifiedPrices';
 import { grantBudgetPermit } from '../../src/server/consult/chatModel';
 import { OPENAI_RESPONSES_URL, openAiFetchTransport } from '../../src/server/ai/openAiTransport';
@@ -44,6 +45,14 @@ async function run(model: ChatModel | null) {
   } finally { Object.assign(console, orig); }
 }
 const model = (key: string) => consultModelFromEnv({ CONSULT_AI_MODEL: MODEL, CONSULT_AI_ENDPOINT: OPENAI_RESPONSES_URL, CONSULT_AI_API_KEY: key, CONSULT_AI_EXECUTION: 'allow' }, openAiFetchTransport);
+// 사용 토큰 기록용(시험 전용): 실제 전송 응답을 그대로 넘기면서 usage만 읽는다(본문·키 미기록)
+const usages: ReturnType<typeof parseUsage>[] = [];
+const tapped: BodyTransport = async (url, init) => {
+  const r = await openAiFetchTransport(url, init);
+  const text = await new Response(r.body).text(); usages.push(parseUsage(text));
+  return { status: r.status, body: new Response(text).body };
+};
+const tappedModel = (key: string) => consultModelFromEnv({ CONSULT_AI_MODEL: MODEL, CONSULT_AI_ENDPOINT: OPENAI_RESPONSES_URL, CONSULT_AI_API_KEY: key, CONSULT_AI_EXECUTION: 'allow' }, tapped);
 
 // 진단(통과·실패 판정 없음, 키 노출만 실패): 운영 한도(1회 3.5초·출력 200토큰)와 별개로 실제 응답 시간·결과·사용량을 잰다. 1회 호출
 test('LIVE0 진단: 실제 응답 시간·결과(시간 15초·출력 200/512토큰)', { skip, timeout: 60_000 }, async () => {
@@ -68,14 +77,17 @@ test('LIVE0b 진단: 상담 경로 실제 프롬프트 오류 코드', { skip, t
 });
 
 test('LIVE1 실제 호출 성공: 예약 1회 → 모델 답변 → usage 기준 확정(1원 이상·예약 이하), 실패 기록 없음, 키 비노출', { skip, timeout: 30_000 }, async () => {
-  const { r, ev, log, out } = await run(model(KEY));
+  usages.length = 0;
+  const { r, ev, log, out } = await run(tappedModel(KEY));
   assert.deepEqual(log, [], `실패 기록: ${JSON.stringify(log)}`);
   assert.ok(r.ok, 'ok'); // 답변이 금액 가드에 걸리면 승인 안내문으로 대체(source fallback)될 수 있다 — 호출 성공 여부는 실패 기록 없음 + 확정으로 본다
   assert.equal(ev.length, 2, JSON.stringify(ev));
   const reserved = Number(ev[0]!.split(':')[1]); const confirmed = Number(ev[1]!.split(':')[1]);
   assert.match(ev[1]!, /^confirm:\d+$/);
   assert.ok(confirmed >= 1 && confirmed <= reserved, `확정 ${confirmed} / 예약 ${reserved}`);
-  console.log(`LIVE1 model=${MODEL} reserved=${reserved} confirmed=${confirmed} source=${r.ok ? r.source : '-'}`);
+  const u = usages.at(-1);
+  console.log(`LIVE1 model=${MODEL} sends=${usages.length} inputTokens=${u?.inputTokens ?? '-'} cachedTokens=${u?.cachedInputTokens ?? '-'} outputTokens=${u?.outputTokens ?? '-'} reserved=${reserved} confirmed=${confirmed} source=${r.ok ? r.source : '-'}`);
+  assert.equal(usages.length, 1, '재시도 없이 1회');
   assert.ok(![JSON.stringify(r), JSON.stringify(log), ...out].some((s) => s.includes(KEY)), '키 노출');
 });
 

@@ -135,7 +135,8 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
 }
 
 /** 상담 1회 호출 상한(코드 고정, 환경변수로 바꾸지 않는다). 예약 비용 = 이 상한으로 계산한 예상 최대 비용(원, 올림) */
-export const CONSULT_CALL_LIMITS = Object.freeze({ maxInputTokens: 4000, maxOutputTokens: 200, timeoutMs: 3500, maxResponseBytes: 32768 }); // 응답 바이트 상한: 실제 Responses API 응답(메타데이터 포함)이 8KB를 넘음 → 32KB(PM 11/24 ④ LIVE0 실측, 비용 무관)
+export const CONSULT_CALL_LIMITS = Object.freeze({ maxInputTokens: 4000, maxOutputTokens: 512, // PM 11/24 A안: 200은 실제 상담 프롬프트에서 답 잘림(INCOMPLETE) → 512(1회 예약 3원)
+  timeoutMs: 3500, maxResponseBytes: 32768 }); // 응답 바이트 상한: 실제 Responses API 응답(메타데이터 포함)이 8KB를 넘음 → 32KB(PM 11/24 ④ LIVE0 실측, 비용 무관)
 
 const VERIFIED_KRW_PRICES = verifiedKrwPrices(); // 공식 확인 기록 → 원화 가격표(모듈당 1번, 고정)
 let last: { sig: string; transport: BodyTransport | null; prices: readonly ModelPrice[]; model: ChatModel } | null = null;

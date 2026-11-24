@@ -34,7 +34,7 @@ function script(steps: ({ status: number; text?: string } | 'throw')[]) {
   return { t, calls };
 }
 const ON = { CONSULT_AI_MODEL: 'gpt-5.6-luna', CONSULT_AI_ENDPOINT: EP, CONSULT_AI_API_KEY: KEY, CONSULT_AI_EXECUTION: 'allow' };
-const live = (t: BodyTransport): ChatModel => consultModelFromEnv(ON, t)!; // 라우트와 같은 모델 선택(1회 예약 2원)
+const live = (t: BodyTransport): ChatModel => consultModelFromEnv(ON, t)!; // 라우트와 같은 모델 선택(1회 예약 3원, PM 11/24 A안)
 function ledger() {
   const ev: string[] = []; const inner = createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000' });
   const budget: AiBudget = { async reserve(c, ctx) { ev.push(`reserve:${c}`); const r = await inner.reserve(c, ctx); if (!r) return null;
@@ -58,8 +58,8 @@ test('LC2 성공: 예약 1회 → 호출 1회 → usage 기준 확정(예약 이
   const model = withRecovery(live(s.t));
   const r = await ask(model, budget);
   assert.ok(r.ok && r.source === 'model');
-  // usage 1원. 예약 = 1회 2원 × 2회(재시도 상한) = 4원
-  assert.deepEqual(ev, ['reserve:4', 'confirm:1']);
+  // usage 1원. 예약 = 1회 3원 × 2회(재시도 상한) = 6원
+  assert.deepEqual(ev, ['reserve:6', 'confirm:1']);
   assert.equal(s.calls.length, 1);
   assert.ok(!s.calls[0]!.body.includes('010-1234-5678') && !s.calls[0]!.body.includes(KEY), '연락처 가림, 키는 본문에 없음(헤더로만)');
   assert.ok(!JSON.stringify(r).includes(KEY));
@@ -70,7 +70,7 @@ test('LC3 5xx 뒤 성공: 재시도 1회만, 확정 = 실패 전송 1회 예약�
   const { ev, budget } = ledger();
   const r = await ask(withRecovery(live(s.t), { baseDelayMs: 1 }), budget);
   assert.ok(r.ok && r.source === 'model');
-  assert.deepEqual(ev, ['reserve:4', 'confirm:3'], '실패 2원(과금 여부 모름 → 보수) + 성공 usage 1원');
+  assert.deepEqual(ev, ['reserve:6', 'confirm:4'], '실패 3원(과금 여부 모름 → 보수) + 성공 usage 1원');
   assert.equal(s.calls.length, 2);
 });
 
@@ -91,7 +91,7 @@ test('LC5 usage 없는 성공 응답: 사용량 모름 → 1회 예약분으로 
   const s = script([{ status: 200, text: body(undefined) }]);
   const { ev, budget } = ledger();
   await ask(withRecovery(live(s.t)), budget);
-  assert.deepEqual(ev, ['reserve:4', 'confirm:2']);
+  assert.deepEqual(ev, ['reserve:6', 'confirm:3']);
 });
 
 test('LC6 모델 선택: mock은 운영 배포 금지, 실제 모델은 키·주소·실행 허용(allow)이 모두 있어야 전송, 키는 모델 객체·오류에 없음', async () => {
