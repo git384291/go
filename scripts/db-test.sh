@@ -46,6 +46,11 @@ echo "== seed (virtual data)"
 "${PSQL[@]}" -d "$DB" -f db/seed/test_seed.sql >/dev/null
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notices.sql >/dev/null
 "${PSQL[@]}" -d "$DB" -f db/tests/00_helpers.sql >/dev/null
+# 0034 광고 월 예산: 새로 만든 DB의 기본값은 0원(= 집행 금지)·안전 여유 20%여야 한다. 확인 뒤 기존 광고 시험용으로만 넉넉히 연다(폐기 DB)
+m34=$("${PSQL[@]}" -d "$DB" -At -c "select monthly_limit_krw || '/' || margin_pct || '/' || core.ad_month_effective_limit() || '/' || (select count(*) from core.ad_month_config) from core.ad_month_config")
+[ "$m34" = "0/20/0/1" ] || { echo "FAIL | MC-default 광고 월 예산 기본값 $m34 (기대 0/20/0/1)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | MC-default 광고 월 예산 기본값 0원·여유 20%·판정 한도 0(미설정 = 집행 금지)·설정 행 1개" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DB" -c "update core.ad_month_config set monthly_limit_krw = 1000000, margin_pct = 10" >/dev/null
 
 echo "== permission report + tests"
 run db/tests/10_grants.sql > "$LOG_DIR/db-grants-report.txt"
@@ -69,6 +74,40 @@ run db/tests/99_ad_launches.sql >/dev/null   # 광고 launch 상태(0018)
 run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM 11/22 P1): 0020 계정 합산 한도·fail-closed 검증
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
+run db/tests/99_ad_monthly_cap.sql >/dev/null   # 광고 월 예산 하드 한도(0034, PM 11/25 M1~M14)
+echo "== 광고 월 예산 동시 요청(0034 M5·M14): 판정 한도 8,000원에 100원 × 100건 동시, 같은 요청 키 20건 동시 — 여러 연결(서버) 경합"
+"${PSQL[@]}" -d "$DB" -q -f db/tests/reset_ad_account.sql >/dev/null
+"${PSQL[@]}" -d "$DB" -q -c "update core.ad_month_config set monthly_limit_krw = 10000, margin_pct = 20" >/dev/null
+mc_run() { "${PSQL[@]}" -d "$DB" -At -c "set role app_staff; $("${PSQL[@]}" -d "$DB" -At -c "$1")"; }   # 직원 앱 계정으로 실행(서명 토큰은 시험 도우미가 만든다)
+mc_run "select test.adapprove('owner', 'camp-mc-par', 10000, 30000, 24, '월 예산 동시 시험')" >/dev/null
+for i in $(seq 1 100); do
+  mc_run "select test.adcall('owner', 'ad_spend_request', format('%L, 100, %L', 'camp-mc-par', 'req-mc-par-' || lpad('$i', 8, '0')))" > "$LOG_DIR/mc-par-$i.out" 2>&1 &
+done
+wait
+for i in $(seq 1 20); do
+  mc_run "select test.adcall('owner', 'ad_spend_request', format('%L, 100, %L', 'camp-mc-par', 'req-mc-dup-00000001'))" > "$LOG_DIR/mc-dup-$i.out" 2>&1 &
+done
+wait
+mc_allow=$(cat "$LOG_DIR"/mc-par-*.out | grep -c '"ALLOW"' || true)
+mc_cap=$(cat "$LOG_DIR"/mc-par-*.out | grep -c 'MONTHLY_CAP_EXCEEDED' || true)
+mc_dup=$(cat "$LOG_DIR"/mc-dup-*.out | grep -c '"ALLOW"' || true)
+mc_dupb=$(cat "$LOG_DIR"/mc-dup-*.out | grep -c 'DUPLICATE_REQUEST\|MONTHLY_CAP_EXCEEDED' || true)
+mc_sum=$("${PSQL[@]}" -d "$DB" -At -c "select coalesce(sum(amount_krw), 0) || '/' || core.ad_account_month((now() at time zone 'Asia/Seoul')::date) from core.ad_spend_ledger where campaign_key = 'camp-mc-par'")
+if [ "$mc_allow" = 80 ] && [ "$mc_cap" = 20 ] && [ "$mc_dup" = 0 ] && [ "$mc_dupb" = 20 ] && [ "$mc_sum" = "8000/8000" ]; then
+  echo "NOTICE:  PASS | M5 동시 100건: 허용 80건 × 100원 = 8,000원 정확히, 나머지 20건 MONTHLY_CAP_EXCEEDED(초과 0원). M14 같은 요청 키 20건 동시: 추가 허용 0건(한도 도달·중복 차단)" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | M5/M14 동시 요청 허용=$mc_allow 월차단=$mc_cap 중복허용=$mc_dup 중복차단=$mc_dupb 원장/월=$mc_sum" | tee -a "$LOG_DIR/db-test.log"; head -3 "$LOG_DIR"/mc-par-1.out; exit 1
+fi
+# 같은 키 동시 중복(한도 여유 있을 때): 정확히 1건만 허용
+"${PSQL[@]}" -d "$DB" -q -c "update core.ad_month_config set monthly_limit_krw = 1000000, margin_pct = 10" >/dev/null
+for i in $(seq 1 20); do
+  mc_run "select test.adcall('owner', 'ad_spend_request', format('%L, 100, %L', 'camp-mc-par', 'req-mc-dup-00000002'))" > "$LOG_DIR/mc-dup2-$i.out" 2>&1 &
+done
+wait
+d2a=$(cat "$LOG_DIR"/mc-dup2-*.out | grep -c '"ALLOW"' || true); d2b=$(cat "$LOG_DIR"/mc-dup2-*.out | grep -c 'DUPLICATE_REQUEST' || true)
+[ "$d2a" = 1 ] && [ "$d2b" = 19 ] || { echo "FAIL | M14b 같은 키 동시 20건 허용=$d2a 중복=$d2b" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M14b 같은 요청 키 20건 동시(여러 연결): 정확히 1건 허용·19건 DUPLICATE_REQUEST" >> "$LOG_DIR/db-test.log"
+"${PSQL[@]}" -d "$DB" -q -f db/tests/reset_ad_account.sql >/dev/null
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
@@ -776,6 +815,15 @@ if [ "$on26" = t ] && [ -n "$err26" ] && [ "$mid" = t ] && [ "$gone25" = t ] && 
 else
   echo "FAIL | M26 0025·0026 롤백 on=$on26 err=$err26 mid=$mid gone=$gone25 back=$back26 snap=$s0→$s1→$s2" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
+# 0034 광고 월 예산: 적용 → 롤백(0021 판정·감시 본문 복원, 설정 표·함수 제거, 원장 보존) → 재적용
+D -f db/migrations/0034_ad_monthly_cap.sql >/dev/null
+has34() { D -At -c "select (position('ad_month_check' in (select prosrc from pg_proc where oid = 'api.ad_spend_request(uuid,uuid,text,text,int,text)'::regprocedure)) > 0)::text || (position('ad_month_check' in (select prosrc from pg_proc where oid = 'api.ad_spend_request_window(uuid,uuid,text,text,int,text)'::regprocedure)) > 0)::text || (position('month_limit_krw' in (select prosrc from pg_proc where oid = 'api.ad_monitor_targets()'::regprocedure)) > 0)::text || (to_regclass('core.ad_month_config') is not null)::text"; }
+l34a=$(D -At -c "select count(*) from core.ad_spend_ledger")
+on34=$(has34); D -f db/rollback/0034_down.sql >/dev/null; off34=$(has34); l34b=$(D -At -c "select count(*) from core.ad_spend_ledger")
+D -f db/migrations/0034_ad_monthly_cap.sql >/dev/null; back34=$(has34); def34=$(D -At -c "select monthly_limit_krw from core.ad_month_config")
+[ "$on34" = truetruetruetrue ] && [ "$off34" = falsefalsefalsefalse ] && [ "$back34" = truetruetruetrue ] && [ "$l34a" = "$l34b" ] && [ "$def34" = 0 ] \
+  || { echo "FAIL | M34 0034 롤백 적용=$on34 롤백=$off34 재적용=$back34 원장=$l34a→$l34b 재적용기본=$def34" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M34 광고 월 예산 0034 롤백: 0021 판정·감시 본문 복원·설정 표 제거·원장 보존($l34a건), 재적용 시 기본 0원" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d postgres -c "drop database if exists $DRILL" >/dev/null
 
 "${PSQL[@]}" -d "$DB" -f db/seed/test_notice_review.sql >/dev/null
