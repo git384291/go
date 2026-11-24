@@ -6,6 +6,8 @@ import 'server-only';
 // - 요청이 한 번이라도 나간 뒤에는 ModelNotCalledError를 내보내지 않는다(예약 비용을 취소하지 않고 확정 대상으로 남긴다).
 // - 사용료: 재시도 포함 최대 비용을 예약(costPerCallKrw = 1회 비용 × 최대 시도 횟수, 1,000원 이하), 확정은 실제로 보낸 횟수만큼만 한다(meter).
 // - 바깥 AbortSignal이 취소되면(상담 전체 시간 초과) 더 이상 시도하지 않는다. 오류 본문·헤더·키는 다루지 않는다.
+// - 동시 요청(최종검증 R10): 다른 요청들의 실패로 차단기가 열리면, 대기 중인 요청도 다시 시도하지 않는다(장애 중 재시도 몰림 방지).
+// - 장애 기록(R8): 차단기 열림·복구만 고정 형식으로 남긴다(고객 글·오류 원문·키 없음).
 import { ModelNotCalledError, type CallMeter, type ChatModel, type ModelInput } from './chatModel';
 
 export type ModelFailureKind = 'timeout' | 'network' | 'rate_limited' | 'server' | 'client' | 'response';
@@ -29,12 +31,17 @@ const countsForBreaker = (e: unknown): boolean => !(e instanceof ModelCallError 
 
 /** 어떤 설정을 넣어도 넘을 수 없는 하드 상한 */
 export const RECOVERY_LIMITS = Object.freeze({ maxAttempts: 3, maxDelayMs: 2000, maxTotalMs: 7000, maxAttemptMs: 7000, maxBreakerFailures: 10, maxBreakerOpenMs: 120_000, maxCostKrw: 1000 });
+/** 차단기 상태 변화 기록(고정 코드와 연속 실패 수만) */
+export type RecoveryEvent = 'breaker_open' | 'breaker_recovered';
+export type RecoveryLog = (event: RecoveryEvent, consecutiveFailures: number) => void;
+const defaultRecoveryLog: RecoveryLog = (event, n) => { console.warn(`[ai-recovery] ${event} failures=${n}`); };
 export type RecoveryConfig = {
   readonly maxAttempts?: number; readonly baseDelayMs?: number; readonly maxDelayMs?: number;
   readonly totalMs?: number; readonly attemptMs?: number;
   readonly breakerFailures?: number; readonly breakerOpenMs?: number;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly now?: () => number;
+  readonly log?: RecoveryLog;
 };
 const clampInt = (v: unknown, lo: number, hi: number, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.trunc(v))) : d);
 const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
@@ -58,6 +65,8 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
   const openMs = clampInt(config.breakerOpenMs, 1, L.maxBreakerOpenMs, 30_000);
   const sleep = config.sleep ?? defaultSleep;
   const now = config.now ?? Date.now;
+  const log = config.log ?? defaultRecoveryLog;
+  const note = (e: RecoveryEvent, n: number) => { try { log(e, n); } catch { /* 기록 실패는 상담에 영향 없음 */ } };
   let failures = 0; // 연속 실패 요청 수
   let openUntil = 0; // 0 = 닫힘. 양수면 이 시각까지 호출 금지, 지난 뒤에는 반열림(시험 1회)
   let probing = false;
@@ -103,6 +112,7 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
           if (meter) meter.sent += 1;
           try {
             const out = await attempt(input, signal, Math.min(attemptMs, remaining), meter);
+            if (openUntil > 0) note('breaker_recovered', failures);
             failures = 0; openUntil = 0;
             return out;
           } catch (e) {
@@ -117,15 +127,19 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
             // 서버가 우리 대기 상한보다 오래 기다리라고 하면 다시 시도하지 않는다(시간·비용 낭비 방지). 상한 안이면 그만큼 기다린다
             const ra = e instanceof ModelCallError ? e.retryAfterMs : undefined;
             if (ra !== undefined && ra > maxDelay) break;
+            if (!probe && openUntil > now()) break; // 그사이 다른 요청들의 실패로 차단기가 열렸다 → 다시 시도하지 않는다
             const delay = Math.min(maxDelay, Math.max(baseDelay * 2 ** (n - 1), ra ?? 0));
             if (deadline - now() <= delay) break; // 다시 시도할 시간이 없다
             await sleep(delay, signal);
-            if (signal.aborted) break;
+            if (signal.aborted || (!probe && openUntil > now())) break;
           }
         }
         if (sentAny && countsForBreaker(last)) {
           failures += 1;
-          if (probe || failures >= threshold) openUntil = now() + openMs;
+          if (probe || failures >= threshold) {
+            if (probe || openUntil === 0) note('breaker_open', failures);
+            openUntil = now() + openMs;
+          }
         }
         throw last instanceof Error ? last : new ModelCallError('MODEL_FAILED', 'network');
       } finally {

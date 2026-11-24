@@ -1,6 +1,7 @@
-// AI 호출 비용 계산(P0 TEST-10). **실제 가격은 코드에 두지 않는다**: 가격표는 승인된 공식 자료로 주입한다(지금은 시험용 가상 값만).
+// AI 호출 비용 계산(P0 TEST-10). 가격표는 승인된 공식 자료로 주입한다(어댑터 설정 prices). 공식 확인된 단가 기록은 verifiedPrices.ts.
 // - 정수 연산(BigInt)만 쓴다. 단가 = 백만 토큰당 원(정수). 예상 최대 비용은 올림(과소 계산 방지).
-// - 통화는 KRW만. 다른 통화·환율 변환은 지원하지 않는다(→ 호출 금지).
+// - 계산 통화는 KRW만(priceFor는 KRW 외 거부). USD 공식 단가는 krwPriceFromUsd로만 원화 가격표로 바꾼다(PM 11/24 ②:
+//   비용 계산용 보수적 환율, 원 단위 올림). **이 환율은 한도 계산용이며 실제 청구 환율이 아니다.**
 // - 캐시 입력 할인은 상한 계산에 쓰지 않는다(할인은 비용을 줄일 뿐이므로 상한 = 전액 입력 단가).
 // - 입력 토큰 상한 가정: 바이트 단위 BPE 계열 토크나이저는 토큰 수 ≤ UTF-8 바이트 수. **공급자별로 공식 확인 필요**(미확인 가정).
 export type ModelPrice = {
@@ -51,3 +52,22 @@ export function settleKrw(p: ModelPrice, u: unknown): number | null {
 
 /** 입력 토큰 상한(가정: 토큰 ≤ UTF-8 바이트) */
 export const inputTokenUpperBound = (text: string): number => new TextEncoder().encode(text).byteLength;
+
+/** 비용 계산용 보수적 환율(PM 11/24 ②: 기준 1,500원 + 안전 여유 20% = 1,800원). **실제 청구 환율 아님** — 한도·예약 계산에만 쓴다 */
+export const COST_ESTIMATE_FX_KRW_PER_USD = 1800;
+/** USD 공식 단가(백만 토큰당 마이크로달러, 정수) */
+export type UsdModelPrice = { readonly model: string; readonly inputMicroUsdPerMTok: number; readonly outputMicroUsdPerMTok: number; readonly cachedInputMicroUsdPerMTok?: number };
+const isMicro = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 1_000_000_000;
+/** USD 단가 → 원화 가격표(원 단위 올림). 값이 하나라도 이상하면 null(= 가격 불확실 → 호출 금지) */
+export function krwPriceFromUsd(u: UsdModelPrice, fxKrwPerUsd: number = COST_ESTIMATE_FX_KRW_PER_USD): ModelPrice | null {
+  if (!u || typeof u.model !== 'string' || u.model.length < 1) return null;
+  if (!Number.isSafeInteger(fxKrwPerUsd) || fxKrwPerUsd < 1 || fxKrwPerUsd > 100_000) return null;
+  if (!isMicro(u.inputMicroUsdPerMTok) || !isMicro(u.outputMicroUsdPerMTok)) return null;
+  if (u.cachedInputMicroUsdPerMTok !== undefined && (!isMicro(u.cachedInputMicroUsdPerMTok) || u.cachedInputMicroUsdPerMTok > u.inputMicroUsdPerMTok)) return null;
+  const krw = (micro: number) => Number(ceilDiv(BigInt(micro) * BigInt(fxKrwPerUsd), M));
+  const p: ModelPrice = {
+    model: u.model, currency: 'KRW', inputKrwPerMTok: krw(u.inputMicroUsdPerMTok), outputKrwPerMTok: krw(u.outputMicroUsdPerMTok),
+    ...(u.cachedInputMicroUsdPerMTok !== undefined ? { cachedInputKrwPerMTok: krw(u.cachedInputMicroUsdPerMTok) } : {}),
+  };
+  return priceFor([p], u.model);
+}
