@@ -25,6 +25,20 @@
 | 네이버 CLOVA Speech | 사용 시간 과금 | 한국어 단문·장문·스트리밍 지원 | 금액, 8kHz 전화망·화자 분리 |
 | 리턴제로(RTZR) | — | — | 공식 가격표 확인 못 함 |
 
+### 한국어 지원·개인정보 처리(공식 문서 기준)
+
+| 업체 | 한국어 | 기본 데이터 처리 | 우리 쪽 조치 |
+|---|---|---|---|
+| Google STT | ko-KR 지원(chirp_2·chirp_3·long·short·telephony, 지역별 상이) | 기본값: 음성·변환문 기록 안 함. 'data logging' 선택 시 Google이 품질 개선에 사용 | data logging 켜지 않음 |
+| Amazon Transcribe | ko-KR 배치·스트리밍 지원, Call Analytics는 통화 후만, 자동 가림(Redaction) 미지원 | **기본값: 처리한 음성을 저장·서비스 개선에 사용.** AWS Organizations 'AI 서비스 옵트아웃' 정책으로 거부 가능 | 쓰려면 옵트아웃 정책 먼저 적용 |
+| OpenAI | 미확인(이번 조사에서 공식 언어 표 확인 못 함) | API 데이터는 기본적으로 학습에 사용 안 함, 남용 감시 기록 최대 30일. 변환 API는 무보관(ZDR) 대상(별도 신청) | 쓰려면 ZDR 신청 |
+| Azure Speech | 미확인 | 실시간: 메모리에서만 처리, 저장 안 함. 배치: 고객이 정한 저장소에 보관, 보관 기간 고객이 관리 | 학습 사용 여부는 문서에 없음 — 미확인 |
+| CLOVA Speech | 단문·장문·스트리밍 한국어 지원 | 공식 문서에서 확인 못 함 | 계약 전 확인 필요 |
+
+공통: 어떤 업체든 보내는 것은 서버가 복호화한 음성뿐이고, 결과 원문은 즉시 암호화 저장, AI에는 가린 글만 보낸다. 국외 이전 해당 여부(개인정보 처리방침·동의 문구)는 업체 확정 후 법률 검토 필요.
+
+출처(개인정보·언어): [Google data logging](https://docs.cloud.google.com/speech-to-text/docs/v1/data-logging), [Google 지원 언어](https://docs.cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages), [Amazon 지원 언어](https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html), [Amazon 옵트아웃](https://docs.aws.amazon.com/transcribe/latest/dg/opt-out.html), [OpenAI your data](https://developers.openai.com/api/docs/guides/your-data), [Azure STT data privacy](https://learn.microsoft.com/legal/cognitive-services/speech-service/speech-to-text/data-privacy-security)
+
 **정확도:** 한국어 전화 통화 기준 공식 비교 수치는 확인하지 못했습니다. 추측으로 순위를 매기지 않습니다.
 **권장(승인 필요):** 실제 녹취 대신 동의받은 시험 통화 20건(가상 대본)으로 후보 2~3곳의 글자 오류율(CER)과 실제 청구액을 비교. 비용 발생 → PM 승인 후 진행.
 
