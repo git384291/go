@@ -7,7 +7,7 @@ import { callPlatform, platformDailyBudgetFor, type AdPlatform } from '../../src
 import { adRunAction } from '../../src/server/admin/adRun';
 import { judgeAccountSpend, judgeSpend } from '../../src/server/advertising/budgetGuard';
 import { AD_DAILY_CAP_KRW, AD_FIRST3DAYS_CAP_KRW } from '../../src/server/advertising/campaignDraft';
-import type { BodyTransport } from '../../src/server/advertising/boundedHttp';import { approvedKeywords, approvedRsaCreative } from '../../src/server/advertising/googleAdsCreative';
+import type { BodyTransport } from '../../src/server/advertising/boundedHttp';import { candidateKeywords, approvedRsaCreative } from '../../src/server/advertising/googleAdsCreative';
 
 
 const CID = '1234567890';
@@ -37,7 +37,7 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
     if (url.endsWith('adGroupAds:mutate')) return ok({ results: [{ resourceName: `customers/${CID}/adGroupAds/${n}~${++n}` }] });
     if (url.endsWith('googleAds:search')) {
       const q: string = body.query;
-      if (/FROM ad_group_criterion/.test(q)) return ok({ results: approvedKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) });
+      if (/FROM ad_group_criterion/.test(q)) return ok({ results: candidateKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) });
       if (/FROM ad_group_ad/.test(q)) { const c = camps.get(`customers/${CID}/campaigns/${q.match(/campaign\.id = (\d+)/)?.[1]}`); return ok({ results: [{ campaign: { status: c?.status }, adGroup: { status: 'PAUSED' }, adGroupAd: { status: 'PAUSED' } }] }); }
       if (/FROM customer$/.test(q)) return ok({ results: [{ customer: { timeZone: 'Asia/Seoul' } }] });
       if (/campaign\.status = 'ENABLED'/.test(q)) {
@@ -55,7 +55,7 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
   return { t, camps, worstDaySpend };
 }
 // 실제 집행 구성(initialStatus='ENABLED')을 흉내 낸다. 기본값 PAUSED면 소재·노출이 없어 지출 0(OS0)
-const plat = (t: BodyTransport, initialStatus: 'ENABLED' | 'PAUSED' = 'ENABLED') => createGoogleAdsPlatform({ transport: t, clientId: 'cid', clientSecret: 'cs', refreshToken: 'rt', customerId: CID, initialStatus, creative: approvedRsaCreative(), keywords: approvedKeywords(), landingUrl: 'https://example.com/internet-tv' })!;
+const plat = (t: BodyTransport, initialStatus: 'ENABLED' | 'PAUSED' = 'ENABLED') => createGoogleAdsPlatform({ transport: t, clientId: 'cid', clientSecret: 'cs', refreshToken: 'rt', customerId: CID, initialStatus, creative: approvedRsaCreative(), keywords: candidateKeywords(), landingUrl: 'https://example.com/internet-tv' })!;
 // 서버(adRun)와 같은 규칙: 매체 일예산 = 승인액 ÷ 2
 const launch = (p: ReturnType<typeof plat>, campaign: string, krw: number, k: string) =>
   callPlatform((deadlineAt) => p.launch({ campaign, amountKrw: krw, requestKey: k, platformDailyBudgetKrw: platformDailyBudgetFor(krw), endDate: '2026-12-03', deadlineAt }));

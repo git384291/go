@@ -1,7 +1,7 @@
 // Google Ads 서버 연결·반응형 검색광고 소재 시험(PM 11/23 B·C 승인) — 가짜 transport·가짜 fetch만. 실계정·실접속·실집행이 아니다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { approvedKeywords, approvedRsaCreative, buildRsaCreative, finalUrlSuffixFor, googleTextWidth, landingUrlFrom, RSA_DESCRIPTION_MAX_WIDTH, RSA_HEADLINE_MAX_WIDTH } from '../../src/server/advertising/googleAdsCreative';
+import { candidateKeywords, approvedRsaCreative, buildRsaCreative, finalUrlSuffixFor, googleTextWidth, landingUrlFrom, RSA_DESCRIPTION_MAX_WIDTH, RSA_HEADLINE_MAX_WIDTH } from '../../src/server/advertising/googleAdsCreative';
 import { validateAdCopy } from '../../src/server/advertising/adGeneration';
 import { selectAdPlatform } from '../../src/server/advertising/platformSelect';
 import { googleAdsFetchTransport } from '../../src/server/advertising/googleAdsTransport';
@@ -63,8 +63,8 @@ test('GW6 플랫폼 선택: mock은 모의, google_ads는 인증 4종·최종 UR
     for (const k of ['GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID', 'AD_LANDING_URL'])
       assert.equal(selectAdPlatform({ ...GOOGLE_ENV, [k]: '' }), null, k);
     assert.equal(selectAdPlatform({ ...GOOGLE_ENV, AD_LANDING_URL: 'http://example.com/' }), null);
-    const p = selectAdPlatform(GOOGLE_ENV)!;
-    assert.deepEqual([p.name, p.live], ['google_ads', true]);
+    // PM 11/24: 키워드 10개 최종 승인 보류 → 승인 근거가 없으면 인증·URL이 모두 있어도 실제 어댑터 없음(닫힘)
+    assert.equal(selectAdPlatform(GOOGLE_ENV), null);
     assert.equal(n, 0);
   } finally { globalThis.fetch = real; }
 });
@@ -98,8 +98,8 @@ function fake(over: Record<string, { status: number; text: string }>) {
     const d: Record<string, { status: number; text: string }> = {
       token: R(200, { access_token: 'ya29.fake_access_token_0000' }), budget: R(200, { results: [{ resourceName: `customers/${CID}/campaignBudgets/7` }] }),
       campaign: R(200, { results: [{ resourceName: `customers/${CID}/campaigns/42` }] }), adGroup: R(200, { results: [{ resourceName: `customers/${CID}/adGroups/5` }] }),
-      kw: R(200, { results: approvedKeywords()!.map((_, i) => ({ resourceName: `customers/${CID}/adGroupCriteria/5~${50 + i}` })) }),
-      kwstatus: R(200, { results: approvedKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) }),
+      kw: R(200, { results: candidateKeywords()!.map((_, i) => ({ resourceName: `customers/${CID}/adGroupCriteria/5~${50 + i}` })) }),
+      kwstatus: R(200, { results: candidateKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) }),
       ad: R(200, { results: [{ resourceName: `customers/${CID}/adGroupAds/5~9` }] }),
       search: R(200, { results: [{ campaignBudget: { amountMicros: '2500000000' }, campaign: { endDateTime: '2026-11-30 23:59:59' }, customer: { timeZone: 'Asia/Seoul' } }] }),
       status: R(200, { results: [{ campaign: { status: 'PAUSED' }, adGroup: { status: 'PAUSED' }, adGroupAd: { status: 'PAUSED' } }] }),
@@ -107,7 +107,7 @@ function fake(over: Record<string, { status: number; text: string }>) {
     const r = over[k] ?? d[k]!;
     return { status: r.status, body: stream(r.text) };
   };
-  return { calls, p: createGoogleAdsPlatform({ transport: t, clientId: 'a', clientSecret: 'b', refreshToken: 'c', customerId: CID, creative: approvedRsaCreative(), keywords: approvedKeywords(), landingUrl: LANDING })! };
+  return { calls, p: createGoogleAdsPlatform({ transport: t, clientId: 'a', clientSecret: 'b', refreshToken: 'c', customerId: CID, creative: approvedRsaCreative(), keywords: candidateKeywords(), landingUrl: LANDING })! };
 }
 const req = () => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: 'req-0123456789abcdef', platformDailyBudgetKrw: 2500, endDate: '2026-11-30', deadlineAt: Date.now() + 5000 });
 const err = async (f: () => Promise<unknown>) => { try { await f(); return null; } catch (e) { return e as PlatformError; } };

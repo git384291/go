@@ -130,8 +130,17 @@ export function keywordSetOrReason(candidates: unknown, approved: readonly strin
   return { set: Object.freeze(out), reason: null };
 }
 
-/** 기본 키워드: 승인 목록 전체(검수 문안의 검색어 후보 10개) */
-export const approvedKeywords = (): KeywordSet | null => buildKeywordSet(approvedKeywordTexts());
+/** 후보 키워드: 검수 문안의 검색어 후보 10개(형식·범위·금지어 검사 통과분). **최종 승인 아님** */
+export const candidateKeywords = (): KeywordSet | null => buildKeywordSet(approvedKeywordTexts());
+/**
+ * 키워드 최종 승인 근거(PM 11/24: 기존 10개 최종 승인 보류 → null). 승인되면 PM 결정 번호(PM-YYYY-MM-DD-이름)를 넣는다.
+ * null이면 실제 광고 경로(platformSelect)는 키워드 0개 → Google Ads 어댑터 없음(닫힘). CPC는 Keyword Planner 실자료 뒤 별도 결정.
+ */
+export const KEYWORD_APPROVAL_REF: string | null = null;
+const APPROVAL_REF = /^PM-\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,40}$/;
+/** 실제 광고에 쓸 키워드: 승인 근거가 있을 때만 후보 집합, 없거나 형식이 틀리면 null(= 어댑터 없음) */
+export const approvedKeywords = (ref: string | null = KEYWORD_APPROVAL_REF): KeywordSet | null =>
+  typeof ref === 'string' && APPROVAL_REF.test(ref) ? candidateKeywords() : null;
 
 /** 어댑터에 주입된 값이 승인된 EXACT 집합인지 다시 확인(호출자를 믿지 않는다) */
 export function isApprovedKeywordSet(x: unknown): x is KeywordSet {

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { approvedKeywords } from '../../src/server/advertising/googleAdsCreative';
+import { candidateKeywords } from '../../src/server/advertising/googleAdsCreative';
 import { kstTomorrow, runReadback, type ReadbackLine } from '../../scripts/google-ads-probe/readback';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 
@@ -19,8 +19,8 @@ function fake(o: Over = {}) {
     if (url.endsWith('/token')) return { status: 200, body: body({ access_token: 'ya29.access-SECRET-token' }) };
     // 11/23 C: 광고 그룹·반응형 검색광고(PAUSED)와 상태 확인 조회
     if (url.endsWith('adGroups:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/adGroups/66' }] }) };
-    if (url.endsWith('adGroupCriteria:mutate')) return { status: 200, body: body({ results: approvedKeywords()!.map((_, i) => ({ resourceName: `customers/1234567890/adGroupCriteria/66~${200 + i}` })) }) };
-    if (url.endsWith('googleAds:search') && b.includes('FROM ad_group_criterion')) return { status: 200, body: body({ results: approvedKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) }) };
+    if (url.endsWith('adGroupCriteria:mutate')) return { status: 200, body: body({ results: candidateKeywords()!.map((_, i) => ({ resourceName: `customers/1234567890/adGroupCriteria/66~${200 + i}` })) }) };
+    if (url.endsWith('googleAds:search') && b.includes('FROM ad_group_criterion')) return { status: 200, body: body({ results: candidateKeywords()!.map((k) => ({ adGroupCriterion: { status: 'PAUSED', keyword: { text: k.text, matchType: 'EXACT' } } })) }) };
     if (url.endsWith('adGroupAds:mutate')) return { status: 200, body: body({ results: [{ resourceName: 'customers/1234567890/adGroupAds/66~77' }] }) };
     if (url.endsWith('googleAds:search') && b.includes('FROM ad_group_ad')) return { status: 200, body: body({ results: [{ campaign: { status: 'PAUSED' }, adGroup: { status: 'PAUSED' }, adGroupAd: { status: 'PAUSED' } }] }) };
     if (url.endsWith('googleAds:search') && b.includes('FROM customer')) return { status: 200, body: body({ results: [{ customer: o.acct ?? ACCT }] }) };

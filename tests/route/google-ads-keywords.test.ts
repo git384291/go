@@ -6,7 +6,7 @@ import { createGoogleAdsPlatform } from '../../src/server/advertising/googleAdsP
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
 import type { PlatformError } from '../../src/server/advertising/platform';
 import {
-  approvedKeywords, approvedKeywordTexts, approvedRsaCreative, buildKeywordSet, checkKeyword, isApprovedKeywordSet, keywordSetOrReason, KEYWORDS_MAX,
+  candidateKeywords, approvedKeywordTexts, approvedRsaCreative, buildKeywordSet, checkKeyword, isApprovedKeywordSet, keywordSetOrReason, KEYWORDS_MAX,
 } from '../../src/server/advertising/googleAdsCreative';
 
 const CID = '1234567890';
@@ -15,7 +15,7 @@ const enc = (s: string) => new TextEncoder().encode(s);
 const stream = (t: string) => new ReadableStream<Uint8Array>({ start(c) { c.enqueue(enc(t)); c.close(); } });
 type Resp = { status: number; text: string; throws?: boolean };
 const R = (status: number, body: unknown): Resp => ({ status, text: typeof body === 'string' ? body : JSON.stringify(body) });
-const KWS = approvedKeywords()!;
+const KWS = candidateKeywords()!;
 const kwOk = (): Resp => R(200, { results: KWS.map((_, i) => ({ resourceName: `customers/${CID}/adGroupCriteria/5~${50 + i}` })) });
 const kwRow = (text: string, status = 'PAUSED', matchType = 'EXACT') => ({ adGroupCriterion: { status, keyword: { text, matchType } } });
 const kwRowsOk = (): Resp => R(200, { results: KWS.map((k) => kwRow(k.text)) });
@@ -179,4 +179,14 @@ test('KW7 PAUSED 보장 유지: 캠페인·광고 그룹·키워드·광고 모�
   }
   const creative = readFileSync(new URL('googleAdsCreative.ts', dir), 'utf8');
   assert.ok(!/status:\s*'ENABLED'/.test(creative), '소재·키워드 본문 생성 코드에 ENABLED 없음');
+});
+
+test('KW8 최종 승인 보류(PM 11/24): 승인 근거가 없으면 실제 광고 경로 키워드 0개 → 어댑터 없음, 형식 맞는 PM 결정 번호가 있을 때만 후보 집합', async () => {
+  const { approvedKeywords, KEYWORD_APPROVAL_REF } = await import('../../src/server/advertising/googleAdsCreative');
+  assert.equal(KEYWORD_APPROVAL_REF, null, '현재 보류');
+  assert.equal(approvedKeywords(), null);
+  for (const bad of [null, '', 'approved', 'PM-2026-11-24', 'pm-2026-11-24-keywords', 'PM-2026-11-24-Keywords!']) assert.equal(approvedKeywords(bad), null, String(bad));
+  assert.deepEqual(approvedKeywords('PM-2026-12-01-keywords-final'), candidateKeywords(), '승인되면 후보 집합 그대로(새 키워드 추가 없음)');
+  const { selectAdPlatform } = await import('../../src/server/advertising/platformSelect');
+  assert.equal(selectAdPlatform({ AD_PLATFORM: 'google_ads', GOOGLE_ADS_CLIENT_ID: 'a', GOOGLE_ADS_CLIENT_SECRET: 'b', GOOGLE_ADS_REFRESH_TOKEN: 'c', GOOGLE_ADS_CUSTOMER_ID: '1234567890', AD_LANDING_URL: 'https://example.com/internet-tv' }), null);
 });

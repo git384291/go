@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { callPlatform, createPlatform, PlatformError } from '../../src/server/advertising/platform';
 import { createGoogleAdsPlatform, googleAdsConfigFromEnv, GOOGLE_ADS_ENV_NAMES, GOOGLE_ADS_OPTIONAL_ENV_NAMES, type GoogleAdsConfig } from '../../src/server/advertising/googleAdsPlatform';
 import type { BodyTransport } from '../../src/server/advertising/boundedHttp';
-import { approvedKeywords, approvedRsaCreative } from '../../src/server/advertising/googleAdsCreative';
+import { candidateKeywords, approvedRsaCreative } from '../../src/server/advertising/googleAdsCreative';
 
 const ACCESS = 'ya29.fake_access_token_for_tests_0000';
 const SECRETS = ['dev-token-SECRET', 'client-id-SECRET', 'client-secret-SECRET', 'refresh-SECRET', ACCESS];
@@ -35,7 +35,7 @@ const fake = (script: Partial<Record<'token' | 'budget' | 'campaign' | 'adGroup'
 const OK_GROUP: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: 'customers/1234567890/adGroups/555' }] }) };
 const OK_AD: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: 'customers/1234567890/adGroupAds/555~999' }] }) };
 const statusRow = (c = 'PAUSED', g = 'PAUSED', a = 'PAUSED'): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaign: { status: c }, adGroup: { status: g }, adGroupAd: { status: a } }] }) });
-const KWS = approvedKeywords()!;
+const KWS = candidateKeywords()!;
 const okKw = (cid: string): { status: number; text: string } => ({ status: 200, text: JSON.stringify({ results: KWS.map((_, i) => ({ resourceName: `customers/${cid}/adGroupCriteria/555~${100 + i}` })) }) });
 const kwRows = (over: { status?: string; matchType?: string } = {}): { status: number; text: string } => ({ status: 200, text: JSON.stringify({ results: KWS.map((k) => ({ adGroupCriterion: { status: over.status ?? 'PAUSED', keyword: { text: k.text, matchType: over.matchType ?? 'EXACT' } } })) }) });
 const DEFAULTS: Partial<Record<string, Resp>> = { adGroup: OK_GROUP, kw: okKw('1234567890'), ad: OK_AD, status: statusRow(), kwstatus: kwRows() };
@@ -45,7 +45,7 @@ const OK_BUDGET: Resp = { status: 200, text: JSON.stringify({ results: [{ resour
 const OK_CAMP: Resp = { status: 200, text: JSON.stringify({ results: [{ resourceName: `customers/${CID}/campaigns/4242` }] }) };
 const searchBudget = (micros: string, end = '2026-11-23 23:59:59', tz = 'Asia/Seoul'): Resp => ({ status: 200, text: JSON.stringify({ results: [{ campaignBudget: { amountMicros: micros }, campaign: { endDateTime: end }, customer: { timeZone: tz } }] }) });
 const cfg = (t: BodyTransport | null, o: Partial<GoogleAdsConfig> = {}): GoogleAdsConfig => ({
-  transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, creative: approvedRsaCreative(), keywords: approvedKeywords(), landingUrl: LANDING, ...o,
+  transport: t, clientId: 'client-id-SECRET', clientSecret: 'client-secret-SECRET', refreshToken: 'refresh-SECRET', customerId: CID, creative: approvedRsaCreative(), keywords: candidateKeywords(), landingUrl: LANDING, ...o,
 });
 const req = (o: Record<string, unknown> = {}) => ({ campaign: 'camp-a', amountKrw: 5000, requestKey: KEY, platformDailyBudgetKrw: 2500, endDate: '2026-11-23', deadlineAt: Date.now() + 5000, ...o });
 const opts = () => ({ deadlineAt: Date.now() + 5000 });
