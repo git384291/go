@@ -47,7 +47,7 @@ export async function dbSummaryClaim(reservation: string): Promise<SummaryClaim 
 export async function dbSummaryComplete(c: SummaryClaim, v: SummaryValue): Promise<string> {
   const rows = await withRole('call', (tx) =>
     tx`select api.call_summary_complete(${c.jobId}::bigint, ${c.leaseToken}::uuid, ${v.product}, ${v.outcome},
-       ${v.callbackEpoch}::bigint, ${v.summary}, ${JSON.stringify(v.evidence)}::jsonb) as r`);
+       ${v.callbackEpoch}::bigint, ${v.summary}, ${JSON.stringify(v.evidence)}::text::jsonb) as r`);
   return String((rows as unknown as { r: string }[])[0].r);
 }
 
