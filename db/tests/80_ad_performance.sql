@@ -52,15 +52,15 @@ select test.expect_error($$delete from core.ad_performance$$, '42501', 'P8b 성�
 
 -- AI 사용료 예약
 set role app_ai;
-select test.expect_eq($$select api.ai_budget_reserve(3)::text$$, 'false', 'U1 기본 한도 0원이면 예약 거부(호출 금지)');
+select test.expect_eq($$select (api.ai_budget_hold(3, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'false', 'U1 기본 한도 0원이면 예약 거부(호출 금지)');
 reset role;
 select test.expect_eq($$select count(*)::text from core.ai_usage_ledger$$, '0', 'U1b 거부는 원장에 쓰지 않음');
-update core.ai_budget_config set monthly_limit_krw = 5 where singleton;
+update core.ai_budget_config set monthly_limit_krw = 5, daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000, scope_max_inflight = 100 where singleton;  -- 0029: 사용자 동시 상한은 이 시험(월 한도 경계) 밖 → 넉넉히. 0028: 일·사용자 한도는 넉넉히(월 한도만 시험)
 set role app_ai;
-select test.expect_eq($$select api.ai_budget_reserve(3)::text$$, 'true', 'U2 한도 안 예약');
-select test.expect_eq($$select api.ai_budget_reserve(2)::text$$, 'true', 'U2b 한도 딱 맞게 예약');
-select test.expect_eq($$select api.ai_budget_reserve(1)::text$$, 'false', 'U3 한도 초과 거부');
-select test.expect_eq($$select api.ai_budget_reserve(0)::text || api.ai_budget_reserve(1001)::text || api.ai_budget_reserve(null)::text || api.ai_budget_reserve(-1)::text$$, 'falsefalsefalsefalse', 'U4 범위 밖 비용은 거부');
+select test.expect_eq($$select (api.ai_budget_hold(3, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'true', 'U2 한도 안 예약');
+select test.expect_eq($$select (api.ai_budget_hold(2, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'true', 'U2b 한도 딱 맞게 예약');
+select test.expect_eq($$select (api.ai_budget_hold(1, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'false', 'U3 한도 초과 거부');
+select test.expect_eq($$select (api.ai_budget_hold(0, gen_random_uuid()::text, repeat('a', 64)) is not null)::text || (api.ai_budget_hold(1001, gen_random_uuid()::text, repeat('a', 64)) is not null)::text || (api.ai_budget_hold(null, gen_random_uuid()::text, repeat('a', 64)) is not null)::text || (api.ai_budget_hold(-1, gen_random_uuid()::text, repeat('a', 64)) is not null)::text$$, 'falsefalsefalsefalse', 'U4 범위 밖 비용은 거부');
 select test.expect_error($$select * from core.ai_usage_ledger$$, '42501', 'U5 전용 역할도 원장 직접 조회 불가');
 select test.expect_error($$select * from core.ai_budget_config$$, '42501', 'U5b 한도 설정 직접 조회 불가');
 reset role;
@@ -70,9 +70,9 @@ select test.expect_error($$delete from core.ai_usage_ledger$$, '42501', 'U7b 사
 select test.expect_error($$delete from core.ai_budget_config$$, '42501', 'U7c 한도 설정 삭제 불가');
 -- U8 다른 앱 역할은 실행 불가
 set role app_public;
-select test.expect_error($$select api.ai_budget_reserve(1)$$, '42501', 'U8 app_public은 AI 사용료 예약 실행 불가');
+select test.expect_error($$select (api.ai_budget_hold(1, gen_random_uuid()::text, repeat('a', 64)) is not null)$$, '42501', 'U8 app_public은 AI 사용료 예약 실행 불가');
 reset role;
 set role app_staff;
-select test.expect_error($$select api.ai_budget_reserve(1)$$, '42501', 'U8b app_staff도 실행 불가');
+select test.expect_error($$select (api.ai_budget_hold(1, gen_random_uuid()::text, repeat('a', 64)) is not null)$$, '42501', 'U8b app_staff도 실행 불가');
 reset role;
 update core.ai_budget_config set monthly_limit_krw = 0 where singleton;

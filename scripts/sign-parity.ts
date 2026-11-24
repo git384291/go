@@ -61,3 +61,44 @@ console.log(
   `select test.expect_error($$select api.create_lead(${q(bypassTok)}, ${q(b.nameEnc)}, ${q(b.nameMasked)}, ${q(b.phoneEnc)}, ${q(b.phoneHmac)}, ${q(b.phoneLast4)}, ${q(b.interest)}, ${q(b.contactTime)}, ${q(b.utmSource)}, ${q(b.utmMedium)}, ${q(b.utmCampaign)}, ${q(b.idempotencyKey)}, ${q(b.privacyVersion)}, ${b.consentCollection}, ${b.marketingOptIn}, ${q(b.ipHash)})$$, 'FP001', 'S6 서버 검사를 우회한 정상 서명 CCTV 신청도 DB가 거부');`,
 );
 console.log('reset role;');
+
+// 0027 gclid(광고 사전검증 8번): TS 서명 = DB 검증, 접수 → 클릭 식별값 귀속, 값 변조 거부, 형식 밖 값은 서명 자체를 만들지 않음
+const ag = buildCreateLeadArgs(
+  {
+    name: '테스트고객',
+    phone: '010-0000-0098',
+    interest: 'internet_tv', // PHASE 1: 활성 상품으로 서명 일치 확인(예약 상품은 서버에서 먼저 거부됨)
+    contactTime: "주말 '오전' | 10시",
+    consentCollection: true,
+    marketingOptIn: true,
+    privacyVersion: 'privacy-test-v1',
+    noticeVersion: 'privacy-test-v1',
+    noticeKeys: ['n1'],
+    noticeHashes: noticeHashes({ items: [{ key: 'n1', body: '시험용 문구' }] }),
+    idempotencyKey: 'parity-gclid-000000001',
+    utmSource: 'google',
+    gclid: 'Cj0KCQiA_parity-GCLID-test01',
+  },
+  {
+    crypto: createPiiCrypto({
+      encKeys: { '1': Buffer.alloc(32, 1) },
+      currentVersion: '1',
+      hmacKey: Buffer.alloc(32, 3),
+      ipHashKey: Buffer.alloc(32, 4),
+    }),
+    signingKey: leadKey,
+    currentPrivacyVersion: 'privacy-test-v1',
+    notices: { version: 'privacy-test-v1', confirmed: true, items: [{ key: 'n1', title: '시험 고지', body: '시험용 문구' }] },
+    clientIp: '203.0.113.99',
+  },
+);
+if (!ag.gclid) throw new Error('gclid args missing');
+const G = ag.gclid;
+console.log('set role app_public;');
+console.log(
+  `select test.expect_eq($$select api.create_lead(${q(ag.token)}, ${q(ag.nameEnc)}, ${q(ag.nameMasked)}, ${q(ag.phoneEnc)}, ${q(ag.phoneHmac)}, ${q(ag.phoneLast4)}, ${q(ag.interest)}, ${q(ag.contactTime)}, ${q(ag.utmSource)}, ${q(ag.utmMedium)}, ${q(ag.utmCampaign)}, ${q(ag.idempotencyKey)}, ${q(ag.privacyVersion)}, ${ag.consentCollection}, ${ag.marketingOptIn}, ${q(ag.ipHash)})$$, 'accepted', 'GP1 gclid 포함 접수 저장');`,
+);
+console.log(`select test.expect_eq($$select api.lead_gclid_attach(${q(G.token)}, ${q(G.idempotencyKey)}, ${q(G.phoneHmac)}, ${q(G.gclid)})$$, 'attached', 'GP2 TS 서명 gclid = DB 검증 통과, 접수에 귀속');`);
+console.log(`select test.expect_error($$select api.lead_gclid_attach(${q(G.token)}, ${q(G.idempotencyKey)}, ${q(G.phoneHmac)}, 'Cj0KCQiA_TAMPERED-value1')$$, '42501', 'GP3 서명 뒤 gclid 변조 거부');`);
+console.log('reset role;');
+console.log(`select test.expect_eq($$select k.gclid from pii.lead_clicks k join core.leads l on l.id = k.lead_id where l.idempotency_key = ${q(G.idempotencyKey)}$$, 'Cj0KCQiA_parity-GCLID-test01', 'GP4 접수(리드)와 gclid 연결 확인');`);

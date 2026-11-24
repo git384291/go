@@ -8,3 +8,16 @@
 #           (이력 재작성·force push 없이 PR 검사 통과 목적)
 #   - 범위: 이 커밋·이 파일·이 규칙·이 줄에만 적용. 같은 값이 다른 커밋·다른 줄에 나오면 계속 탐지됨
 1e08944d21b8ba5b8998b045a418659036be5dd3:tests/unit/catalog.test.ts:generic-api-key:28
+#
+# [GL-002] 2026-11-24 광고 사전검증 8번(gclid), CI 실행 45229745673에서 탐지
+#   - 내용: 단위 시험(tests/unit/gclid.test.ts)의 가짜 요청 중복 방지 ID. GL-001과 같은 시험 값(UUID 형식). 인증키·자격증명 아님
+#   - 조치: 현재 파일은 명확한 가짜 값('gclid-test-request-key-0001')으로 교체. 과거 커밋(a49f590)의 탐지만 아래 지문으로 예외 처리(이력 재작성·force push 없음)
+#   - 범위: 이 커밋·이 파일·이 규칙·이 줄에만 적용
+a49f59018dda182fbdee1ca9db1f05efd9068f9a:tests/unit/gclid.test.ts:generic-api-key:70
+
+
+# [GL-004] 2026-11-24 AI 복구 최종검증 PR(#9) 첫 커밋에서 탐지
+#   - 내용: 개인정보·비밀 비노출 시험(RF8)의 가짜 토큰 모양 문자열(시험 데이터). 실제 자격증명 아님
+#   - 조치: 현재 파일은 낮은 엔트로피 가짜 값으로 교체. 첫 커밋의 탐지만 아래 지문으로 예외 처리(이력 재작성·force push 없음)
+#   - 범위: 이 커밋·이 파일·이 규칙·이 줄에만 적용
+c5a39236a73d26b48883efb11b226d7447bc9214:tests/route/ai-recovery-final.test.ts:generic-api-key:261

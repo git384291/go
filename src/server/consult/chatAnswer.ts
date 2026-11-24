@@ -4,8 +4,9 @@ import { AI_UNAVAILABLE_GUIDANCE, POLICY_UNVERIFIED_GUIDANCE } from '@/content/c
 import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
 import { maskPii } from './piiMask';
 import { SYSTEM_PROMPT } from './chatModel';
-import { ModelNotCalledError } from './chatModel';
-import type { AiBudget, CallMeter, ChatModel } from './chatModel';
+import { grantBudgetPermit, ModelNotCalledError, revokeBudgetPermit } from './chatModel';
+import type { AiBudget, CallMeter, ChatModel, ReserveContext } from './chatModel';
+import { ModelCallError } from './modelRecovery';
 
 /**
  * AI 24시간 상담 답변(PM 11/21 ②). 요금·사은품은 승인된 정책 견적 문장에서만 나온다.
@@ -14,14 +15,41 @@ import type { AiBudget, CallMeter, ChatModel } from './chatModel';
  * PM 11/24: 모델 없음·한도·장애·시간 초과는 A 안내(AI 상담 장애, 승인 견적이 있으면 그 문장만 덧붙임),
  * 정책 검증 장애(조회 실패·충돌·만료/미승인 행 등)는 모델을 부르지 않고 B 안내 + next 'blocked'(화면 접수 잠금, 서버·DB도 접수 차단).
  */
+/**
+ * AI 장애·한도 기록(최종검증 R8·R11). 고정 코드·숫자만 남긴다: 고객 글·이름·연락처·주소·오류 원문·키·토큰은 절대 넣지 않는다.
+ * - stage: budget_denied(예약 거부 = 한도·중복 요청 ID·긴급 차단), not_called(전송 0회, 0원 취소), failed(전송 뒤 실패)
+ * - settle: 예약 정리 방식(cancel 0원 / uncertain 예약 전액·대표 조정 / confirm 보낸 횟수만큼)
+ */
+export type AiFailureEvent = {
+  readonly stage: 'budget_denied' | 'not_called' | 'failed';
+  readonly code: string; readonly status: number | null; readonly sent: number;
+  readonly settle: 'none' | 'cancel' | 'uncertain' | 'confirm';
+};
+export type AiFailureLog = (e: AiFailureEvent) => void;
+const defaultFailureLog: AiFailureLog = (e) => { console.warn(`[ai-chat] ${e.stage} code=${e.code} status=${e.status ?? '-'} sent=${e.sent} settle=${e.settle}`); };
+const CODE_RE = /^[A-Z][A-Z_]{0,39}$/;
+/** 오류 → 고정 코드(원문 메시지는 형식이 맞는 내부 코드일 때만, 아니면 'UNKNOWN') */
+function failureCode(e: unknown): { code: string; status: number | null } {
+  if (e instanceof ModelCallError) return { code: e.kind.toUpperCase(), status: Number.isSafeInteger(e.status) ? (e.status as number) : null };
+  if (e instanceof ModelNotCalledError) return { code: CODE_RE.test(e.message) ? e.message : 'NOT_CALLED', status: null };
+  if (e instanceof Error && e.message === 'TIMEOUT') return { code: 'TIMEOUT', status: null };
+  return { code: 'UNKNOWN', status: null };
+}
+
 export type ChatDeps = {
   readonly provider: ApprovedPolicyProvider;
   readonly supplierId: string;
   readonly model: ChatModel | null;
   readonly budget: AiBudget;
   readonly timeoutMs?: number;
+  /** 장애·한도 기록(없으면 고정 형식 경고 1줄). 실패해도 상담 응답에는 영향 없음 */
+  readonly failureLog?: AiFailureLog;
 };
-export type ChatInput = { readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string };
+export type ChatInput = {
+  readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string;
+  /** 0028: 예약 문맥(요청 ID·사용자 키). 없으면 DB 예약은 거부된다(메모리 시험 예산은 문맥 없이도 동작) */
+  readonly budgetCtx?: ReserveContext;
+};
 export type ChatReply =
   | { readonly ok: false; readonly code: 'INVALID_INPUT' }
   | { readonly ok: true; readonly kind: QuoteAnswer['kind']; readonly text: string; readonly source: 'model' | 'fallback'; readonly next: 'signup' | 'callback' | 'blocked'; readonly callbackPrompt?: string };
@@ -66,6 +94,9 @@ export function chatTimeoutMs(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CHAT_TIMEOUT_MAX_MS, Math.trunc(v)) : CHAT_TIMEOUT_DEFAULT_MS;
 }
 
+const isUncertain = (e: unknown): boolean =>
+  (e instanceof Error && e.message === 'TIMEOUT') || (e instanceof ModelCallError && (e.kind === 'timeout' || e.kind === 'network'));
+
 export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): Promise<ChatReply> {
   const m = input.message;
   if (typeof m !== 'string' || m.trim().length < 1 || m.length > 300) return { ok: false, code: 'INVALID_INPUT' };
@@ -81,10 +112,12 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const unavailable = (): ChatReply => gate(withCallback({ ok: true, kind: approved.kind, text: approved.kind === 'quote' ? `${AI_UNAVAILABLE_GUIDANCE}\n\n${approved.text}` : AI_UNAVAILABLE_GUIDANCE, source: 'fallback', next: 'signup' }, m));
   const model = deps.model;
   if (!model) return unavailable();
-  const hold = await deps.budget.reserve(model.costPerCallKrw);
-  if (!hold) return unavailable();
+  const note = (e: AiFailureEvent) => { try { (deps.failureLog ?? defaultFailureLog)(e); } catch { /* 기록 실패는 무시 */ } };
+  const hold = await deps.budget.reserve(model.costPerCallKrw, input.budgetCtx);
+  if (!hold) { note({ stage: 'budget_denied', code: 'BUDGET_DENIED', status: null, sent: 0, settle: 'none' }); return unavailable(); }
   const ctl = new AbortController();
   const meter: CallMeter = { sent: 0 };
+  grantBudgetPermit(meter); // 공통 비용 게이트: 예약이 성공한 이 호출에만 전송 허가
   // 확정 비용: 재시도 래퍼가 센 전송 횟수만큼(예약 이하). 세지 않는 모델은 예약 전액(보수적)
   const spent = () => (model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -100,9 +133,14 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     return gate(withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m));
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
-    if (e instanceof ModelNotCalledError) await hold.cancel(); else await hold.confirm(spent());
+    // 0028: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)
+    const f = failureCode(e);
+    if (e instanceof ModelNotCalledError) { await hold.cancel(); note({ stage: 'not_called', ...f, sent: meter.sent, settle: 'cancel' }); }
+    else if (isUncertain(e) && hold.uncertain) { await hold.uncertain(); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'uncertain' }); }
+    else { await hold.confirm(spent()); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'confirm' }); }
     return unavailable();
   } finally {
+    revokeBudgetPermit(meter);
     if (timer) clearTimeout(timer);
   }
 }

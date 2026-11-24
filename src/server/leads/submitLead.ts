@@ -56,6 +56,8 @@ export async function submitLead(lead: unknown, ctx: IntakeContext, run: PublicR
       }
       // 대표 직접 연락 동의: 같은 트랜잭션, 같은 연락처의 최신 리드에 연결(새 접수·재접수 모두). 실패하면 접수도 함께 취소된다
       if (a.followup) await tx`select api.followup_request(${a.followup.token}, ${a.followup.idempotencyKey}, ${a.followup.phoneHmac}, ${a.followup.privacyVersion})`;
+      // 0027 광고 클릭 식별값(gclid): 같은 트랜잭션, 같은 연락처의 최신 리드에 첫 값만 연결(형식 밖은 DB도 저장하지 않음). Google로 전송하지 않는다
+      if (a.gclid) await tx`select api.lead_gclid_attach(${a.gclid.token}, ${a.gclid.idempotencyKey}, ${a.gclid.phoneHmac}, ${a.gclid.gclid})`;
       return null;
     });
     return { ok: true, outcome };

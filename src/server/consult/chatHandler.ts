@@ -2,6 +2,8 @@ import 'server-only';
 import { answerChat } from './chatAnswer';
 import type { ChatDeps } from './chatAnswer';
 import { issueSession, verifySession } from './consultSession';
+import { REQUEST_ID, SCOPE_KEY } from './chatModel';
+import { createHmac, randomUUID } from 'node:crypto';
 
 /**
  * POST /api/consult/chat 처리(주입형). 스위치(CONSULT_CHAT_ENABLED)·크기·형식·IP별 횟수 제한을 모델 호출 전에 모두 거른다.
@@ -58,6 +60,13 @@ export type HandlerDeps = {
   inflight?: InflightGuard;
 };
 
+/**
+ * AI 사용자별 한도 키(PM 11/24 최종 결정 ③, 0029): 서버가 서명해 발급한 상담 세션 ID의 HMAC(세션 키 + 용도 구분 문자열).
+ * IP 단독 식별은 쓰지 않는다(IP는 횟수 제한·봇 확인 같은 보조 남용 방지에만). 원문 세션 ID·IP는 DB·기록에 남지 않는다.
+ * 고객 로그인은 아직 없다 — 생기면 내부 사용자 ID로 바꾼다.
+ */
+export const aiScopeFor = (key: Buffer, sessionId: string): string => createHmac('sha256', key).update(`ai-scope|${sessionId}`, 'utf8').digest('hex');
+
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
   if (!d.enabled) return json(503, { ok: false, code: 'DISABLED' });
   if (!d.chat || !CODE.test(d.chat.supplierId) || !d.sessionKey) return json(503, { ok: false, code: 'SERVICE_NOT_READY' });
@@ -76,8 +85,10 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
   const hasCampaign = 'campaign' in b;
   const hasSession = 'session' in b;
   const hasBot = 'turnstileToken' in b;
+  const hasReq = 'requestId' in b; // 0028: 선택. 같은 요청 ID 재전송은 다시 예약·호출하지 않는다
+  if (hasReq && (typeof b.requestId !== 'string' || !REQUEST_ID.test(b.requestId))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   if (hasSession && hasBot) return json(400, { ok: false, code: 'INVALID_INPUT' }); // 봇 확인 토큰은 새 세션 요청에서만
-  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : [])].sort().join(',');
+  const allowed = ['carrier', 'message', 'productId', 'regionCode', ...(hasCampaign ? ['campaign'] : []), ...(hasSession ? ['session'] : []), ...(hasBot ? ['turnstileToken'] : []), ...(hasReq ? ['requestId'] : [])].sort().join(',');
   if (Object.keys(b).sort().join(',') !== allowed || !ok(b.carrier) || !ok(b.productId) || !ok(b.regionCode) || (hasCampaign && !ok(b.campaign))) return json(400, { ok: false, code: 'INVALID_INPUT' });
   // 세션: 있으면 서명 검증, 없으면 새로 발급(IP별 횟수 제한). 브라우저가 만든 id는 받지 않는다
   let sessionId = '';
@@ -111,7 +122,9 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     const chatOk = await d.rateLimit('chat').catch(() => null);
     if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
     if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
-    const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode }, d.now());
+    const scope = aiScopeFor(d.sessionKey as Buffer, sessionId);
+    const budgetCtx = SCOPE_KEY.test(scope) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope } : undefined;
+    const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, budgetCtx }, d.now());
     if (!r.ok) return json(400, r);
     if (d.recordConsult) { try { await d.recordConsult(sessionId, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }
     return json(200, { ...r, session: token });

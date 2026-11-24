@@ -13,7 +13,12 @@ import { adminLeadsList } from '../../src/server/admin/leadsRoute';
 import { answerQuote } from '../../src/server/consult/quoteAnswer';
 import { answerChat } from '../../src/server/consult/chatAnswer';
 import { handleChat } from '../../src/server/consult/chatHandler';
-import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type ChatModel } from '../../src/server/consult/chatModel';
+import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type AiBudget, type ChatModel } from '../../src/server/consult/chatModel';
+// 0028: DB는 요청 ID·사용자 키 없는 예약을 거부한다. 시험용 래퍼가 문맥을 붙인다(가상 키, 개인정보 아님)
+let e2eReq = 0;
+const E2E_SCOPE = 'e'.repeat(64);
+const withCtx = (b: AiBudget): AiBudget => ({ reserve: (c, ctx) => b.reserve(c, ctx ?? { requestId: `e2e-req-${Date.now()}-${e2eReq++}`, scope: E2E_SCOPE }) });
+const OPEN_LIMITS = 'daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000, scope_max_inflight = 100'; // 0029 사용자 동시 상한도 넉넉히(월 한도만 시험)
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
 import { intakePolicyFromEnv } from '../../src/server/leads/policyFault';
 import { AI_UNAVAILABLE_GUIDANCE } from '../../src/content/consultGuidance';
@@ -434,9 +439,13 @@ test('E11 광고: 승인 없이는 집행 차단 → 승인 → 모의 집행·�
 });
 
 test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확정/취소, 호출 전 실패만 취소·장애는 확정, 한도 안에서만(동시 포함), 전용 역할만 실행', async () => {
-  const budget = createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never)));
-  const used = async () => count(`select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw else u.cost_krw end), 0)::int as n
-    from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id`);
+  const budget = withCtx(createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never))));
+  await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0028 새 한도는 넉넉히(월 한도만 시험)
+  // 0028: DB 판정(core.ai_spent)과 같은 기준 — 이번 달(KST)만, 불확실 정산은 조정값 우선
+  const used = async () => count(`select coalesce(sum(case s.kind when 'cancel' then 0 when 'confirm' then s.actual_cost_krw
+      when 'uncertain' then coalesce(a.actual_cost_krw, s.actual_cost_krw) else u.cost_krw end), 0)::int as n
+    from core.ai_usage_ledger u left join core.ai_usage_closures s on s.reservation_id = u.id left join core.ai_usage_adjustments a on a.reservation_id = u.id
+    where u.month = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM')`);
   const u0 = await used();
   const [cfg] = await admin`select monthly_limit_krw from core.ai_budget_config where singleton`;
   assert.equal(cfg.monthly_limit_krw, 0);
@@ -478,11 +487,11 @@ test('E12 AI 사용료 DB 집계: 기본 0원이면 호출 금지, 예약→확�
     // 미정산 예약은 전액으로 센다(보수적) — 위 동시 예약 1건이 미정산
     assert.equal(await budget.reserve(1), null);
   } finally {
-    await admin`update core.ai_budget_config set monthly_limit_krw = 0 where singleton`;
+    await admin`update core.ai_budget_config set monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0 where singleton`;
   }
   // 다른 역할·직접 접근 차단
   for (const role of ['public', 'staff'] as const) {
-    await assert.rejects(withRoleOn(app, role, (tx) => tx`select api.ai_budget_hold(1)`), (e: { code?: string }) => e.code === '42501');
+    await assert.rejects(withRoleOn(app, role, (tx) => tx`select api.ai_budget_hold(1, ${'e2e-perm-000000000001'}, ${E2E_SCOPE})`), (e: { code?: string }) => e.code === '42501');
     await assert.rejects(withRoleOn(app, role, (tx) => tx`select api.ai_budget_confirm(1, 1)`), (e: { code?: string }) => e.code === '42501');
   }
   await assert.rejects(withRoleOn(app, 'ai', (tx) => tx`select * from core.ai_usage_ledger`), (e: { code?: string }) => e.code === '42501');
@@ -597,7 +606,8 @@ test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수
   assert.equal((await set(owner, { limitKrw: 100001, reason: '시험' })).status, 422);
   assert.equal((await set(owner, { limitKrw: 100, reason: '' })).status, 422);
   assert.equal(await count(`select count(*)::int as n from core.audit_logs where action = 'ai.budget_limit_set'`), a0);
-  const budget = createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never)));
+  const budget = withCtx(createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(tx as never))));
+  await admin.unsafe(`update core.ai_budget_config set ${OPEN_LIMITS} where singleton`); // 0028 새 한도는 넉넉히(월 한도만 시험)
   const used0 = (await get(owner)).b.usedKrw as number;
   try {
     assert.equal((await set(owner, { limitKrw: used0 + 20, reason: 'E15 시험' })).status, 200);
@@ -617,10 +627,10 @@ test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수
     assert.ok([used0, used0 + 2, used0 + 4].includes(used1), String(used1));
     // 장애 복구: 정산이 일시 실패해도 재시도로 반영, 3번 모두 실패하면 미정산(예약 전액)으로 남고 예외는 없다
     let fail = 2;
-    const flakyRun = (n: () => number) => createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(((s: TemplateStringsArray, ...v: unknown[]) => {
+    const flakyRun = (n: () => number) => withCtx(createDbAiBudget((fn) => withRoleOn(app, 'ai', (tx) => fn(((s: TemplateStringsArray, ...v: unknown[]) => {
       if (s.join('?').includes('ai_budget_confirm') && n() > 0) { fail--; throw new Error('db blip'); }
       return (tx as never as (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>)(s, ...v);
-    }) as never)));
+    }) as never))));
     const h2 = await flakyRun(() => fail).reserve(6);
     assert.ok(h2);
     await h2.confirm(1);
@@ -640,7 +650,7 @@ test('E15 AI 월 한도 화면 API: 기본 0원, 대표만 설정·사유 필수
     assert.equal((await set(owner, { limitKrw: 0, reason: 'E15 복구' })).status, 200);
     assert.equal(await budget.reserve(1), null);
   } finally {
-    await admin`update core.ai_budget_config set monthly_limit_krw = 0 where singleton`;
+    await admin`update core.ai_budget_config set monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0 where singleton`;
   }
 });
 

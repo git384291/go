@@ -33,6 +33,7 @@ export async function POST(req: Request) {
     limiter, ip, now: () => new Date(),
     // F1: 새 세션은 서버 측 봇 확인(Turnstile), 메시지·세션은 DB 공용 한도(IP HMAC만, 원문 IP 미저장). 키·DB 오류는 막는다(503)
     botCheck: (token, from) => verifyTurnstile(token, from),
+    // AI 사용자별 비용 한도 키는 핸들러가 서명 세션 ID로 만든다(aiScopeFor, PM 11/24 ③). IP는 아래 횟수 제한에만 쓴다
     rateLimit: async (kind) => {
       const h = createPiiCrypto(piiKeysFromEnv(process.env)).ipHash(ip);
       const rows = (await withRole('public', (tx) => tx`select api.consult_rate_hit(${h}, ${kind}) as ok`)) as unknown as { ok: unknown }[];

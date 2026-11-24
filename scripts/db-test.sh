@@ -26,7 +26,7 @@ if [ ! -s "$DATA/PG_VERSION" ]; then
   as_pg "mkdir -p '$DATA' && '$PG_BIN/initdb' -D '$DATA' -U postgres --auth=trust --encoding=UTF8 --locale=$PG_LOCALE >/dev/null"
 fi
 if ! as_pg "'$PG_BIN/pg_ctl' -D '$DATA' status" >/dev/null 2>&1; then
-  as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PORT -k $SOCK -c listen_addresses=''\" -l '$DATA/server.log' -w start" >/dev/null
+  as_pg "'$PG_BIN/pg_ctl' -D '$DATA' -o \"-p $PORT -k $SOCK -c listen_addresses='' -c max_connections=200\" -l '$DATA/server.log' -w start" >/dev/null  # 동시 100건 시험(R10)용 연결 여유
 fi
 
 PSQL=(psql -X -q -h "$SOCK" -p "$PORT" -U postgres -v ON_ERROR_STOP=1)
@@ -71,7 +71,10 @@ run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
+run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
+run db/tests/99_ad_precheck.sql >/dev/null   # 광고 사전검증 10: 예약 시작 전 집행 차단·대조군·1회 실행
+run db/tests/99_lead_gclid.sql >/dev/null   # 광고 사전검증 8: gclid 접수 귀속·첫 값 보존·형식·변조·보존기간(0027)
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
@@ -187,6 +190,51 @@ if [ "$ok" = 5 ] && [ "$leads" = 1 ] && [ "$repeat" = 0 ]; then
 else
   echo "FAIL | C4 accepted=$ok leads=$leads repeat=$repeat" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
+# 9. 전환 중복 방지(광고 사전검증): 응답 유실(timeout) 뒤 같은 요청 키로 재시도 — 새 연결(서버 재시작·재처리 모사)에서 3회
+for i in 1 2 3; do
+  psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+    -c "begin" -c "set local role app_public" -f "$LOG_DIR/conc-same.sql" -c "commit" | grep -v '^$' > "$LOG_DIR/conc-retry-$i.out" 2>&1 || true
+done
+ok=$(cat "$LOG_DIR"/conc-retry-*.out | grep -c '^accepted$' || true)
+leads=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads where idempotency_key = 'idem-double-0000000001'")
+repeat=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.lead_status_history h join core.leads l on l.id = h.lead_id where l.idempotency_key = 'idem-double-0000000001' and h.reason = 'repeat_inquiry'")
+if [ "$ok" = 3 ] && [ "$leads" = 1 ] && [ "$repeat" = 0 ]; then
+  echo "NOTICE:  PASS | C4b 확정 뒤 같은 요청 키 재시도 3회(새 연결) → 모두 accepted, 리드(=전환) 1건 유지, 재문의 0건" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C4b accepted=$ok leads=$leads repeat=$repeat" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+# 상담 시작(전환 퍼널 1단계): 같은 세션 키 8건 동시(서로 다른 연결) → 1건만
+for i in $(seq 1 8); do
+  ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+      -c "begin" -c "set local role app_public" -c "select api.consult_event_record('sess-conv-dup-000000001', 'conv-dup')" -c "commit" > "$LOG_DIR/conc-ev-$i.out" 2>&1 ) &
+done
+wait
+evfail=$(cat "$LOG_DIR"/conc-ev-*.out | grep -ci 'error' || true)
+events=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.consult_events where session_key = 'sess-conv-dup-000000001'")
+if [ "$events" = 1 ] && [ "$evfail" = 0 ]; then
+  echo "NOTICE:  PASS | C4c 같은 상담 세션 동시 8건(서로 다른 연결) → 상담 시작 1건, 오류 0건" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C4c events=$events errors=$evfail" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+echo "== concurrency: identical request submitted 100 times at once (R5·R10, separate connections)"
+"${PSQL[@]}" -d "$DB" -At -c "select test.lead_sql(repeat('6', 63) || '2', 'idem-hundred-000000001', p_ip => repeat('7', 64))" > "$LOG_DIR/conc-100.sql"
+pids=()
+for i in $(seq 1 100); do
+  ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+      -c "begin" -c "set local role app_public" -f "$LOG_DIR/conc-100.sql" -c "commit" > "$LOG_DIR/c100-$i.out" 2>&1 ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+ok=$(cat "$LOG_DIR"/c100-*.out | grep -c '^accepted$' || true)
+other=$(cat "$LOG_DIR"/c100-*.out | grep -v '^$' | grep -vc '^accepted$' || true)
+leads=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads where idempotency_key = 'idem-hundred-000000001'")
+repeat=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.lead_status_history h join core.leads l on l.id = h.lead_id where l.idempotency_key = 'idem-hundred-000000001' and h.reason = 'repeat_inquiry'")
+if [ "$ok" = 100 ] && [ "$other" = 0 ] && [ "$leads" = 1 ] && [ "$repeat" = 0 ]; then
+  echo "NOTICE:  PASS | C4d 같은 요청 동시 100건(서로 다른 연결) → 응답 100건 accepted, 리드 1건, 재문의 0건, 오류 0건" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C4d accepted=$ok other=$other leads=$leads repeat=$repeat" | tee -a "$LOG_DIR/db-test.log"; cat "$LOG_DIR"/c100-*.out | sort | uniq -c | head; exit 1
+fi
+rm -f "$LOG_DIR"/c100-*.out "$LOG_DIR/conc-100.sql"
 rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out "$LOG_DIR/app_server.err"
 
 # ===== PHASE 1 보완(검수 지적 2항): 승인·활성화 동시성 =====
@@ -758,6 +806,14 @@ fail=$(grep -c 'FAIL |' "$LOG_DIR/db-test.log" || true)
 grep -o 'PASS | [^|]*' "$LOG_DIR/db-test.log" | sed 's/^PASS | /  ✓ /'
 echo "== DB tests: pass=$pass fail=$fail"
 [ "$fail" = 0 ] || exit 1
+
+# AI 비용 예약 동시성(D1~D14, 동시 100건 포함, 최종검증 R10·R12). 같은 가상 DB에서 실행하고 끝나면 AI 원장·한도를 원상 복구한다.
+echo "== AI cost reservation concurrency (D1~D14, separate connections)"
+if ! bash scripts/ai-cost-db-concurrency.sh > "$LOG_DIR/ai-cost-concurrency.log" 2>&1; then
+  grep -E '^(FAIL|BLOCKED|REFUSED)' "$LOG_DIR/ai-cost-concurrency.log" | head -20
+  echo "FAIL | AI 비용 예약 동시성 검사 실패 (test-results/ai-cost-concurrency.log)"; exit 1
+fi
+tail -1 "$LOG_DIR/ai-cost-concurrency.log"
 
 # 설계 초안 0007(로그인 시도 제한)은 정식 마이그레이션에 자동 로드되지 않는다. GitHub Actions CI에서만, 기본 DB 검사가
 # 통과한 뒤 같은 TCP 미수신 가상 클러스터에 별도 폐기용 DB를 만들어 명시 실행한다(fideon_test는 건드리지 않음).
