@@ -72,6 +72,7 @@ run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 �
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0050, PM 11/25 ③)
 run db/tests/99_crm_unify.sql >/dev/null   # 고객·접수·CRM 통합(0051, PM 11/25 ①③)
+run db/tests/99_purge_scope.sql >/dev/null   # 파기 범위 분리(0052, PM 11/25 B)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 
@@ -715,6 +716,13 @@ D -f db/migrations/0051_crm_unify.sql >/dev/null
 back51=$(D -At -c "select position('0051' in pg_get_functiondef('api.create_lead(text,text,text,text,text,text,text,text,text,text,text,text,text,boolean,boolean,text)'::regprocedure)) > 0 and to_regprocedure('api.crm_unhandled(uuid,uuid,text)') is not null")
 [ "$gone51" = t ] && [ "$back51" = t ] || { echo "FAIL | M51 0051 롤백 gone=$gone51 재적용=$back51" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M51 CRM 통합 0051 롤백: 새 함수 제거·이전 정의 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0052 파기 범위: 롤백(신청 파기 함수 제거·0002 정의 복원) → 재적용
+D -f db/rollback/0052_down.sql >/dev/null
+gone52=$(D -At -c "select to_regprocedure('api.purge_lead(uuid,uuid,text,uuid,text)') is null and position('LEGAL_HOLD' in pg_get_functiondef('api.purge_customer(uuid,uuid,text,uuid,text)'::regprocedure)) = 0")
+D -f db/migrations/0052_purge_scope.sql >/dev/null
+back52=$(D -At -c "select to_regprocedure('api.purge_lead(uuid,uuid,text,uuid,text)') is not null and position('LEGAL_HOLD' in pg_get_functiondef('api.purge_customer(uuid,uuid,text,uuid,text)'::regprocedure)) > 0")
+[ "$gone52" = t ] && [ "$back52" = t ] || { echo "FAIL | M52 0052 롤백 gone=$gone52 재적용=$back52" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M52 파기 범위 0052 롤백: 함수 제거·0002 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0024 상담 공용 횟수 제한: 적용 → 롤백(함수 제거, 집계 보존) → 재적용
 D -f db/migrations/0024_consult_rate.sql >/dev/null
 D -f db/rollback/0024_down.sql >/dev/null

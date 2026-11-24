@@ -80,6 +80,7 @@ grant execute on function
   security.assert_staff(uuid, uuid, text, text[]),
   security.verify_token(text, text, text[]),
   core.purge_customer_internal(uuid, uuid, text),
+  core.purge_lead_internal(uuid, uuid, text),   -- 0052: 신청 1건 파기(api 함수 소유자만)
   core.policy_terms_shape(jsonb),   -- 0008: terms 형태 검사(check 제약이 쓴다)
   core.recontact_allowed(uuid, text)   -- 0050: 재연락 가능 판정(api 함수 소유자만 실행)
   to fideon_api;
@@ -148,7 +149,8 @@ grant execute on function
   api.recontact_close(uuid, uuid, text, bigint, text),
   api.recontact_sweep(uuid, uuid, text),
   api.customer_timeline(uuid, uuid, text, uuid),   -- 0051: 고객 통합 이력(대표만, 가린 값만)
-  api.crm_unhandled(uuid, uuid, text)   -- 0051: 미처리 자동 분류
+  api.crm_unhandled(uuid, uuid, text),   -- 0051: 미처리 자동 분류
+  api.purge_lead(uuid, uuid, text, uuid, text)   -- 0052: 신청 1건 파기(대표만)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
