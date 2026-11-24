@@ -70,7 +70,7 @@ run db/tests/99_ad_overspend_repro.sql >/dev/null   # 광고비 초과 위험(PM
 run db/tests/99_lead_amendments.sql >/dev/null   # 재접수 변경 요청(0019)
 run db/tests/99_ad_window_monitor.sql >/dev/null   # 집행 기간·날짜별 최대 청구액·정기 감시(0021, PM 11/22 P0)
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
-run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0050, PM 11/25 ③)
+run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0060, PM 11/25 ③)
 run db/tests/99_crm_unify.sql >/dev/null   # 고객·접수·CRM 통합(0051, PM 11/25 ①③)
 run db/tests/99_purge_scope.sql >/dev/null   # 파기 범위 분리(0052, PM 11/25 B)
 run db/tests/99_purge_notes_retention.sql >/dev/null   # 메모 파기·5년 보존 분리(0053)
@@ -703,14 +703,14 @@ D -f db/migrations/0023_lead_followups.sql >/dev/null
 back23=$(D -At -c "select to_regprocedure('api.followup_done(uuid,uuid,text,uuid)') is not null")
 [ "$gone23" = t ] && [ "$back23" = t ] || { echo "FAIL | M23 0023 롤백 gone=$gone23 재적용=$back23" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M23 대표 직접 연락 동의 0023 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
-# 0050 날짜별 재연락·수신 거부: 적용 → 롤백(함수 제거, 기록 보존) → 재적용
-D -f db/migrations/0050_recontact_schedule.sql >/dev/null
-D -f db/rollback/0050_down.sql >/dev/null
-gone50=$(D -At -c "select (to_regprocedure('api.recontact_schedule(uuid,uuid,text,uuid,date,text)') is null and to_regprocedure('api.marketing_opt_out(text,text,text)') is null and to_regclass('core.recontact_schedule') is not null)")
-D -f db/migrations/0050_recontact_schedule.sql >/dev/null
-back50=$(D -At -c "select to_regprocedure('api.recontact_sweep(uuid,uuid,text)') is not null")
-[ "$gone50" = t ] && [ "$back50" = t ] || { echo "FAIL | M50 0050 롤백 gone=$gone50 재적용=$back50" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
-echo "NOTICE:  PASS | M50 날짜별 재연락 0050 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0060 날짜별 재연락·수신 거부: 적용 → 롤백(함수 제거, 기록 보존) → 재적용
+D -f db/migrations/0060_recontact_schedule.sql >/dev/null
+D -f db/rollback/0060_down.sql >/dev/null
+gone60=$(D -At -c "select (to_regprocedure('api.recontact_schedule(uuid,uuid,text,uuid,date,text)') is null and to_regprocedure('api.marketing_opt_out(text,text,text)') is null and to_regclass('core.recontact_schedule') is not null)")
+D -f db/migrations/0060_recontact_schedule.sql >/dev/null
+back60=$(D -At -c "select to_regprocedure('api.recontact_sweep(uuid,uuid,text)') is not null")
+[ "$gone60" = t ] && [ "$back60" = t ] || { echo "FAIL | M60 0060 롤백 gone=$gone60 재적용=$back60" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M60 날짜별 재연락 0060 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0051 CRM 통합: 롤백(새 함수 제거·이전 정의 복원) → 재적용
 D -f db/rollback/0051_down.sql >/dev/null
 gone51=$(D -At -c "select to_regprocedure('api.crm_unhandled(uuid,uuid,text)') is null and to_regprocedure('api.customer_timeline(uuid,uuid,text,uuid)') is null and position('0051' in pg_get_functiondef('api.create_lead(text,text,text,text,text,text,text,text,text,text,text,text,text,boolean,boolean,text)'::regprocedure)) = 0")
