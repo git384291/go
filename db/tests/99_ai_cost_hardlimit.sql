@@ -152,4 +152,7 @@ select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h12-000000000004', re
 update core.ai_budget_config set scope_max_inflight = 0 where singleton;
 select test.expect_eq($$select (api.ai_budget_hold(1, 'req-h12-000000000005', repeat('b9', 32)) is null)::text$$, 'true', 'H12e 상한 0 = 호출 금지');
 select test.expect_eq($$select column_default from information_schema.columns where table_schema = 'core' and table_name = 'ai_budget_config' and column_name = 'scope_max_inflight'$$, '1', 'H12f 기본값 1(PM 결정)');
-update core.ai_budget_config set scope_max_inflight = 1 where singleton;
+-- H12 정리: 남은 예약 정산 후 원상 복구(한도 0원 = 호출 금지, 사용자 동시 상한은 기본 1) — 뒤 시험(앱 통합 E12·E15)이 기본값을 전제로 한다
+select api.ai_budget_confirm(u.id, 1) from core.ai_usage_ledger u left join core.ai_usage_closures x on x.reservation_id = u.id
+ where x.reservation_id is null and u.request_id like 'req-h12-%';
+update core.ai_budget_config set paused = false, monthly_limit_krw = 0, daily_limit_krw = 0, scope_daily_limit_krw = 0, scope_monthly_limit_krw = 0, max_inflight = 0, scope_max_inflight = 1 where singleton;
