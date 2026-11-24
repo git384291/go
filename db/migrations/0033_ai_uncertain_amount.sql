@@ -24,5 +24,8 @@ begin
   return found;
 end
 $$;
+-- 0025·0026과 같이 이 파일 안에서 PUBLIC 실행을 막는다(zz_grants 적용 전 틈에 아무 역할이나 불확실 1원 정산으로 사용액을 줄이지 못하게).
+-- app_ai 실행 권한·소유자(fideon_api)는 zz_grants가 준다. 그 전까지는 앱 정산이 실패해 미정산(예약 전액)으로 남는다(안전한 쪽).
+revoke all on function api.ai_budget_uncertain(bigint, int) from public;
 
 commit;
