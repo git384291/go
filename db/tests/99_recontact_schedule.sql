@@ -1,4 +1,4 @@
--- 날짜별 재연락 일정·수신 거부(0050, PM 11/25 ③): 같은 날 중복 금지, 수신 거부·동의 없음 차단, 대표만, 추가 전용, 감사에 원문 없음. 가상 데이터만.
+-- 날짜별 재연락 일정·수신 거부(0060, PM 11/25 ③): 같은 날 중복 금지, 수신 거부·동의 없음 차단, 대표만, 추가 전용, 감사에 원문 없음. 가상 데이터만.
 \set ON_ERROR_STOP 1
 reset role;
 create function test.rc_staff(p_who text, p_fn text, p_a text default null, p_b text default null, p_c text default null) returns text language plpgsql security definer set search_path = test, pg_catalog as $$
