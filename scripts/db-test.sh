@@ -787,6 +787,14 @@ if ! bash scripts/ai-cost-db-concurrency.sh > "$LOG_DIR/ai-cost-concurrency.log"
 fi
 tail -1 "$LOG_DIR/ai-cost-concurrency.log"
 
+# 사용자별 AI 한도 우회(세션 재발급·다중 서버) 실DB 검증(SB-D*). 끝나면 한도·원장·횟수 집계 원상 복구.
+echo "== AI per-user limit bypass (session reissue, multi-server, SB-D*)"
+if ! bash scripts/ai-scope-bypass-db.sh > "$LOG_DIR/ai-scope-bypass.log" 2>&1; then
+  grep -E '^(FAIL|BLOCKED|REFUSED)' "$LOG_DIR/ai-scope-bypass.log" | head -20
+  echo "FAIL | 사용자별 AI 한도 우회 검사 실패 (test-results/ai-scope-bypass.log)"; exit 1
+fi
+tail -1 "$LOG_DIR/ai-scope-bypass.log"
+
 # 설계 초안 0007(로그인 시도 제한)은 정식 마이그레이션에 자동 로드되지 않는다. GitHub Actions CI에서만, 기본 DB 검사가
 # 통과한 뒤 같은 TCP 미수신 가상 클러스터에 별도 폐기용 DB를 만들어 명시 실행한다(fideon_test는 건드리지 않음).
 # 이 단계가 실패하면 전체 DB 검사도 실패한다. 결과는 기본 DB 검사와 다른 라벨로 남는다.
