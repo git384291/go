@@ -1,6 +1,7 @@
 import 'server-only';
-// 상담 AI 실제 모델 어댑터 — **인터페이스·모의시험 전용 준비 코드(PM 11/22 4c7f269 지시 9). 상담 경로에 연결하지 않았다.**
-// - createModel(chatModel.ts)은 여전히 'mock'만 돌려준다. 이 어댑터를 쓰려면 별도 승인(비용 한도·모델·키)과 연결 변경이 필요하다.
+// 상담 AI 실제 모델 어댑터(PM 11/22 4c7f269 지시 9). PM 11/24: 공식 확인 가격표(verifiedPrices)를 상담 경로에 연결(consultModelFromEnv).
+// - **실제 전송은 여전히 0회**: 라우트는 transport를 null로 넘긴다(실제 전송 코드 없음). 실제 전송 연결·운영 활성화는 모델 접근·품질 검증과 별도 승인 뒤에만.
+// - 가격표에 없는(단가 불확실) 모델 이름은 모델 없음(null) → 안전 안내문, 호출 0회.
 // - 요청·응답 형식은 광고 소재 생성 어댑터와 같은 Responses API 형식(store:false, tools 없음)을 가정한다.
 //   **실제 업체·주소·모델명·가격은 정하지 않았다**: 주소(endpoint)도 주입이며 코드에 실제 서비스 주소를 두지 않는다(정적 시험 RD2·CH10).
 //   연결 승인 시 공식 문서로 형식을 다시 확인한다(Claude 환경에서 이번에 원문 미열람).
@@ -11,6 +12,8 @@ import 'server-only';
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
 import { hasBudgetPermit, ModelNotCalledError, type CallMeter, type ChatModel, type ModelInput } from './chatModel';
 import { estimateMaxKrw, inputTokenUpperBound, priceFor, type ModelPrice } from '@/server/ai/costModel';
+import { verifiedKrwPrices } from '@/server/ai/verifiedPrices';
+import { createModel } from './chatModel';
 import { ModelCallError } from './modelRecovery';
 
 export const MAX_REPLY_CHARS = 600;
@@ -112,4 +115,36 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
       try { return parseChatReply(r.text); } catch (e) { throw new ModelCallError(e instanceof Error ? e.message : 'BAD_RESPONSE', 'response'); }
     },
   });
+}
+
+/** 상담 1회 호출 상한(코드 고정, 환경변수로 바꾸지 않는다). 예약 비용 = 이 상한으로 계산한 예상 최대 비용(원, 올림) */
+export const CONSULT_CALL_LIMITS = Object.freeze({ maxInputTokens: 4000, maxOutputTokens: 200, timeoutMs: 3500, maxResponseBytes: 8192 });
+
+const VERIFIED_KRW_PRICES = verifiedKrwPrices(); // 공식 확인 기록 → 원화 가격표(모듈당 1번, 고정)
+let last: { sig: string; transport: BodyTransport | null; prices: readonly ModelPrice[]; model: ChatModel } | null = null;
+/**
+ * 상담 경로 모델 선택(PM 11/24). CONSULT_AI_MODEL:
+ * - 'mock' → 무료 모의 모델(createModel 그대로)
+ * - 가격표(공식 확인 기록 → 1,800원/USD 보수 환율 원화표)에 정확히 1개 있는 모델 ID → 어댑터. 예약 비용은 가격표로만 계산(환경변수 비용 없음)
+ * - 그 밖(오타·대소문자·날짜 붙은 ID·가격표 이상) → null(단가 불확실 = 호출 금지)
+ * 실행은 CONSULT_AI_EXECUTION === 'allow' + 키 + 주소 + transport가 모두 있어야 한다(하나라도 없으면 전송 0회, 예약 취소).
+ * 같은 설정이면 같은 객체를 돌려준다(복구 차단기 상태 유지).
+ */
+export function consultModelFromEnv(env: Record<string, string | undefined>, transport: BodyTransport | null, prices: readonly ModelPrice[] = VERIFIED_KRW_PRICES): ChatModel | null {
+  const name = env.CONSULT_AI_MODEL;
+  if (name === 'mock') return createModel(env);
+  if (typeof name !== 'string') return null;
+  const p = priceFor(prices, name);
+  if (!p) return null;
+  const L = CONSULT_CALL_LIMITS;
+  const cost = estimateMaxKrw(p, L.maxInputTokens, L.maxOutputTokens);
+  if (cost === null || cost < 1 || cost > 1000) return null;
+  const sig = JSON.stringify([name, env.CONSULT_AI_ENDPOINT ?? null, env.CONSULT_AI_API_KEY ?? null, env.CONSULT_AI_EXECUTION ?? null, cost]);
+  if (last && last.sig === sig && last.transport === transport && last.prices === prices) return last.model;
+  const model = createOpenAiChatModel({
+    transport, endpoint: env.CONSULT_AI_ENDPOINT ?? null, apiKey: env.CONSULT_AI_API_KEY ?? null, model: name,
+    executionAllowed: env.CONSULT_AI_EXECUTION === 'allow', costPerCallKrw: cost, prices: [p], ...L,
+  });
+  last = { sig, transport, prices, model };
+  return model;
 }

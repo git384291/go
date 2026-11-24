@@ -1,6 +1,7 @@
 import { clientIpFrom } from '@/server/http/clientIp';
 import { createLimiter, handleChat } from '@/server/consult/chatHandler';
-import { createDbAiBudget, createModel } from '@/server/consult/chatModel';
+import { createDbAiBudget } from '@/server/consult/chatModel';
+import { consultModelFromEnv } from '@/server/consult/openAiChatModel';
 import { recoveringModelFor } from '@/server/consult/modelRecovery';
 import { sessionKeyFromEnv } from '@/server/consult/consultSession';
 import { dbPolicyProvider } from '@/server/consult/publishedPolicies';
@@ -11,7 +12,7 @@ import { createPiiCrypto, piiKeysFromEnv } from '@/server/security/piiCrypto';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// 기본 꺼짐(CONSULT_CHAT_ENABLED). 메모리 제한은 1차, DB 공용 제한(0024)이 최종. 모델은 무료 모의(CONSULT_AI_MODEL=mock)뿐이고, 월 사용료 한도는 DB 집계(기본 0원). 실제 API 호출 없음.
+// 기본 꺼짐(CONSULT_CHAT_ENABLED). 메모리 제한은 1차, DB 공용 제한(0024)이 최종. 모델은 모의 또는 공식 가격표에 있는 모델만(단가 불확실 = 모델 없음), 사용료 한도는 DB 집계(기본 0원). 실제 전송 코드 없음(transport null) → 실제 API 호출 0회.
 const limiter = createLimiter(10, 60_000);
 const newSessionLimiter = createLimiter(5, 3_600_000); // IP당 새 상담 세션은 1시간에 5개
 const budget = createDbAiBudget((fn) => withRole('ai', (tx) => fn(tx as never)));
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
   return handleChat(req, {
     enabled: process.env.CONSULT_CHAT_ENABLED === 'true',
     chat: {
-      supplierId, model: recoveringModelFor(createModel(process.env)), budget,
+      supplierId, model: recoveringModelFor(consultModelFromEnv(process.env, null)), budget,
       provider: dbPolicyProvider(async () => {
         const rows = await withRole('public', (tx) => tx`select api.policy_published() as p`);
         return (rows as unknown as { p: unknown }[]).map((r) => r.p);
