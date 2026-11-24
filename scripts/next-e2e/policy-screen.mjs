@@ -3,6 +3,8 @@
 // 새 버전 교체 시 이전 버전·감사 보존, 만료, 동시 승인, 화면 입력 오류, 다른 데이터 불변.
 // 가짜 정책만(supplier-a·carrier-x·next-e2e-ui*), 폐기 DB(run.sh)에서만. 게시 스위치는 끝나면 원래 값으로 되돌린다.
 const NUM = /\d{1,3}(,\d{3})+원/;
+// jsonb는 키 순서를 바꿔 저장한다 → 키를 정렬해 값만 비교
+const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v));
 
 export async function runPolicyScreen({ sql, n, check, adm, pj, chat, BASE, owner, editor, reviewer }) {
   const { chromium } = await import('playwright');
@@ -68,7 +70,7 @@ export async function runPolicyScreen({ sql, n, check, adm, pj, chat, BASE, owne
     check('PS3 화면 "검증만": 견적 가능한 정책으로 판정, DB 저장 없음', dryMsg.includes('검증 완료 — 견적 가능한 정책') && (await rowsOf(UI)).length === 0, dryMsg.slice(0, 80));
     await Promise.all([ed.waitForNavigation({ waitUntil: 'networkidle' }), ed.click('button:has-text("초안 저장")')]);
     const [d1] = await rowsOf(UI);
-    const same = d1 && JSON.stringify(d1.terms) === JSON.stringify(v1.terms) && d1.product_label === v1.productLabel
+    const same = d1 && canon(d1.terms) === canon(v1.terms) && d1.product_label === v1.productLabel
       && new Date(d1.valid_from).toISOString() === v1.validFrom && new Date(d1.valid_until).toISOString() === v1.validUntil;
     check('PS4 화면 "초안 저장" → DB draft 1건, 원본 정책표(JSON)와 DB 값 완전 일치(요금·약정·장비·설치·결합·지역·사은품·지급/환수 조건·유효기간·상품명)', d1?.state === 'draft' && same === true,
       `state=${d1?.state} terms=${d1 ? JSON.stringify(d1.terms).slice(0, 60) : '-'}`);
@@ -111,7 +113,7 @@ export async function runPolicyScreen({ sql, n, check, adm, pj, chat, BASE, owne
     const rows2 = await rowsOf(UI);
     const ans2 = await ask(UI);
     check('PS11 새 버전 승인: 이전 승인본은 지우지 않고 superseded(값 그대로·교체 시각 기록), 새 버전 approved, 승인본은 1개뿐',
-      ok2.status === 200 && rows2.length === 2 && rows2[0].state === 'superseded' && rows2[0].superseded_at !== null && JSON.stringify(rows2[0].terms) === JSON.stringify(v1.terms)
+      ok2.status === 200 && rows2.length === 2 && rows2[0].state === 'superseded' && rows2[0].superseded_at !== null && canon(rows2[0].terms) === canon(v1.terms)
       && rows2[1].state === 'approved' && rows2.filter((x) => x.state === 'approved').length === 1, rows2.map((x) => x.state).join(','));
     check('PS12 고객 상담은 새 버전 금액(29,900원)만, 이전 금액(27,700원) 없음', ans2.text.includes('29,900') && !ans2.text.includes('27,700'), ans2.text.slice(0, 120));
     const aud = await n(`select count(*)::int as n from core.audit_logs where action like 'policy.%' and target_id in ('${rows2[0].id}', '${rows2[1].id}')`);
