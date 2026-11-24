@@ -3,7 +3,9 @@
 // 키는 환경변수로만 받고, 결과·기록·콘솔 출력에 나오지 않는지 확인한다. 운영 DB 사용 안 함(메모리 예산).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { consultModelFromEnv } from '../../src/server/consult/openAiChatModel';
+import { consultModelFromEnv, createOpenAiChatModel, CONSULT_CALL_LIMITS } from '../../src/server/consult/openAiChatModel';
+import { verifiedKrwPrices } from '../../src/server/ai/verifiedPrices';
+import { grantBudgetPermit } from '../../src/server/consult/chatModel';
 import { OPENAI_RESPONSES_URL, openAiFetchTransport } from '../../src/server/ai/openAiTransport';
 import { recoveringModelFor } from '../../src/server/consult/modelRecovery';
 import { answerChat, type AiFailureEvent } from '../../src/server/consult/chatAnswer';
@@ -42,6 +44,19 @@ async function run(model: ChatModel | null) {
   } finally { Object.assign(console, orig); }
 }
 const model = (key: string) => consultModelFromEnv({ CONSULT_AI_MODEL: MODEL, CONSULT_AI_ENDPOINT: OPENAI_RESPONSES_URL, CONSULT_AI_API_KEY: key, CONSULT_AI_EXECUTION: 'allow' }, openAiFetchTransport);
+
+// 진단(통과·실패 판정 없음, 키 노출만 실패): 운영 한도(1회 3.5초·출력 200토큰)와 별개로 실제 응답 시간·결과·사용량을 잰다. 1회 호출
+test('LIVE0 진단: 실제 응답 시간·결과(시간 15초·출력 200/512토큰)', { skip, timeout: 60_000 }, async () => {
+  for (const maxOutputTokens of [200, 512]) {
+    const m = createOpenAiChatModel({ transport: openAiFetchTransport, endpoint: OPENAI_RESPONSES_URL, apiKey: KEY, model: MODEL, executionAllowed: true, costPerCallKrw: 10, prices: verifiedKrwPrices(), ...CONSULT_CALL_LIMITS, maxOutputTokens, timeoutMs: 15_000, maxResponseBytes: 32_768 });
+    const meter = { sent: 0 } as { sent: number; usageKrw?: number }; grantBudgetPermit(meter);
+    const t0 = Date.now(); let outcome = 'ok'; let len = 0;
+    try { len = (await m.generate({ system: '통신 상품 상담원입니다. 한국어로 두 문장 이내로 답하세요.', user: '인터넷 요금 안내 부탁드려요.', approved: '월 11,111원(가상)' }, AbortSignal.timeout(15_000), meter)).length; }
+    catch (e) { outcome = `${(e as { kind?: string }).kind ?? 'error'}:${e instanceof Error ? e.message.slice(0, 40) : 'x'}`; }
+    const line = `LIVE0 out=${maxOutputTokens} ms=${Date.now() - t0} outcome=${outcome} replyChars=${len} sent=${meter.sent} usageKrw=${meter.usageKrw ?? '-'}`;
+    assert.ok(!line.includes(KEY)); console.log(line);
+  }
+});
 
 test('LIVE1 실제 호출 성공: 예약 1회 → 모델 답변 → usage 기준 확정(1원 이상·예약 이하), 실패 기록 없음, 키 비노출', { skip, timeout: 30_000 }, async () => {
   const { r, ev, log, out } = await run(model(KEY));
