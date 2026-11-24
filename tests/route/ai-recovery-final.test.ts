@@ -258,7 +258,7 @@ test('RF7 장애 기록(R8): 고정 형식 1줄(단계·코드·상태·보낸 �
 });
 
 test('RF8 개인정보·비밀(R11): 이름·연락처·주소·키·토큰이 모델 입력(가림 뒤)·고객 응답·장애 기록·HTTP 응답 어디에도 원문으로 나가지 않는다', async () => {
-  const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.' + 'x'.repeat(40);
+  const TOKEN = 'eyJ' + 'z'.repeat(60); // 가짜 토큰 모양(시험 데이터)
   const msg = `저는 홍길동이고 010-1234-5678, 주안로 12 살아요. 키 ${KEY} 토큰 ${TOKEN}`;
   const SECRETS = ['홍길동', '010-1234-5678', '1234-5678', '주안로 12', KEY, TOKEN, 'provider echo'];
   const logged: string[] = [];
