@@ -73,6 +73,7 @@ run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·�
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
+run db/tests/99_policy_pr16_verify.sql >/dev/null   # PR #16 추가 검증(PM 11/25): 비활성 상품 차단·정확성·캐시 구조·실패 롤백·Supabase 보안 구조(한 트랜잭션, 마지막에 되돌림)
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
