@@ -41,3 +41,26 @@ export function clientIpFrom(
   const last = forwarded.at(-1) ?? '';
   return isIp(last) ? last : '0.0.0.0';
 }
+
+/**
+ * 횟수 제한(IP별 버킷)용 키. IPv4는 그대로, IPv6는 /64 접두사로 묶는다.
+ * 한 가입자가 보통 /64 전체(2^64개 주소)를 받으므로, 주소 하나마다 버킷을 주면 주소만 바꿔 IP별 세션·메시지 한도를
+ * 무한히 우회할 수 있다(→ 세션 재발급으로 사용자별 AI 한도 우회). 원문 IP는 여기서도 저장하지 않는다(호출부가 HMAC).
+ * 해석할 수 없는 IPv6는 '0.0.0.0'(공용 버킷, 안전한 쪽으로 실패).
+ */
+export function rateLimitIpKey(ip: string): string {
+  if (!ip.includes(':')) return ip;
+  const s = ip.toLowerCase();
+  const parts = s.split('::');
+  if (parts.length > 2) return '0.0.0.0';
+  const head = parts[0] ? parts[0].split(':') : [];
+  const tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+  const fill = parts.length === 2 ? 8 - head.length - tail.length : 0;
+  if (parts.length === 2 ? fill < 1 : head.length !== 8) return '0.0.0.0';
+  const groups = [...head, ...Array<string>(fill).fill('0'), ...tail];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return '0.0.0.0';
+  // IPv4 대응 IPv6(::ffff:a.b, 16진 표기)는 그 IPv4로 — /64로 묶으면 모든 대응 주소가 한 버킷('0:0:0:0::/64')이 된다(PR #13에서 반영)
+  const n = groups.map((g) => parseInt(g, 16));
+  if (n.slice(0, 5).every((x) => x === 0) && n[5] === 0xffff) return `${n[6]! >> 8}.${n[6]! & 255}.${n[7]! >> 8}.${n[7]! & 255}`;
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
+}

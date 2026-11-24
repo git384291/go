@@ -18,7 +18,7 @@ import { createAiBudget, createDbAiBudget, mockModel, ModelNotCalledError, type 
 let e2eReq = 0;
 const E2E_SCOPE = 'e'.repeat(64);
 const withCtx = (b: AiBudget): AiBudget => ({ reserve: (c, ctx) => b.reserve(c, ctx ?? { requestId: `e2e-req-${Date.now()}-${e2eReq++}`, scope: E2E_SCOPE }) });
-const OPEN_LIMITS = 'daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000, scope_max_inflight = 100'; // 0029 사용자 동시 상한도 넉넉히(월 한도만 시험)
+const OPEN_LIMITS = 'daily_limit_krw = 1000000, scope_daily_limit_krw = 1000000, scope_monthly_limit_krw = 1000000, max_inflight = 1000, scope_max_inflight = 100, net_daily_limit_krw = 1000000'; // 0029 사용자 동시 상한도 넉넉히(월 한도만 시험)
 import { dbPolicyProvider } from '../../src/server/consult/publishedPolicies';
 import { intakePolicyFromEnv } from '../../src/server/leads/policyFault';
 import { AI_UNAVAILABLE_GUIDANCE } from '../../src/content/consultGuidance';
