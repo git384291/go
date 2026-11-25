@@ -17,7 +17,7 @@ import { GOOGLE_MAX_DAY_MULTIPLIER, PlatformError, type AdPlatform, type CallOpt
 // - 범위: 예산(CampaignBudget)+캠페인(Campaign)+광고 그룹(AdGroup)+반응형 검색광고(AdGroupAd) 생성·중지·성과 조회. 키워드·이미지·영상은 만들지 않는다(키워드가 없으면 검색 노출도 없음)(소재 생성·게시는 제이님 승인 전 금지).
 //   캠페인은 기본 PAUSED로 만든다(initialStatus='ENABLED'를 명시해야 활성). 소재가 없으면 노출·과금도 없다.
 // - 예산 보호: 일 예산은 원화를 micros로 바꿔 req.platformDailyBudgetKrw 이하로만 설정하고, 만든 뒤 다시 읽어(read-back) 실제 값을 돌려준다.
-//   읽기에 실패하거나 값이 다르면 dailyBudgetKrw=0(미확인)을 돌려 서버가 즉시 중지·경고하게 한다(fail-closed). 계정 통화는 KRW여야 한다(아니면 예산 단위가 어긋난다 — 실계정에서 확인 필요).
+//   읽기에 실패하거나 값이 다르면 dailyBudgetKrw=0(미확인)을 돌려 서버가 즉시 중지·경고하게 한다(fail-closed). 계정 통화는 KRW여야 한다(아니면 예산 단위가 어긋난다). 서버가 집행 전·정기 감시마다 accountCurrency로 확인해 KRW가 아니면 차단·중지한다(모의 시험만, 실계정 미확인).
 // - 오류 구분(응답 본문은 읽지 않는다 — 반사 금지): 요청 거부(400·401·403·404·429)는 집행 안 됨이 확실 → failed(코드 BAD_REQUEST·AUTH_ERROR·NOT_FOUND·RATE_LIMITED),
 //   마감·전송 오류·5xx·2xx 판독 실패는 집행 여부 불명 → unknown. 예산 값 오류는 전송 전 BUDGET_INVALID(failed), 읽기 값 불일치는 BUDGET_MISMATCH.
 // - 캠페인 이름에 requestKey를 넣어 사람이 구글 광고 화면에서 unknown 건을 찾아 대조할 수 있게 한다(자동 재시도 없음).
@@ -210,6 +210,14 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       const tz = isObj(row?.customer) ? (row!.customer as Record<string, unknown>).timeZone : undefined;
       if (typeof tz !== 'string' || !/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(tz)) throw new PlatformError('failed', 'BAD_RESPONSE');
       return tz;
+    },
+    async accountCurrency(opts: CallOpts) {
+      const token = await accessToken(opts.deadlineAt);
+      const j = await call('googleAds:search', { query: 'SELECT customer.currency_code FROM customer' }, token, opts.deadlineAt, false);
+      const row = isObj(j) && Array.isArray(j.results) && j.results.length === 1 && isObj(j.results[0]) ? j.results[0] : null;
+      const cur = isObj(row?.customer) ? (row!.customer as Record<string, unknown>).currencyCode : undefined;
+      if (typeof cur !== 'string' || !/^[A-Z]{3}$/.test(cur)) throw new PlatformError('failed', 'BAD_RESPONSE');
+      return cur;
     },
     async fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts) {
       if (!ref.externalId || !ID.test(ref.externalId)) throw new PlatformError('failed', 'NO_EXTERNAL_ID');

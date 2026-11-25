@@ -22,10 +22,11 @@ function db(launches: unknown[], o: { fail?: 'targets' | 'stop' | 'record' | 'be
   }) as MonitorTx);
   return { runAsMonitor, calls, stops: () => calls.filter((c) => c.q.includes('ad_monitor_stop')).map((c) => c.v), record: () => calls.find((c) => c.q.includes('ad_monitor_record'))?.v };
 }
-const plat = (o: { cost?: (day: string) => number | null; pauseOk?: boolean; fetchThrows?: boolean; tz?: string | Error } = {}) => {
+const plat = (o: { cost?: (day: string) => number | null; pauseOk?: boolean; fetchThrows?: boolean; tz?: string | Error; cur?: string | Error } = {}) => {
   const c = { pause: 0, fetch: [] as string[] };
   const p: AdPlatform = { ...mockPlatform, live: true,
     async accountTimeZone() { if (o.tz instanceof Error) throw o.tz; return o.tz ?? 'Asia/Seoul'; },
+    async accountCurrency() { if (o.cur instanceof Error) throw o.cur; return o.cur ?? 'KRW'; },
     async pause() { c.pause++; if (o.pauseOk === false) throw new Error('down'); return { paused: true }; },
     async fetchPerformance(_r, day) { c.fetch.push(day); if (o.fetchThrows) throw new Error('x'); const v = o.cost ? o.cost(day) : 1000; return { impressions: v === null ? null : 10, clicks: v === null ? null : 1, costKrw: v }; } };
   return { p, c };
@@ -144,6 +145,14 @@ test('AM12 계정 시간대: Asia/Seoul이 아니면 열린 캠페인 전부 중
   const r = await runAdMonitor({ platform: p.p, now: () => kst('2026-11-22T12:00:00'), runAsMonitor: a.runAsMonitor, runId: RID });
   assert.deepEqual(r.stopped, [{ campaign: 'camp-m', code: 'ACCOUNT_TIMEZONE_MISMATCH', paused: true }]);
   const b = db([L()]); const q = plat({ tz: new Error('x') });
+  const r2 = await runAdMonitor({ platform: q.p, now: () => kst('2026-11-22T12:00:00'), runAsMonitor: b.runAsMonitor, runId: RID });
+  assert.equal(r2.ok, false); assert.ok(r2.unknown.some((u) => u.code === 'ACCOUNT_CHECK_FAILED'));
+});
+test('AM12b 계정 통화(PM 11/25 KRW): KRW가 아니면 열린 캠페인 전부 중지(ACCOUNT_CURRENCY_MISMATCH), 조회 실패는 UNKNOWN(새 집행 차단)', async () => {
+  const a = db([L()]); const p = plat({ cur: 'USD' });
+  const r = await runAdMonitor({ platform: p.p, now: () => kst('2026-11-22T12:00:00'), runAsMonitor: a.runAsMonitor, runId: RID });
+  assert.deepEqual(r.stopped, [{ campaign: 'camp-m', code: 'ACCOUNT_CURRENCY_MISMATCH', paused: true }]);
+  const b = db([L()]); const q = plat({ cur: new Error('x') });
   const r2 = await runAdMonitor({ platform: q.p, now: () => kst('2026-11-22T12:00:00'), runAsMonitor: b.runAsMonitor, runId: RID });
   assert.equal(r2.ok, false); assert.ok(r2.unknown.some((u) => u.code === 'ACCOUNT_CHECK_FAILED'));
 });
