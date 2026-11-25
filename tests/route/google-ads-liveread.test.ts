@@ -7,7 +7,7 @@ import type { ProbeLine } from '../../scripts/google-ads-probe/core';
 
 const SECRET = 'refresh-' + 'Q'.repeat(30);
 const ENV = { GOOGLE_ADS_CLIENT_ID: 'cid.apps.example', GOOGLE_ADS_CLIENT_SECRET: 'sec-' + 'R'.repeat(20), GOOGLE_ADS_REFRESH_TOKEN: SECRET, GOOGLE_ADS_CUSTOMER_ID: '123-456-7890' };
-type Mode = { campaigns?: unknown[]; daily?: unknown[]; total?: unknown[]; status?: number; ideas?: unknown[]; kwStatus?: number };
+type Mode = { currency?: string; campaigns?: unknown[]; daily?: unknown[]; total?: unknown[]; status?: number; ideas?: unknown[]; kwStatus?: number };
 function fake(mode: Mode = {}) {
   const calls: { url: string; body: string }[] = [];
   const t = async (url: string, init: { body: string }) => {
@@ -17,7 +17,7 @@ function fake(mode: Mode = {}) {
     if (mode.status && mode.status !== 200) return { status: mode.status, text: JSON.stringify({ error: { details: [{ errors: [{ errorCode: { authorizationError: 'USER_PERMISSION_DENIED' } }] }] } }) };
     const q = String(JSON.parse(init.body).query);
     const rows = q.includes('FROM customer WHERE') ? mode.total ?? [] : q.includes('segments.date') ? mode.daily ?? [] : q.includes('FROM campaign') ? mode.campaigns ?? []
-      : [{ customer: { currencyCode: 'KRW', timeZone: 'Asia/Seoul', testAccount: false, manager: false, status: 'ENABLED' } }];
+      : [{ customer: { currencyCode: mode.currency ?? 'KRW', timeZone: 'Asia/Seoul', testAccount: false, manager: false, status: 'ENABLED' } }];
     return { status: 200, text: JSON.stringify({ results: rows }) };
   };
   return { t, calls };
@@ -122,4 +122,17 @@ test('GL9 Mac mini 단일 파일(.mjs)도 같은 키워드·같은 주소·같�
     assert.ok(s.includes("!/mutate|validateOnly/i.test(init.body)"));
     assert.ok(!/:mutate|validateOnly: true/.test(s));
   }
+});
+
+test('GL10 계정 통화 KRW 아님(PM 11/25): 원화 계산 전에 멈춤(종료 7), 캠페인·실적·키워드 조회 0회, .mjs도 같은 검사', async () => {
+  for (const cur of ['USD', 'JPY']) {
+    const r = await run({ currency: cur });
+    assert.equal(r.code, 7);
+    assert.ok(r.lines.some((l) => l.step === 'currency' && l.ok === false && l.reason === 'CURRENCY_NOT_KRW'));
+    assert.ok(!r.lines.some((l) => l.step === 'campaigns' || l.step === 'metrics_30d' || l.step === 'keyword_cpc'));
+    assert.ok(!r.calls.some((c) => c.url.endsWith(':generateKeywordHistoricalMetrics')));
+  }
+  assert.equal((await run({ currency: 'KRW' })).code, 0);
+  const mjs = readFileSync('scripts/google-ads-probe/google-ads-liveread.mjs', 'utf8');
+  assert.ok(mjs.includes("if (c.currencyCode !== 'KRW') { log({ step: 'currency', ok: false, reason: 'CURRENCY_NOT_KRW' }); return 7; }"));
 });

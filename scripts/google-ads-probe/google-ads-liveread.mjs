@@ -52,7 +52,7 @@ function capPlan(capKrw               , cpcKrw               )                  
   return { dailyBudgetKrw: daily, maxClicksPerMonth: cpcKrw ? Math.floor(capKrw / cpcKrw) : null };
 }
 
-/** 종료 코드: 0 확인 완료, 2 설정 없음, 3 인증·조회 실패, 5 ENABLED 캠페인 발견(변경하지 않고 보고), 6 집계 불일치·중복 */
+/** 종료 코드: 0 확인 완료, 2 설정 없음, 3 인증·조회 실패, 5 ENABLED 캠페인 발견(변경하지 않고 보고), 6 집계 불일치·중복, 7 계정 통화 KRW 아님(PM 11/25) */
 async function runLiveRead(env                                              , raw                , log                        )                  {
   const v = (k        ) => (typeof env[k] === 'string' && env[k] .trim() !== '' ? env[k] .trim() : null);
   const missing = GOOGLE_ADS_ENV_NAMES.filter((k) => v(k) === null);
@@ -97,6 +97,9 @@ async function runLiveRead(env                                              , ra
   const c = (acc[0]?.customer ?? {})                           ;
   log({ step: 'account', ok: true, currency: typeof c.currencyCode === 'string' ? c.currencyCode : null, timeZone: typeof c.timeZone === 'string' ? c.timeZone : null,
     testAccount: c.testAccount === true, manager: c.manager === true, status: typeof c.status === 'string' ? c.status : null });
+
+  // 계정 통화가 KRW가 아니면 아래 원화 계산(비용·CPC·하루예산)이 틀린다 → 여기서 멈춤(읽기만, 변경 없음). PM 11/25 KRW 검사
+  if (c.currencyCode !== 'KRW') { log({ step: 'currency', ok: false, reason: 'CURRENCY_NOT_KRW' }); return 7; }
 
   // ③ 캠페인·예산·상태
   const camps = await search('campaigns', "SELECT campaign.id, campaign.status, campaign.serving_status, campaign.bidding_strategy_type, campaign_budget.amount_micros FROM campaign WHERE campaign.status != 'REMOVED'");
@@ -170,4 +173,4 @@ const transport = async (url, init) => {
   catch { return { status: 0, text: '' }; }
 };
 const code = await runLiveRead(env, transport, (l) => console.log(JSON.stringify(l)));
-console.log('종료 코드: ' + code + '  (0 확인 완료 · 2 값 없음 · 3 인증·권한·조회 실패 · 5 켜진 캠페인 있음 · 6 실적 불일치)');
+console.log('종료 코드: ' + code + '  (0 확인 완료 · 2 값 없음 · 3 인증·권한·조회 실패 · 5 켜진 캠페인 있음 · 6 실적 불일치 · 7 계정 통화가 원화(KRW) 아님)');
