@@ -27,7 +27,10 @@ exec_allow(rolname, proname) as (
     ('app_staff', 'staff_session_open'), ('app_staff', 'staff_session_revoke'), ('app_staff', 'whoami'),
     ('app_staff', 'list_leads'), ('app_staff', 'reveal_contact'), ('app_staff', 'update_lead'),
     ('app_staff', 'assign_lead'), ('app_staff', 'export_leads_masked'), ('app_staff', 'set_feature_flag'),
-    ('app_staff', 'purge_customer')
+    ('app_staff', 'purge_customer'),
+    ('app_public', 'policy_current'), ('app_staff', 'policy_current'),
+    ('app_staff', 'policy_create'), ('app_staff', 'policy_approve'),
+    ('app_staff', 'policy_publish'), ('app_staff', 'policy_list')
 ),
 violations(v) as (
   -- V1 모든 보호 테이블은 RLS + FORCE

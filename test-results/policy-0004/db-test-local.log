@@ -1,0 +1,961 @@
+--- [보고용] SECURITY DEFINER 함수와 EXECUTE 권한 보유 역할 ---
+         function         |   owner    |           execute_roles           | search_path_fixed 
+--------------------------+------------+-----------------------------------+-------------------
+ api.assign_lead          | fideon_api | app_staff, fideon_api             | t
+ api.create_lead          | fideon_api | app_public, fideon_api            | t
+ api.export_leads_masked  | fideon_api | app_staff, fideon_api             | t
+ api.list_leads           | fideon_api | app_staff, fideon_api             | t
+ api.policy_approve       | fideon_api | app_staff, fideon_api             | t
+ api.policy_create        | fideon_api | app_staff, fideon_api             | t
+ api.policy_current       | fideon_api | app_public, app_staff, fideon_api | t
+ api.policy_list          | fideon_api | app_staff, fideon_api             | t
+ api.policy_publish       | fideon_api | app_staff, fideon_api             | t
+ api.purge_customer       | fideon_api | app_staff, fideon_api             | t
+ api.reveal_contact       | fideon_api | app_staff, fideon_api             | t
+ api.set_feature_flag     | fideon_api | app_staff, fideon_api             | t
+ api.staff_session_open   | fideon_api | app_staff, fideon_api             | t
+ api.staff_session_revoke | fideon_api | app_staff, fideon_api             | t
+ api.update_lead          | fideon_api | app_staff, fideon_api             | t
+ api.whoami               | fideon_api | app_staff, fideon_api             | t
+ security.assert_staff    | postgres   | fideon_api                        | t
+ security.verify_token    | postgres   | fideon_api                        | t
+(18 rows)
+
+psql:db/tests/10_grants.sql:21: NOTICE:  PASS | G1 모든 테이블 RLS+FORCE | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:27: NOTICE:  PASS | G2 앱 역할 테이블 권한 0 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:34: NOTICE:  PASS | G3 앱 역할 USAGE는 api만 | app_public:api,app_staff:api
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:40: NOTICE:  PASS | G4 search_path 고정 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:62: NOTICE:  PASS | G5 EXECUTE 허용 목록 외 권한 0 | 
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:67: NOTICE:  PASS | G6 PUBLIC 실행 가능 함수 0 | <NULL>
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:75: NOTICE:  PASS | G7 역할 간 함수 교차 실행 불가 | falsefalsefalsefalse
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:80: NOTICE:  PASS | G8 api 함수 소유자 fideon_api | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/10_grants.sql:82: NOTICE:  PASS | G9 fideon_api 서명 키 조회 불가 | false
+ expect_eq 
+-----------
+ 
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.62612f10b68249b3d3646b52a67e08160631909fe2ce7bd58b1075fcd567d652
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.19ecac4c89a4c47067b353c884a9bf412d9fbedcdea254894b00d3e8f90cc61f
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.8492bd252f05bc869c1fbd2d747e4cb8518726e3a9030d0fc54a0b0f7700b797
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.db100bfba36c1186e5ea9420eb7273353328dda860ee64e126d9ab1d7331e835
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.4456c7f38f73460f3ae81015ba33ecc03a434db54b790686bbb8632dc9988ab7
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.b67587f191c1eb57312105bd4ae7e3b19aabaa71afacce0bdd25ec8273780285
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613125.c09750df0802dfb8784931a4e87c5ff3bb1d6810023ca41d207cd4743a2e7847
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.31eb7b71797acafa989112b89dc477603d85fbd75c6b6be34a8681c614a701b6
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:18: NOTICE:  PASS | A1 정상 대표 세션 통과 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:22: NOTICE:  PASS | A2 세션 ID만 전달(서명 없음) 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:24: NOTICE:  PASS | A3 위조 서명 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:28: NOTICE:  PASS | A4 상담원 서명 + 대표 세션 ID 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:30: NOTICE:  PASS | A5 상담원 서명으로 대표 행세 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:32: NOTICE:  PASS | A6 유효 서명이라도 세션 소유자 불일치면 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:36: NOTICE:  PASS | A7 비활성 관리자 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:38: NOTICE:  PASS | A8 12시간 초과 세션 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:40: NOTICE:  PASS | A9 로그아웃(취소)된 세션 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:42: NOTICE:  PASS | A10 만료된 서명 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:44: NOTICE:  PASS | A11 다른 용도 키(lead)로 만든 서명 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+ set_config |              set_config              |          set_config           
+------------+--------------------------------------+-------------------------------
+ owner      | 00000000-0000-4000-8000-000000000001 | {"role":"owner","aal":"aal2"}
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:50: NOTICE:  PASS | A12 사용자 정의 설정값 위조 무효 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:54: NOTICE:  PASS | A13 일반 토큰으로 세션 생성 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:57: NOTICE:  PASS | A14 세션 테이블 직접 조회 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:58: NOTICE:  PASS | A15 서명 키 직접 조회 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:59: NOTICE:  PASS | A16 서명 검증 함수 직접 호출 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:60: NOTICE:  PASS | A17 리드 테이블 직접 조회 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:61: NOTICE:  PASS | A18 고객 암호문 테이블 직접 조회 불가 | 42501 (permission denied for schema pii)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:63: NOTICE:  PASS | A19 세션 직접 생성 불가 | 42501 (permission denied for schema security)
+ expect_error 
+--------------
+ 
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.be05133f3728f58c0698f01582cab1f3a1c77f8afe74794c2803fe7792eb85fa
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:71: NOTICE:  PASS | A20 로그아웃 처리 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/20_staff_auth.sql:73: NOTICE:  PASS | A21 로그아웃 직후 같은 토큰 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.0d95d429a0112e731c19e2776e381a93bd35a90dcf19d14f17e91807408a5b3f', 'v1:enc-name', '테*고', 'v1:enc-phone', '1111111111111111111111111111111111111111111111111111111111111111', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000001', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.6b4f5141e8df8a2bf71bbafa99fff74d26b9d2a5dd0daac78727797614b4ad1b', 'v1:enc-name', '테*고', 'v1:enc-phone', '1111111111111111111111111111111111111111111111111111111111111111', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000002', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.1bf33dd4fd366c393fc70084fb4cbdbbc421547cb8b9335d316c8efb87a5fc0e', 'v1:attacker', '테*고', 'v1:enc-phone', '3333333333333333333333333333333333333333333333333333333333333333', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000003', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.c1072d3968795623544589e0713b4daa2f9adb4f44bc65dfce3d7126935c434e', 'v1:enc-name', '테*고', 'v1:enc-phone', '4444444444444444444444444444444444444444444444444444444444444444', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000004', 'privacy-test-v1', 'false'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                          set_config                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.8ee3fff5792499fb00bee9f5ef3193d79e3a8379bcfdd465762d92cc1ebbf73d', 'v1:enc-name', '테*고', 'v1:enc-phone', '5555555555555555555555555555555555555555555555555555555555555555', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000005', 'privacy-old', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.bdac1cd58ace091799a1cf8660fb1b174cb12fcf8c41ed8d13454fd8bb6efa2f', 'v1:enc-name', '테*고', 'v1:enc-phone', '6666666666666666666666666666666666666666666666666666666666666666', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000006', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+(1 row)
+
+                                                                                                                                                                                                            set_config                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613255.c8bc62b87360126d45c75e219081d4d7fdbba10f3e63958a3678d1b945ba1928', 'v1:enc-name', '테*고', 'v1:enc-phone', '7777777777777777777777777777777777777777777777777777777777777777', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-test-000000007', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:31: NOTICE:  PASS | L1 신규 상담 신청 | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:32: NOTICE:  PASS | L2 같은 번호 재신청도 같은 응답(리드 ID·중복 여부 비노출) | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:33: NOTICE:  PASS | L3 같은 요청 재전송 | accepted
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:34: NOTICE:  PASS | L4 서명 후 필드 변조 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:36: NOTICE:  PASS | L5 서명 없는 직접 호출 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:37: NOTICE:  PASS | L6 동의 없음 거부 | 22023 (CONSENT_REQUIRED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:38: NOTICE:  PASS | L7 처리방침 버전 불일치 거부 | 22023 (CONSENT_VERSION_MISMATCH)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:39: NOTICE:  PASS | L8 공개 역할은 관리자 함수 실행 불가 | 42501 (permission denied for function list_leads)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:40: NOTICE:  PASS | L9 공개 역할 고객 테이블 조회 불가 | 42501 (permission denied for schema pii)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:44: NOTICE:  PASS | L10 같은 번호는 리드 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:47: NOTICE:  PASS | L11 재문의 이력 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:50: NOTICE:  PASS | L12 동의 기록(문서 버전 포함) | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:55: NOTICE:  PASS | L13 상담 폼 스위치 꺼짐 → 거부 | 55000 (SERVICE_NOT_READY)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:60: NOTICE:  PASS | L14 보유기간 미설정 → 거부 | 55000 (SERVICE_NOT_READY)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:68: NOTICE:  PASS | L15 IP당 시간당 10건 초과 거부 | 54000 (RATE_LIMITED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.62612f10b68249b3d3646b52a67e08160631909fe2ce7bd58b1075fcd567d652
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.19ecac4c89a4c47067b353c884a9bf412d9fbedcdea254894b00d3e8f90cc61f
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613255.f18e1b04b7b4b5a1fcde0a92df82cb7d61d5e947583473e62cff36b2205cf3b2
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:82: NOTICE:  PASS | P1 상담원: 배정된 리드 원문 조회 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:84: NOTICE:  PASS | P2 상담원: 다른 상담원 리드 조회 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:86: NOTICE:  PASS | P3 상담원: 임의 리드 ID → 같은 오류(존재 여부 비노출) | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:88: NOTICE:  PASS | P4 검수자: 원문 조회 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:90: NOTICE:  PASS | P5 사유 없는 원문 조회 거부 | 22023 (REASON_REQUIRED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:91: NOTICE:  PASS | P6 상담원 목록은 배정분만 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:93: NOTICE:  PASS | P7 목록은 마스킹 번호만 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:95: NOTICE:  PASS | P8 상담원 내려받기 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:97: NOTICE:  PASS | P9 대표 마스킹 내려받기 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:99: NOTICE:  PASS | P10 허용되지 않은 상태 전이 거부 | 22023 (INVALID_TRANSITION)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:101: NOTICE:  PASS | P11 허용 상태 전이 + 메모 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:103: NOTICE:  PASS | P12 다른 상담원 리드 수정 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:105: NOTICE:  PASS | P13 상담원 기능 스위치 변경 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:108: NOTICE:  PASS | P14 원문 조회 감사 기록 정확히 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:109: NOTICE:  PASS | P15 내려받기 감사 기록 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:116: NOTICE:  PASS | P16 원문 조회 시간당 30건 초과 거부 | 54000 (REVEAL_RATE_LIMITED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:120: NOTICE:  PASS | P17 보유기간 지난 가상 고객 1건 자동 파기 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:122: NOTICE:  PASS | P18 앱 역할은 자동 파기 함수 실행 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:124: NOTICE:  PASS | P19 대표 수동 파기 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:126: NOTICE:  PASS | P20 파기된 리드 원문 조회 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:129: NOTICE:  PASS | P21 파기 후 암호문 행 0 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/30_leads_pii.sql:130: NOTICE:  PASS | P22 파기 감사 기록 2건 | 2
+ expect_eq 
+-----------
+ 
+(1 row)
+
+NOTICE:  PASS | C1 app_server(역할 전환 전) 테이블 직접 조회 불가 | ERROR:  permission denied for schema core
+NOTICE:  PASS | C2 동시 10건 → 응답 10건 모두 accepted, 리드 1건, 재문의 9건
+NOTICE:  PASS | C3 같은 IP 동시 12건 → 정확히 10건 접수, 2건 횟수 제한
+NOTICE:  PASS | C4 같은 요청 동시 5건 → 응답 5건 accepted, 리드 1건, 재문의 0건
+NOTICE:  PASS | X1 점검 계정으로 권한 점검 | 위반 0건
+NOTICE:  PASS | X2 일부러 준 테이블 권한 감지 | 감지: V2 table privilege: app_staff on core.leads
+NOTICE:  PASS | X3 일부러 끈 FORCE RLS 감지 | 감지: V1 RLS/FORCE off: pii.consents
+NOTICE:  PASS | X4 허용 목록 밖 함수 실행 권한 감지 | 감지: V5 execute not allowed: app_public -> core.purge_expired
+NOTICE:  PASS | X5 허용되지 않은 스키마 USAGE 감지 | 감지: V3 schema usage: app_public on core
+NOTICE:  PASS | X6 원상 복구 후 다시 0건 | 위반 0건
+NOTICE:  PASS | F1 수수료·정산 테이블 추가 후 권한 재적용 → 위반 0건 | 위반 0건
+NOTICE:  PASS | F2 공개 고객·관리자 역할 모두 수수료·정산 테이블 조회 불가(permission denied)
+NOTICE:  PASS | F3 api 함수 중 수수료·정산 테이블을 읽는 함수 0개
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613260.e8987387bc060f7db488d6bbec144e7fe40094d9120b65896b1e270ca189b9ef
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613260.a1020cb40cf8928e7725efecf89af436c7271d93760761141b2dc3a709720852
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613260.ee9e7dcb440a86eea858e3aa2df60ca1b4e1c1a62b23353b6c048bce619ee11d
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613260.64f7ddbfde2b9b866135b4475e841a48ed36c52eb275e62d66502b00464352d6
+(1 row)
+
+                                  set_config                                   
+-------------------------------------------------------------------------------
+ 1.1795613260.4b596c824f3015cacc206d01e6fe1dac3249cd486b6e14edd9bdd73f42a33ec4
+(1 row)
+
+psql:db/tests/40_policies.sql:25: NOTICE:  PASS | P-S1a 대표 세션 확인 = owner | owner
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:26: NOTICE:  PASS | P-S1b 정책 작성자 세션 확인 = policy_editor | policy_editor
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:27: NOTICE:  PASS | P-S1c 검수자 세션 확인 = reviewer | reviewer
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:29: NOTICE:  PASS | P-S1d 로그아웃된 세션으로 정책 목록 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+              set_config              
+--------------------------------------
+ 78a043ea-31d3-4c98-9ff6-b479e7842289
+(1 row)
+
+psql:db/tests/40_policies.sql:35: NOTICE:  PASS | P-S2a 작성 직후 상태 draft | draft
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:37: NOTICE:  PASS | P-S2b 검수자는 작성 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:39: NOTICE:  PASS | P-S2c 상담원은 작성 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:41: NOTICE:  PASS | P-S2d 같은 버전 중복 작성 거부 | 23505 (DUPLICATE_VERSION)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:43: NOTICE:  PASS | P-S2e 잘못된 버전 형식 거부 | 23514 (new row for relation "policy_documents" violates check constraint "policy_documents_version_check")
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:47: NOTICE:  PASS | P-S2f DB 저장 확인(본문 해시 일치, 작성자 기록) | true/00000000-0000-4000-8000-000000000006
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:52: NOTICE:  PASS | P-S3a 대표가 정책 게시 스위치 켬 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:54: NOTICE:  PASS | P-S3b 승인 전 게시 거부(NOT_APPROVED) | 55000 (NOT_APPROVED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:56: NOTICE:  PASS | P-S3c 차단 후 게시 문서 0건 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:61: NOTICE:  PASS | P-S4a 작성자(정책 작성 권한)는 승인 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:63: NOTICE:  PASS | P-S4b 상담원 승인 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:65: NOTICE:  PASS | P-S4c 승인 사유 없으면 거부 | 22023 (REASON_REQUIRED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:67: NOTICE:  PASS | P-S4d 검수자 승인 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:69: NOTICE:  PASS | P-S4e 이미 승인된 문서 재승인 거부 | 55000 (INVALID_STATE approved)
+ expect_error 
+--------------
+ 
+(1 row)
+
+              set_config              
+--------------------------------------
+ bd9b651a-7684-47c8-a546-f344ba98bad1
+(1 row)
+
+psql:db/tests/40_policies.sql:74: NOTICE:  PASS | P-S4f 대표도 본인 작성 문서 승인 불가(SELF_APPROVAL) | 42501 (SELF_APPROVAL)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:78: NOTICE:  PASS | P-S5a 검수자 게시 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:80: NOTICE:  PASS | P-S5b 작성자 게시 불가 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:82: NOTICE:  PASS | P-S5c 대표 게시 성공 | privacy-test-v2
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:88: NOTICE:  PASS | P-S6a DB 상태 published, 게시자·시각 기록 | published/00000000-0000-4000-8000-000000000001/true
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:90: NOTICE:  PASS | P-S6b 설정 privacy_policy_version = v2 (상담 신청 동의 버전에 반영) | privacy-test-v2
+ expect_eq 
+-----------
+ 
+(1 row)
+
+                                                                                                                                                                                                             set_config                                                                                                                                                                                                             
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613260.3b658b704326ef043a9d8207587fb0d633bff4b08620467879af378019b8b0af', 'v1:enc-name', '테*고', 'v1:enc-phone', '4444444444444444444444444444444444444444444444444444444444444444', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-policy-000000001', 'privacy-test-v1', 'true'::boolean, 'false'::boolean, '3333333333333333333333333333333333333333333333333333333333333333')
+(1 row)
+
+                                                                                                                                                                                                             set_config                                                                                                                                                                                                             
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ select api.create_lead('1.1795613260.94809ad768a81e4de233e1953c95d0c0c383f2497633606232748f2262db2c1b', 'v1:enc-name', '테*고', 'v1:enc-phone', '4444444444444444444444444444444444444444444444444444444444444444', '1234', 'internet_tv', '평일 저녁', 'naver', 'cpc', 'test', 'idem-policy-000000002', 'privacy-test-v2', 'true'::boolean, 'false'::boolean, '3333333333333333333333333333333333333333333333333333333333333333')
+(1 row)
+
+psql:db/tests/40_policies.sql:95: NOTICE:  PASS | P-S6c 이전 정책 버전 동의로 상담 신청 거부(CONSENT_VERSION_MISMATCH) | 22023 (CONSENT_VERSION_MISMATCH)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:96: NOTICE:  PASS | P-S6d 새 정책 버전 동의로 상담 신청 접수 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:98: NOTICE:  PASS | P-S6e 동의 기록에 새 버전 저장 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+              set_config              
+--------------------------------------
+ f400cb20-ab12-48b9-a6a0-73fb9d8b96ef
+(1 row)
+
+psql:db/tests/40_policies.sql:104: NOTICE:  PASS | P-S7a v3 승인 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:106: NOTICE:  PASS | P-S7b v3 게시 | privacy-test-v3
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:109: NOTICE:  PASS | P-S7c 공개 조회 = 최신 v3 | privacy-test-v3
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:110: NOTICE:  PASS | P-S7d 공개 조회 결과 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:113: NOTICE:  PASS | P-S7e 이전 v2 비활성화(retired) | retired/true
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:115: NOTICE:  PASS | P-S7f privacy 게시 문서 정확히 1건 | 1
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:117: NOTICE:  PASS | P-S7g 설정 버전 v3로 갱신 | privacy-test-v3
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:122: NOTICE:  PASS | P-S8a 이미 게시된 v3 중복 게시 거부 | 55000 (INVALID_STATE published)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:124: NOTICE:  PASS | P-S8b 폐기(retired) v2 재게시 거부 | 55000 (INVALID_STATE retired)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:126: NOTICE:  PASS | P-S8c 위조 서명으로 게시 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:128: NOTICE:  PASS | P-S8d 다른 사람 서명으로 대표 행세 거부 | 42501 (FORBIDDEN)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:129: NOTICE:  PASS | P-S8e 관리자 역할 테이블 직접 수정 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:130: NOTICE:  PASS | P-S8f 관리자 역할 테이블 직접 조회 불가 | 42501 (permission denied for schema core)
+ expect_error 
+--------------
+ 
+(1 row)
+
+              set_config              
+--------------------------------------
+ ffbdbe4d-d3a6-4c04-bd29-db3cdcf9f01d
+(1 row)
+
+psql:db/tests/40_policies.sql:134: NOTICE:  PASS | P-S8g v4 승인 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:136: NOTICE:  PASS | P-S8h 게시 스위치 끔 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:138: NOTICE:  PASS | P-S8i 스위치 꺼짐이면 게시 거부(FEATURE_DISABLED) | 55000 (FEATURE_DISABLED)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:140: NOTICE:  PASS | P-S8j 게시 스위치 다시 켬 | ok
+ expect_ok 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:144: NOTICE:  PASS | P-S8k 공개 역할은 게시 함수 실행 불가 | 42501 (permission denied for function policy_publish)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:145: NOTICE:  PASS | P-S8l 공개 역할은 관리자 목록 실행 불가 | 42501 (permission denied for function policy_list)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:150: NOTICE:  PASS | P-S8m 게시본 본문 변경 불가(POLICY_IMMUTABLE) | 42501 (POLICY_IMMUTABLE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:152: NOTICE:  PASS | P-S8n 상태 되돌리기 불가(INVALID_TRANSITION) | 55000 (INVALID_TRANSITION approved -> draft)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:154: NOTICE:  PASS | P-S8o 함수 우회 직접 게시해도 게시본 2개 불가(유일 인덱스) | 23505 (duplicate key value violates unique constraint "policy_documents_one_published")
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:156: NOTICE:  PASS | P-S8p 정책 문서 삭제 불가 | 42501 (permission denied for table policy_documents)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:164: NOTICE:  PASS | P-S9a 작성·승인·게시 감사 기록(행위자 포함) 순서대로 존재 | policy.create:00000000-0000-4000-8000-000000000006,policy.approve:00000000-0000-4000-8000-000000000005,policy.publish:00000000-0000-4000-8000-000000000001,policy.create:00000000-0000-4000-8000-000000000006,policy.approve:00000000-0000-4000-8000-000000000005,policy.publish:00000000-0000-4000-8000-000000000001
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:166: NOTICE:  PASS | P-S9b 게시 감사에 이전 버전 기록 | privacy-test-v2
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:169: NOTICE:  PASS | P-S9c 게시 감사 사유 누락 0건 | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:171: NOTICE:  PASS | P-S9d 감사 기록 수정 불가 | 42501 (permission denied for table audit_logs)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:172: NOTICE:  PASS | P-S9e 감사 기록 삭제 불가 | 42501 (permission denied for table audit_logs)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:184: NOTICE:  PASS | P-S9f 게시 중 장애 발생 | P0001 (SIMULATED_FAILURE)
+ expect_error 
+--------------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:187: NOTICE:  PASS | P-S9g 장애 후 상태 그대로(v3 게시 유지, v4 승인 상태) | privacy-test-v2=retired,privacy-test-v3=published,privacy-test-v4=approved
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:189: NOTICE:  PASS | P-S9h 장애 후 설정 버전 v3 유지 | privacy-test-v3
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:191: NOTICE:  PASS | P-S9i 장애 건 게시 감사 기록 없음(반쪽 기록 없음) | 0
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:196: NOTICE:  PASS | P-S9j 장애 해소 후 재시도 성공 | privacy-test-v4
+ expect_eq 
+-----------
+ 
+(1 row)
+
+psql:db/tests/40_policies.sql:199: NOTICE:  PASS | P-S9k 복구 후 최종 상태 정상 | privacy-test-v2=retired,privacy-test-v3=retired,privacy-test-v4=published
+ expect_eq 
+-----------
+ 
+(1 row)
+
+NOTICE:  PASS | P-C1 같은 정책 동시 게시 5건 → 성공 1건, 중복 차단 4건, 게시본 1개, 감사 1건
+NOTICE:  PASS | P-C2 서로 다른 버전 동시 게시 2건 → 순서대로 처리, 게시본 1개(privacy-test-v7), 설정 버전 일치, 이전본 retired

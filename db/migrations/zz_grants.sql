@@ -85,6 +85,9 @@ grant execute on function
   api.create_lead(text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text)
   to app_public;
 
+-- 정책 공개 조회는 공개·관리자 모두 (0004)
+grant execute on function api.policy_current(text) to app_public, app_staff;
+
 grant execute on function
   api.staff_session_open(uuid, uuid, text),
   api.staff_session_revoke(uuid, uuid, text),
@@ -95,7 +98,11 @@ grant execute on function
   api.assign_lead(uuid, uuid, text, uuid, uuid),
   api.export_leads_masked(uuid, uuid, text, date, date),
   api.set_feature_flag(uuid, uuid, text, text, boolean, text),
-  api.purge_customer(uuid, uuid, text, uuid, text)
+  api.purge_customer(uuid, uuid, text, uuid, text),
+  api.policy_create(uuid, uuid, text, text, text, text),
+  api.policy_approve(uuid, uuid, text, uuid, text),
+  api.policy_publish(uuid, uuid, text, uuid, text),
+  api.policy_list(uuid, uuid, text, text)
   to app_staff;
 
 -- core.purge_expired()는 예약 작업(마이그레이션 역할)만 실행한다. 앱 역할에 부여하지 않는다.

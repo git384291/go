@@ -128,6 +128,7 @@ else
 fi
 rm -f "$LOG_DIR"/conc-*.sql "$LOG_DIR"/conc-*.out "$LOG_DIR/app_server.err"
 
+
 echo "== catalog audit as release_auditor (the same check release-check runs against the production DB)"
 AUDIT_URL="postgresql:///$DB?host=$SOCK&port=$PORT&user=release_auditor"
 audit_expect() { # $1 라벨, $2 기대(pass | 위반 문자열 일부)
@@ -185,6 +186,61 @@ else
 fi
 SQL "drop table core.commissions_probe, core.settlement_ledger_probe"
 rm -f "$LOG_DIR/probe.err"
+
+echo "== policy draft → approve → publish (runs last: publishing changes the consent version)"
+run db/tests/40_policies.sql >/dev/null
+echo "== concurrency: policy publish (same document 5 times, two versions at once)"
+OWN="'00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001'"
+EDI="'00000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000008'"
+REV="'00000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000005'"
+mkdoc() { # $1 버전 → 작성·승인 후 문서 ID 출력(관리자 연결, 서명은 테스트 키)
+  "${PSQL[@]}" -d "$DB" -At -c "select api.policy_approve($REV, test.staff_token('00000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000005'),
+      api.policy_create($EDI, test.staff_token('00000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000008'), 'privacy', '$1', '동시성 $1'),
+      '동시성 검수')" >/dev/null
+  "${PSQL[@]}" -d "$DB" -At -c "select id from core.policy_documents where version = '$1'"
+}
+pubsql() { # $1 문서 ID → app_staff로 실행할 게시 SQL
+  echo "select api.policy_publish($OWN, '$("${PSQL[@]}" -d "$DB" -At -c "select test.staff_token('00000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001')")', '$1', '동시 게시');"
+}
+d5=$(mkdoc privacy-test-v5)
+pubsql "$d5" > "$LOG_DIR/conc-same.sql"
+pids=()
+for i in $(seq 1 5); do
+  ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+      -c "begin" -c "set local role app_staff" -f "$LOG_DIR/conc-same.sql" -c "commit" > "$LOG_DIR/conc-$i.out" 2>&1 ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+ok=$(cat "$LOG_DIR"/conc-*.out | grep -c '^privacy-test-v5$' || true)
+dup=$(cat "$LOG_DIR"/conc-*.out | grep -c 'INVALID_STATE' || true)
+pubs=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.policy_documents where kind = 'privacy' and status = 'published'")
+audits=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.audit_logs where action = 'policy.publish' and target_id = '$d5'")
+if [ "$ok" = 1 ] && [ "$dup" = 4 ] && [ "$pubs" = 1 ] && [ "$audits" = 1 ]; then
+  echo "NOTICE:  PASS | P-C1 같은 정책 동시 게시 5건 → 성공 1건, 중복 차단 4건, 게시본 1개, 감사 1건" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | P-C1 ok=$ok dup=$dup published=$pubs audits=$audits" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+rm -f "$LOG_DIR"/conc-*
+d6=$(mkdoc privacy-test-v6); d7=$(mkdoc privacy-test-v7)
+pubsql "$d6" > "$LOG_DIR/conc-6.sql"; pubsql "$d7" > "$LOG_DIR/conc-7.sql"
+pids=()
+for v in 6 7; do
+  ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+      -c "begin" -c "set local role app_staff" -f "$LOG_DIR/conc-$v.sql" -c "select pg_sleep(0.5)" -c "commit" > "$LOG_DIR/conc-$v.out" 2>&1 ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+okv=$(cat "$LOG_DIR"/conc-*.out | grep -c '^privacy-test-v[67]$' || true)
+pubs=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.policy_documents where kind = 'privacy' and status = 'published'")
+cur=$("${PSQL[@]}" -d "$DB" -At -c "select version from core.policy_documents where kind = 'privacy' and status = 'published'")
+setv=$("${PSQL[@]}" -d "$DB" -At -c "select value #>> '{}' from core.settings where key = 'privacy_policy_version'")
+v5=$("${PSQL[@]}" -d "$DB" -At -c "select status from core.policy_documents where version = 'privacy-test-v5'")
+if [ "$okv" = 2 ] && [ "$pubs" = 1 ] && [ "$cur" = "$setv" ] && [ "$v5" = retired ]; then
+  echo "NOTICE:  PASS | P-C2 서로 다른 버전 동시 게시 2건 → 순서대로 처리, 게시본 1개($cur), 설정 버전 일치, 이전본 retired" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | P-C2 ok=$okv published=$pubs current=$cur setting=$setv v5=$v5" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
+rm -f "$LOG_DIR"/conc-*
 
 pass=$(grep -c 'PASS |' "$LOG_DIR/db-test.log" || true)
 fail=$(grep -c 'FAIL |' "$LOG_DIR/db-test.log" || true)
