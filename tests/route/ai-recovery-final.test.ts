@@ -270,7 +270,7 @@ test('RF8 개인정보·비밀(R11): 이름·연락처·주소·키·토큰이 �
   for (const s of SECRETS) assert.ok(!out.includes(s), `응답·기록에 노출: ${s}`);
   // 통합(11/25): PR #2 데이터 최소화(P0) — 개인정보 신호가 있으면 모델 호출 0회·장애 기록 없음(더 엄격한 규칙으로 기대값 변경)
   assert.equal(f.st.inputs.length, 0, '개인정보 글은 모델로 보내지 않는다');
-  assert.deepEqual(logged, []);
+  assert.equal(logged.length, 0, '장애 기록 없음'); // deepEqual(logged, [])는 타입을 never[]로 좁혀 이후 push가 타입 오류
   // 깨끗한 글 + 원문 섞인 알 수 없는 오류: 고정 코드만 기록(기존 RF8 검사 유지)
   const r2 = await answerChat(deps(w, spyBudget(1000).budget, (e) => logged.push(JSON.stringify(e))), input('인터넷 요금이 궁금해요'), NOW);
   const out2 = JSON.stringify(r2) + logged.join('\n') + evs.join('\n');
