@@ -2,7 +2,7 @@ import 'server-only';
 import { checkPolicy, guardAiReply } from './quoteAnswer';
 import { AI_UNAVAILABLE_GUIDANCE, POLICY_UNVERIFIED_GUIDANCE } from '@/content/consultGuidance';
 import type { ApprovedPolicyProvider, QuoteAnswer } from './quoteAnswer';
-import { maskPii } from './piiMask';
+import { isSafeModelInput, prepareUserText, replyHasPii } from './piiBoundary';
 import { SYSTEM_PROMPT } from './chatModel';
 import { grantBudgetPermit, ModelNotCalledError, revokeBudgetPermit } from './chatModel';
 import type { AiBudget, CallMeter, ChatModel, ReserveContext } from './chatModel';
@@ -44,6 +44,8 @@ export type ChatDeps = {
   readonly timeoutMs?: number;
   /** 장애·한도 기록(없으면 고정 형식 경고 1줄). 실패해도 상담 응답에는 영향 없음 */
   readonly failureLog?: AiFailureLog;
+  /** 시험용 마스킹 주입(기본 maskPii). 운영 경로는 주입하지 않는다 */
+  readonly mask?: (t: string) => string;
 };
 export type ChatInput = {
   readonly message: unknown; readonly carrier: string; readonly productId: string; readonly regionCode: string;
@@ -113,6 +115,11 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const model = deps.model;
   if (!model) return unavailable();
   const note = (e: AiFailureEvent) => { try { (deps.failureLog ?? defaultFailureLog)(e); } catch { /* 기록 실패는 무시 */ } };
+  // P0 전송 경계: 검사를 통과한 글만 보낸다. 실패하면 예약·호출 없이 승인 안내문으로 닫는다(Fail-Closed)
+  const prepared = prepareUserText(m, deps.mask);
+  if (!prepared.ok) return fallback();
+  const payload = { system: SYSTEM_PROMPT, user: prepared.text, approved: approved.text };
+  if (!isSafeModelInput(payload)) return fallback();
   const hold = await deps.budget.reserve(model.costPerCallKrw, input.budgetCtx);
   if (!hold) { note({ stage: 'budget_denied', code: 'BUDGET_DENIED', status: null, sent: 0, settle: 'none' }); return unavailable(); }
   const ctl = new AbortController();
@@ -128,10 +135,11 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const reply = await Promise.race([
-      model.generate({ system: SYSTEM_PROMPT, user: maskPii(m), approved: approved.text }, ctl.signal, meter),
+      model.generate(payload, ctl.signal, meter),
       new Promise<never>((_, rej) => { timer = setTimeout(() => { rej(new Error('TIMEOUT')); ctl.abort(); }, chatTimeoutMs(deps.timeoutMs)); }),
     ]);
     await hold.confirm(spent());
+    if (replyHasPii(reply)) return fallback(); // AI 응답 재검사: 개인정보 모양이면 쓰지 않는다
     const guarded = guardAiReply(reply, approved);
     if (guarded.text !== reply) return fallback();
     if (!benefitClaimsAllowed(reply, approved)) return fallback();

@@ -7,7 +7,7 @@ import 'server-only';
 //   **실제 업체·주소·모델명·가격은 정하지 않았다**: 주소(endpoint)도 주입이며 코드에 실제 서비스 주소를 두지 않는다(정적 시험 RD2·CH10).
 //   연결 승인 시 공식 문서로 형식을 다시 확인한다(Claude 환경에서 이번에 원문 미열람).
 // - transport·키·모델·실행 허용은 모두 명시 주입(환경변수·기본 클라이언트 없음). 설정이 없거나 허용이 아니면 ModelNotCalledError(전송 0회 → 예약 취소).
-// - 입력은 chatAnswer가 이미 가린 고객 글(maskPii)과 서버가 만든 승인 안내문뿐이다. 이 어댑터는 다른 고객 정보를 받지 않는다.
+// - 입력은 chatAnswer의 전송 경계(piiBoundary)를 통과한 고객 글(개인정보 신호 없음)과 서버가 만든 승인 안내문뿐이다. 이 어댑터는 다른 고객 정보를 받지 않는다.
 // - 출력은 그대로 믿지 않는다: chatAnswer가 금액·혜택 가드(guardAiReply·benefitClaimsAllowed)로 다시 검사하고, 실패하면 승인 안내문으로 대체한다.
 // - 1요청 1호출(재시도는 이 어댑터 밖의 modelRecovery.withRecovery가 하드 상한 안에서만), 응답 크기 상한, 마감 시각 초과 시 중단. 오류 본문·헤더·키는 반사하지 않는다.
 import { boundedRequest, parseJsonSafe, type BodyTransport } from '@/server/advertising/boundedHttp';
@@ -16,6 +16,7 @@ import { estimateMaxKrw, inputTokenUpperBound, priceFor, settleKrw, type ModelPr
 import { verifiedKrwPrices } from '@/server/ai/verifiedPrices';
 import { createModel } from './chatModel';
 import { ModelCallError } from './modelRecovery';
+import { isSafeModelInput } from './piiBoundary';
 
 export const MAX_REPLY_CHARS = 600;
 
@@ -113,6 +114,8 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
       if (!valid(config)) throw new ModelNotCalledError('NOT_CONFIGURED');
       if (!hasBudgetPermit(meter)) throw new ModelNotCalledError('NO_BUDGET_PERMIT'); // 비용 게이트 우회(직접 호출) 차단
       if (signal.aborted) throw new ModelNotCalledError('ABORTED');
+      // P0 외부 전송 직전 최종 검사: 개인정보 모양이 남아 있으면 보내지 않는다(전송 0회 → 예약 취소)
+      if (!isSafeModelInput(input)) throw new ModelNotCalledError('PII_BLOCKED');
       const bodyText = buildChatBody(config.model, input, config.maxOutputTokens);
       if (inputTokenUpperBound(bodyText) > config.maxInputTokens) throw new ModelNotCalledError('INPUT_TOO_LARGE');
       const r = await boundedRequest(config.transport, config.endpoint, {
