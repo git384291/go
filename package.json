@@ -14,6 +14,8 @@
     "lint": "eslint .",
     "test:unit": "tsx --test tests/unit/*.test.ts",
     "test:route": "TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx --test tests/route/*.test.ts",
+    "test:live-ai": "TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx --test tests/live/*.test.ts",
+    "test:live-ai-diag": "CONSULT_AI_LIVE_DIAG=1 npm run test:live-ai",
     "test:next-e2e": "bash scripts/next-e2e/run.sh",
     "test:server-smoke": "node scripts/server-smoke/run.mjs",
     "preflight:launch": "tsx scripts/preflight/run.ts",

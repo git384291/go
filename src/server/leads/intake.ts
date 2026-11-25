@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createPiiCrypto, maskName, normalizeMobile, piiKeysFromEnv, type PiiCrypto } from '../security/piiCrypto';
 import { signingKeyFromEnv, signToken, type SigningKey } from '../security/token';
 import { isActiveInterest } from '../../content/catalog';
+import { rateLimitIpKey } from '../http/clientIp';
 import { noticeReadiness, REQUIRED_NOTICES, sameNoticeKeys, type NoticeConfig } from '../../content/requiredNotices';
 import { cleanGclid } from '../../content/attribution';
 
@@ -171,7 +172,7 @@ export function buildCreateLeadArgs(body: unknown, ctx: IntakeContext): CreateLe
     privacyVersion: input.privacyVersion,
     consentCollection: true,
     marketingOptIn: input.marketingOptIn,
-    ipHash: ctx.crypto.ipHash(ctx.clientIp),
+    ipHash: ctx.crypto.ipHash(rateLimitIpKey(ctx.clientIp)), // IP별 접수 한도 키: IPv6는 /64 단위(주소 바꾸기 우회 방지), 원문 IP 미저장
   };
 
   const token = signToken('lead', leadSignedFields(a), ctx.signingKey, ctx.nowSeconds);

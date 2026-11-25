@@ -128,6 +128,7 @@ run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도:
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
 run db/tests/99_ad_precheck.sql >/dev/null   # 광고 사전검증 10: 예약 시작 전 집행 차단·대조군·1회 실행
 run db/tests/99_lead_gclid.sql >/dev/null   # 광고 사전검증 8: gclid 접수 귀속·첫 값 보존·형식·변조·보존기간(0027)
+run db/tests/99_policy_pr16_verify.sql >/dev/null   # PR #16 추가 검증(PM 11/25): 비활성 상품 차단·정확성·캐시 구조·실패 롤백·Supabase 보안 구조(한 트랜잭션, 마지막에 되돌림)
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
@@ -923,6 +924,14 @@ if ! bash scripts/ai-cost-db-concurrency.sh > "$LOG_DIR/ai-cost-concurrency.log"
   echo "FAIL | AI 비용 예약 동시성 검사 실패 (test-results/ai-cost-concurrency.log)"; exit 1
 fi
 tail -1 "$LOG_DIR/ai-cost-concurrency.log"
+
+# 사용자별 AI 한도 우회(세션 재발급·다중 서버) 실DB 검증(SB-D*). 끝나면 한도·원장·횟수 집계 원상 복구.
+echo "== AI per-user limit bypass (session reissue, multi-server, SB-D*)"
+if ! bash scripts/ai-scope-bypass-db.sh > "$LOG_DIR/ai-scope-bypass.log" 2>&1; then
+  grep -E '^(FAIL|BLOCKED|REFUSED)' "$LOG_DIR/ai-scope-bypass.log" | head -20
+  echo "FAIL | 사용자별 AI 한도 우회 검사 실패 (test-results/ai-scope-bypass.log)"; exit 1
+fi
+tail -1 "$LOG_DIR/ai-scope-bypass.log"
 
 # 설계 초안 0007(로그인 시도 제한)은 정식 마이그레이션에 자동 로드되지 않는다. GitHub Actions CI에서만, 기본 DB 검사가
 # 통과한 뒤 같은 TCP 미수신 가상 클러스터에 별도 폐기용 DB를 만들어 명시 실행한다(fideon_test는 건드리지 않음).

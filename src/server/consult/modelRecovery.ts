@@ -151,9 +151,9 @@ export function withRecovery(inner: ChatModel, config: RecoveryConfig = {}): Cha
 
 // 안정적인 모델 객체 1개당 복구 상태(차단기) 1개: 요청마다 새로 만들면 차단기가 의미 없다.
 const cache = new WeakMap<ChatModel, ChatModel>();
-export function recoveringModelFor(model: ChatModel | null): ChatModel | null {
+export function recoveringModelFor(model: ChatModel | null, config: RecoveryConfig = {}): ChatModel | null {
   if (!model) return null;
   let w = cache.get(model);
-  if (!w) { w = withRecovery(model); cache.set(model, w); }
+  if (!w) { w = withRecovery(model, config); cache.set(model, w); } // 같은 모델엔 같은 설정(라우트 상수)만 쓴다
   return w;
 }

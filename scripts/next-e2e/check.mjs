@@ -4,6 +4,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { runBrowserFlow } from './browser-flow.mjs';
+import { runPolicyScreen } from './policy-screen.mjs';
 
 const BASE = process.env.E2E_BASE;
 const sql = postgres(process.env.E2E_ADMIN_URL, { max: 1, onnotice: () => {} });
@@ -462,6 +463,10 @@ try {
   try {
     await runBrowserFlow({ sql, n, check, adm, pj, post, BASE, pubUrl, owner: ownerC, reviewer: reviewerC, editor: editorC, counselor: counselorC });
   } catch (e) { check('BF 실제 브라우저 단일 흐름', false, String(e.message).split('\n')[0]); }
+  // PM 11/24 ⑤: 정책 승인·게시 실제 관리자 화면 흐름(PS1~PS17). 기존 Q·PB(API)·BF는 반복하지 않는다
+  try {
+    await runPolicyScreen({ sql, n, check, adm, pj, chat, BASE, owner: ownerC, editor: editorC, reviewer: reviewerC });
+  } catch (e) { check('PS 정책 화면 흐름', false, String(e.message).split('\n')[0]); }
 } catch (e) { check('실행 중 예외 없음', false, String(e.message).split('\n')[0]); } finally { await sql.end(); fake.close(); }
 const bad = results.filter((x) => !x).length;
 console.log(`== Next 서버 E2E: pass=${results.length - bad} fail=${bad}`);

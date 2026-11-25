@@ -6,7 +6,8 @@
  */
 export type ModelInput = { readonly system: string; readonly user: string; readonly approved: string };
 /** 재시도 포함 호출에서 실제로 보낸 횟수(복구 래퍼가 올린다). 모델이 세지 않으면 0이고, 그때는 예약 비용 전액을 확정한다 */
-export type CallMeter = { sent: number };
+export type CallMeter = { sent: number; usageKrw?: number; usageCount?: number };
+// usageKrw·usageCount: 응답 usage로 실제 비용을 안 전송의 합계·개수(실제 어댑터만 채운다). 나머지 전송은 1회 예약 비용으로 센다(보수적)
 export type ChatModel = {
   readonly name: string;
   /** 1회 상담 답변에 예약하는 최대 비용(재시도 포함) */
@@ -34,10 +35,11 @@ export function createModel(env: Record<string, string | undefined>): ChatModel 
 export class ModelNotCalledError extends Error {}
 
 /** 사용료 예약 → 호출 → 확정(실제 비용)/취소(호출 안 함). 정산이 오지 않은 예약은 DB가 예약 비용 전액으로 센다. */
-// - uncertain(): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 예약 전액으로 닫고 대표 조정 대기(0028). 없으면 확정으로 처리한다.
-export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(): Promise<void> };
+// - uncertain(금액?): 요청이 나갔지만 과금 여부를 알 수 없음(시간 초과·연결 끊김) → 금액(1원 이상·예약 이하, 없으면 예약 전액)으로 닫고 대표 조정 대기(0028·0033). 없으면 확정으로 처리한다.
+export type Reservation = { confirm(actualKrw: number): Promise<void>; cancel(): Promise<void>; uncertain?(amountKrw?: number): Promise<void> };
 /** 예약 문맥(0028): 요청 ID(멱등, 같은 ID는 다시 예약하지 않음)와 사용자 키(서버 HMAC 64자리, 사용자별 일·월 한도) */
-export type ReserveContext = { readonly requestId: string; readonly scope: string };
+/** net(0032, 선택): 회선 키(서버 HMAC 64자리). 있으면 회선별 하루 상한도 DB가 같은 잠금 안에서 본다. 형식이 틀리면 예약 거부(fail-closed) */
+export type ReserveContext = { readonly requestId: string; readonly scope: string; readonly net?: string };
 export const REQUEST_ID = /^[A-Za-z0-9-]{16,64}$/;
 export const SCOPE_KEY = /^[0-9a-f]{64}$/;
 export type AiBudget = { reserve(costKrw: number, ctx?: ReserveContext): Promise<Reservation | null> };
@@ -81,15 +83,21 @@ export function createAiBudget(env: Record<string, string | undefined>, log: Con
       used += cost;
       let done = false;
       const settle = (actual: number) => { if (!done) { done = true; used += actual - cost; } };
-      // 확정은 1원 이상(호출이 나간 뒤 0원으로 지우지 못함, DB 0028와 같음). 0원은 취소(호출 안 함)뿐
-      return { async confirm(a) { settle(Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain() { settle(cost); } };
+      // 확정은 1원 이상 예약 금액 이하(호출이 나간 뒤 0원으로 지우지 못함·예약 초과 확정 불가, DB 0028·0030과 같음). 0원은 취소(호출 안 함)뿐
+      return { async confirm(a) { settle(Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))); }, async cancel() { settle(0); }, async uncertain(a?: number) { settle(a === undefined ? cost : Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))); } };
     },
   };
 }
 
 /** DB 집계: api.ai_budget_hold/confirm/release가 월 한도(core.ai_budget_config, 기본 0원)와 추가 전용 원장으로 판정한다. 어떤 오류든 예약 거부, 정산 오류는 삼킨다(미정산 = 예약 비용 전액). */
 export type RunAi = <T>(fn: (tx: (s: TemplateStringsArray, ...v: unknown[]) => PromiseLike<unknown>) => Promise<T>) => Promise<T>;
-export function createDbAiBudget(run: RunAi): AiBudget {
+/** 정산 실패 기록(PM 11/24): 3회 모두 실패했을 때 서버 오류 1줄. 고정 단어·SQLSTATE(5자)만 — 오류 원문·SQL·금액·요청 ID·키·고객 정보는 남기지 않는다.
+ *  비용 한도는 그대로: 정산이 안 된 예약은 DB가 예약 전액으로 센다(0028), 동시 1건 한도도 그 예약이 끝날 때까지 유지(0029). */
+export type BudgetSettleLog = (op: 'confirm' | 'release' | 'uncertain', sqlstate: string) => void;
+const defaultSettleLog: BudgetSettleLog = (op, sqlstate) => { console.error(`[ai-budget] settle_failed op=${op} attempts=3 sqlstate=${sqlstate}`); };
+const sqlstateOf = (e: unknown): string => { const c = (e as { code?: unknown } | null)?.code; return typeof c === 'string' && /^[0-9A-Z]{5}$/.test(c) ? c : 'unknown'; };
+
+export function createDbAiBudget(run: RunAi, settleLog: BudgetSettleLog = defaultSettleLog): AiBudget {
   return {
     async reserve(cost, ctx) {
       if (!Number.isSafeInteger(cost) || cost < 0) return null;
@@ -97,23 +105,29 @@ export function createDbAiBudget(run: RunAi): AiBudget {
       // 0028: 요청 ID·사용자 키가 없거나 형식이 틀리면 DB가 거부한다(null). 여기서 지어내지 않는다
       const req = ctx && REQUEST_ID.test(ctx.requestId) ? ctx.requestId : null;
       const scope = ctx && SCOPE_KEY.test(ctx.scope) ? ctx.scope : null;
+      if (ctx && ctx.net !== undefined && !SCOPE_KEY.test(ctx.net)) return null; // 0032: 회선 키가 왔는데 형식이 틀리면 막는다
+      const net = ctx?.net;
       let id: unknown;
       try {
-        const rows = (await run(async (tx) => tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text)::text as id`)) as readonly { id?: unknown }[];
+        const rows = (await run(async (tx) => (net === undefined
+          ? tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text)::text as id`
+          : tx`select api.ai_budget_hold(${cost}::int, ${req}::text, ${scope}::text, ${net}::text)::text as id`))) as readonly { id?: unknown }[];
         id = rows[0]?.id;
       } catch { return null; }
       if (typeof id !== 'string' || !/^\d{1,18}$/.test(id)) return null;
       // 정산은 예약당 1번만 DB에 반영되는 멱등 호출이라 일시 장애는 최대 3번까지 다시 시도한다(false = 이미 정산됨 → 끝).
       // 끝내 안 되면 미정산으로 남고, DB는 예약 비용 전액으로 센다(비용을 줄여 세지 않는다).
-      const settle = async (q: (tx: Parameters<Parameters<RunAi>[0]>[0]) => PromiseLike<unknown>) => {
+      const settle = async (op: 'confirm' | 'release' | 'uncertain', q: (tx: Parameters<Parameters<RunAi>[0]>[0]) => PromiseLike<unknown>) => {
+        let last: unknown = null;
         for (let i = 0; i < 3; i++) {
-          try { await run(async (tx) => q(tx)); return; } catch { /* 다시 시도 */ }
+          try { await run(async (tx) => q(tx)); return; } catch (e) { last = e; /* 다시 시도 */ }
         }
+        try { settleLog(op, sqlstateOf(last)); } catch { /* 기록 실패는 무시(상담 응답에 영향 없음) */ }
       };
       return {
-        confirm: (actual) => settle((tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(1, Math.min(1000, Math.trunc(Number.isFinite(actual) ? actual : cost)))}::int)`),
-        cancel: () => settle((tx) => tx`select api.ai_budget_release(${id as string}::bigint)`),
-        uncertain: () => settle((tx) => tx`select api.ai_budget_uncertain(${id as string}::bigint)`),
+        confirm: (actual) => settle('confirm', (tx) => tx`select api.ai_budget_confirm(${id as string}::bigint, ${Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(actual) ? actual : cost)))}::int)`), // 0030: 예약 초과 확정은 DB도 거부
+        cancel: () => settle('release', (tx) => tx`select api.ai_budget_release(${id as string}::bigint)`),
+        uncertain: (a?: number) => settle('uncertain', (tx) => (a === undefined ? tx`select api.ai_budget_uncertain(${id as string}::bigint)` : tx`select api.ai_budget_uncertain(${id as string}::bigint, ${Math.max(1, Math.min(cost, Math.trunc(Number.isFinite(a) ? a : cost)))}::int)`)), // 0033
       };
     },
   };

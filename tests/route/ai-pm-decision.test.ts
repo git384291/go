@@ -43,20 +43,20 @@ test('PD3 공식 확인 기록: gpt-5.6-luna 출처·확인일 있음, 원화 �
   assert.deepEqual(verifiedKrwPrices([{ ...v, verifiedOn: 'today' }]), []);
 });
 
-test('PD4 단가 미확인 모델은 호출 차단(전송 0회), 기록은 상담 경로에 연결되지 않음(운영 활성화 금지)', async () => {
+test('PD4 단가 미확인 모델은 호출 차단(전송 0회), 기록은 가격표 연결 1곳(consultModelFromEnv)에서만 쓰고 실제 전송은 없음', async () => {
   let calls = 0;
   const t: BodyTransport = async () => { calls++; throw new Error('must not send'); };
   const m = createOpenAiChatModel({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: 'sk-test-' + 'A'.repeat(30), model: 'gpt-5.6-terra', executionAllowed: true, costPerCallKrw: 2, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, prices: verifiedKrwPrices(), maxInputTokens: 4000 });
   const meter = { sent: 0 }; grantBudgetPermit(meter);
   await assert.rejects(m.generate({ system: 'S', user: 'u', approved: 'a' }, new AbortController().signal, meter), ModelNotCalledError);
   assert.equal(calls, 0);
-  // 정적: 확인 기록·환율은 비용 계산 모듈 밖에서 import하지 않는다(상담 경로·라우트 미연결), 환율이 청구 환율이 아니라는 표시 유지
+  // 정적: 확인 기록은 상담 모델 선택 1곳에서만 import(라우트·핸들러 직접 사용 없음), 환율이 청구 환율이 아니라는 표시 유지
   const files: string[] = [];
   const walk = (d: string) => { for (const n of readdirSync(d)) { const f = path.join(d, n); if (statSync(f).isDirectory()) walk(f); else if (/\.(ts|tsx)$/.test(n)) files.push(f); } };
   walk('src');
-  assert.deepEqual(files.filter((f) => /from ['"][^'"]*verifiedPrices['"]/.test(readFileSync(f, 'utf8'))), []);
+  assert.deepEqual(files.filter((f) => /from ['"][^'"]*verifiedPrices['"]/.test(readFileSync(f, 'utf8'))), [path.join('src', 'server', 'consult', 'openAiChatModel.ts')]);
   assert.match(readFileSync('src/server/ai/costModel.ts', 'utf8'), /실제 청구 환율 아님/);
-  assert.match(readFileSync('src/server/consult/chatModel.ts', 'utf8'), /CONSULT_AI_MODEL === 'mock' \? mockModel : null/, '상담 모델은 여전히 mock뿐');
+  assert.match(readFileSync('src/server/consult/chatModel.ts', 'utf8'), /CONSULT_AI_MODEL === 'mock' \? mockModel : null/, 'createModel은 여전히 mock뿐');
 });
 
 // ───── ③ 사용자별 한도 키 ─────

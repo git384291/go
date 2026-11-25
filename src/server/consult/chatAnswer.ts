@@ -119,7 +119,12 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
   const meter: CallMeter = { sent: 0 };
   grantBudgetPermit(meter); // 공통 비용 게이트: 예약이 성공한 이 호출에만 전송 허가
   // 확정 비용: 재시도 래퍼가 센 전송 횟수만큼(예약 이하). 세지 않는 모델은 예약 전액(보수적)
-  const spent = () => (model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw);
+  // PM 11/24 ④: 응답 usage를 아는 전송은 실제 비용, 모르는 전송(실패·시간 초과 등)은 1회 예약 비용. 합계는 예약 이하·1원 이상
+  const spent = () => {
+    const known = Math.min(meter.sent, meter.usageCount ?? 0);
+    if (known > 0) return Math.max(1, Math.min(model.costPerCallKrw, (meter.usageKrw ?? 0) + (meter.sent - known) * (model.attemptCostKrw ?? model.costPerCallKrw)));
+    return model.attemptCostKrw && meter.sent > 0 ? Math.min(model.costPerCallKrw, model.attemptCostKrw * meter.sent) : model.costPerCallKrw;
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const reply = await Promise.race([
@@ -133,10 +138,10 @@ export async function answerChat(deps: ChatDeps, input: ChatInput, now: Date): P
     return gate(withCallback({ ok: true, kind: guarded.kind, text: guarded.text, source: 'model', next: 'signup' }, m));
   } catch (e) {
     // 요청을 보내기 전 실패(설정 누락 등)만 취소하고, 시간 초과·응답 오류는 비용이 났을 수 있어 확정한다
-    // 0028: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 예약 전액으로 닫고 대표 조정 대기(환불하지 않음)
+    // 0028·0033: 시간 초과·연결 끊김은 과금 여부를 알 수 없다 → 보낸 횟수 × 1회 최대 비용(예약 전액 아님, PM 11/24 보완)으로 '불확실' 닫고 대표 조정 대기(환불하지 않음)
     const f = failureCode(e);
     if (e instanceof ModelNotCalledError) { await hold.cancel(); note({ stage: 'not_called', ...f, sent: meter.sent, settle: 'cancel' }); }
-    else if (isUncertain(e) && hold.uncertain) { await hold.uncertain(); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'uncertain' }); }
+    else if (isUncertain(e) && hold.uncertain) { await hold.uncertain(spent()); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'uncertain' }); }
     else { await hold.confirm(spent()); note({ stage: 'failed', ...f, sent: meter.sent, settle: 'confirm' }); }
     return unavailable();
   } finally {

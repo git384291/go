@@ -3,6 +3,7 @@ import { answerChat } from './chatAnswer';
 import type { ChatDeps } from './chatAnswer';
 import { issueSession, verifySession } from './consultSession';
 import { REQUEST_ID, SCOPE_KEY } from './chatModel';
+import { rateLimitIpKey } from '../http/clientIp';
 import { createHmac, randomUUID } from 'node:crypto';
 
 /**
@@ -66,11 +67,17 @@ export type HandlerDeps = {
  * 고객 로그인은 아직 없다 — 생기면 내부 사용자 ID로 바꾼다.
  */
 export const aiScopeFor = (key: Buffer, sessionId: string): string => createHmac('sha256', key).update(`ai-scope|${sessionId}`, 'utf8').digest('hex');
+/**
+ * AI 회선 키(0032, PM 11/24: 회선별 하루 300원): 횟수 제한과 같은 회선 단위(IPv4 그대로·IPv6 /64)를 세션 키로 HMAC.
+ * 세션을 다시 받아도 같은 회선이면 같은 키 → 회선 하루 상한은 초기화되지 않는다. 원문 IP는 DB·기록에 남지 않는다.
+ */
+export const aiNetFor = (key: Buffer, ip: string): string => createHmac('sha256', key).update(`ai-net|${rateLimitIpKey(ip)}`, 'utf8').digest('hex');
 
 export async function handleChat(req: Request, d: HandlerDeps): Promise<Response> {
   if (!d.enabled) return json(503, { ok: false, code: 'DISABLED' });
   if (!d.chat || !CODE.test(d.chat.supplierId) || !d.sessionKey) return json(503, { ok: false, code: 'SERVICE_NOT_READY' });
-  if (!d.limiter(d.ip, d.now().getTime())) return json(429, { ok: false, code: 'RATE_LIMITED' });
+  const rip = rateLimitIpKey(d.ip); // 횟수 제한 키: IPv6는 /64로 묶는다(주소 바꾸기 우회 방지). 봇 확인에는 원래 IP
+  if (!d.limiter(rip, d.now().getTime())) return json(429, { ok: false, code: 'RATE_LIMITED' });
   let body: unknown;
   try {
     const raw = await req.text();
@@ -100,14 +107,14 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     if (!id) return json(400, { ok: false, code: 'INVALID_SESSION' });
     sessionId = id; token = b.session as string; key = `s:${id}`;
   } else {
-    key = `i:${d.ip}`;
+    key = `i:${rip}`;
   }
   // 처리 중인 같은 세션(첫 메시지는 같은 IP) 요청이 있으면 DB 한도·봇 확인·모델 호출 모두 하기 전에 막는다
   const guard = d.inflight ?? defaultInflight;
   if (!guard.enter(key, d.now().getTime())) return json(429, { ok: false, code: 'BUSY' });
   try {
     if (!hasSession) {
-      if (!d.newSessionLimiter(d.ip, d.now().getTime())) return json(429, { ok: false, code: 'SESSION_LIMIT' });
+      if (!d.newSessionLimiter(rip, d.now().getTime())) return json(429, { ok: false, code: 'SESSION_LIMIT' });
       // 새 세션: 서버 측 봇 확인 → DB 공용 세션 한도. 둘 다 통과해야 세션을 발급한다
       const bot = await d.botCheck(typeof b.turnstileToken === 'string' ? b.turnstileToken : '', d.ip).catch(() => 'unavailable' as const);
       if (bot === 'unavailable') return json(503, { ok: false, code: 'BOT_CHECK_UNAVAILABLE' });
@@ -123,7 +130,8 @@ export async function handleChat(req: Request, d: HandlerDeps): Promise<Response
     if (chatOk === null) return json(503, { ok: false, code: 'RATE_CHECK_UNAVAILABLE' });
     if (!chatOk) return json(429, { ok: false, code: 'RATE_LIMITED' });
     const scope = aiScopeFor(d.sessionKey as Buffer, sessionId);
-    const budgetCtx = SCOPE_KEY.test(scope) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope } : undefined;
+    const net = aiNetFor(d.sessionKey as Buffer, d.ip);
+    const budgetCtx = SCOPE_KEY.test(scope) && SCOPE_KEY.test(net) ? { requestId: hasReq ? (b.requestId as string) : randomUUID(), scope, net } : undefined;
     const r = await answerChat(d.chat, { message: b.message, carrier: b.carrier, productId: b.productId, regionCode: b.regionCode, budgetCtx }, d.now());
     if (!r.ok) return json(400, r);
     if (d.recordConsult) { try { await d.recordConsult(sessionId, hasCampaign ? (b.campaign as string) : null); } catch { /* 집계 실패는 상담에 영향 없음 */ } }
