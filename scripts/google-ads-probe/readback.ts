@@ -25,7 +25,7 @@ export async function runReadback(env: Readonly<Record<string, string | undefine
   log({ step: 'env', ok: missing.length === 0 && armed, missing: [...missing], armed });
   if (missing.length > 0 || !armed) return 2;
   // 11/23 C: launch가 광고 그룹·반응형 검색광고(모두 PAUSED)까지 만들므로 검수 소재와 최종 URL(AD_LANDING_URL)이 필요하다
-  const cfg = { ...googleAdsConfigFromEnv(env, transport), initialStatus: 'PAUSED' as const, validateOnly: false, creative: approvedRsaCreative(), keywords: candidateKeywords() /* 테스트 계정 전용 확인 도구: 후보 키워드로 생성·읽기 확인(노출 없음, PM 승인과 무관) */, landingUrl: landingUrlFrom(env.AD_LANDING_URL) };
+  const cfg = { ...googleAdsConfigFromEnv(env, transport), validateOnly: false, creative: approvedRsaCreative(), keywords: candidateKeywords() /* 테스트 계정 전용 확인 도구: 후보 키워드로 생성·읽기 확인(노출 없음, PM 승인과 무관) */, landingUrl: landingUrlFrom(env.AD_LANDING_URL) };
   const platform = createGoogleAdsPlatform(cfg);
   if (!platform || !cfg.customerId) { log({ step: 'config', ok: false }); return 2; }
   const deadline = () => Date.now() + 15_000; // 요청 시간 제한은 실제 시계(종료일 계산용 now와 분리)

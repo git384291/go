@@ -76,6 +76,6 @@ test('RB5 pause 응답 이상은 종료 7, 캠페인 생성 실패는 종료 5(p
 test('RB6 정적: CI·package.json은 실행하지 않음, ENABLED 생성 없음', () => {
   const src = readFileSync('scripts/google-ads-probe/readback.ts', 'utf8').replace(/^\s*\/\/.*$/gm, '');
   assert.ok(!/ENABLED|retry|while \(/.test(src));
-  assert.match(src, /initialStatus: 'PAUSED'/);
+  assert.ok(!/initialStatus/.test(src));
   for (const p of ['package.json', '.github/workflows/ci.yml']) assert.ok(!/google-ads-probe\/readback/.test(readFileSync(p, 'utf8')), p);
 });
