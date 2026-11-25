@@ -54,18 +54,18 @@ const noMarks = (s: string, label: string) => { for (const m of MARKS) assert.ok
 const cfgUser = (d: { log: { connects: Record<string, unknown>[] } }) => d.log.connects[0].username;
 const status = (r: { checks: { id: string; status: string; value?: unknown }[] }, id: string) => r.checks.find((c) => c.id === id);
 
-test('B1 import·기본 실행은 닫힘: 도움말만, 기대값 미정이면 접속 0으로 EXPECT_UNSET', async () => {
+test('B1 import·기본 실행은 닫힘: 도움말만, 승인 호스트가 아니면 접속 0으로 HOST_MISMATCH', async () => {
   const src = readFileSync(new URL('../../scripts/probe/dev-db-readonly.mjs', import.meta.url), 'utf8');
   assert.ok(!/^import .*postgres/m.test(src), '드라이버는 실행 경로에서만 import');
   assert.ok(!/DATABASE_URL|dotenv|readFileSync/.test(src.replace(/\/\/.*$/gm, '')), 'DATABASE_URL·dotenv·파일 읽기 없음');
-  assert.deepEqual(PROBE_EXPECT, { host: null, port: null, database: null, loginUser: null, dbRole: null }, '모르는 호스트를 만들지 않음');
+  assert.deepEqual(PROBE_EXPECT, { host: 'aws-0-ap-northeast-2.pooler.supabase.com', port: 6543, database: 'postgres', loginUser: 'app_server.lmxhbhieurnhelhgvjyv', dbRole: 'app_server' }, 'PM 11/25 승인값만(다른 호스트를 만들지 않음)');
   const out: string[] = [];
   let connects = 0;
   const connect = () => { connects++; throw new Error('should not connect'); };
   assert.equal(await main([], { FIDEON_PROBE_DB_URL: URL_OK, FIDEON_PROBE_DB_CA: CA }, { out: (s: string) => out.push(s), connect }), 0);
   assert.equal(await main(['--url-env', 'FIDEON_PROBE_DB_URL', '--ca-env', 'FIDEON_PROBE_DB_CA'], { FIDEON_PROBE_DB_URL: URL_OK, FIDEON_PROBE_DB_CA: CA }, { out: (s: string) => out.push(s), connect }), 0, '--run 없으면 실행 안 함');
   assert.equal(await main(['--run', '--url-env', 'FIDEON_PROBE_DB_URL', '--ca-env', 'FIDEON_PROBE_DB_CA'], { FIDEON_PROBE_DB_URL: URL_OK, FIDEON_PROBE_DB_CA: CA }, { out: (s: string) => out.push(s), connect }), 2);
-  assert.ok(out.join('\n').includes('EXPECT_UNSET'));
+  assert.ok(out.join('\n').includes('HOST_MISMATCH'), '시험용 주소는 승인 호스트가 아니므로 접속 전 거부');
   assert.equal(await main(['--run', '--url-env', 'DATABASE_URL', '--ca-env', 'FIDEON_PROBE_DB_CA'], { DATABASE_URL: URL_OK }, { out: (s: string) => out.push(s), connect, expect: EXPECT }), 2, '허용 이름 형식 밖 환경변수 거부');
   assert.equal(connects, 0);
   noMarks(out.join('\n'), 'B1 출력');
@@ -95,7 +95,15 @@ test('B2 대상 검증(네트워크 전): 정확한 기대값만, 옵션·내부
     ['not a url', 'URL_INVALID'],
   ];
   for (const [u, code] of bad) assert.deepEqual(validateTarget(u, EXPECT), { ok: false, code }, u);
-  assert.deepEqual(validateTarget(URL_OK), { ok: false, code: 'EXPECT_UNSET' });
+  assert.deepEqual(validateTarget(URL_OK), { ok: false, code: 'HOST_MISMATCH' });
+  const UNSET = { host: null, port: null, database: null, loginUser: null, dbRole: null };
+  assert.deepEqual(validateTarget(URL_OK, UNSET), { ok: false, code: 'EXPECT_UNSET' });
+  // PM 11/25: 승인 호스트라도 postgres 관리자 계정(postgres.<ref>)으로는 접속 전 거부
+  const H = 'aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres';
+  assert.deepEqual(validateTarget(`postgresql://postgres.lmxhbhieurnhelhgvjyv:x@${H}`), { ok: false, code: 'USER_MISMATCH' });
+  assert.deepEqual(validateTarget(`postgresql://postgres:x@${H}`), { ok: false, code: 'USER_MISMATCH' });
+  assert.equal(validateTarget(`postgresql://app_server.lmxhbhieurnhelhgvjyv:x@${H}`).ok, true, 'app_server 전용 계정만 통과(네트워크 전 단계)');
+  assert.deepEqual(validateTarget(`postgresql://app_server.lmxhbhieurnhelhgvjyv:x@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres`), { ok: false, code: 'PORT_MISMATCH' });
 });
 
 test('B3 정상: TLS 옵션(CA·rejectUnauthorized·max1·prepare false), 고정 SQL만·쓰기 0, read-only·역할 전환·복귀·권한', async () => {
