@@ -165,14 +165,14 @@ test('GA8 validateOnly: 구글에 검증만 요청, 캠페인 요청 0회, faile
   assert.equal(JSON.parse(f.calls.find((c) => c.url.endsWith('campaignBudgets:mutate'))!.body).validateOnly, true);
   assert.equal(f.calls.filter((c) => c.url.endsWith('campaigns:mutate')).length, 0);
 });
-test('GA9 비밀 비노출: 오류·결과 어디에도 credential·토큰·URL 없음, initialStatus는 명시해야만 ENABLED', async () => {
+test('GA9 비밀 비노출: 오류·결과 어디에도 credential·토큰·URL 없음, initialStatus(ENABLED)를 넣어도 항상 PAUSED 생성', async () => {
   const f = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: { status: 200, throws: true } });
   const out = await callPlatform((d) => createGoogleAdsPlatform(cfg(f.t))!.launch(req({ deadlineAt: d })));
   const s = JSON.stringify(out) + JSON.stringify(await run(createGoogleAdsPlatform(cfg(f.t)), (q) => q.launch(req())));
   for (const x of [...SECRETS, 'googleapis', 'ECONNRESET']) assert.ok(!s.includes(x), x);
   const g = fake({ token: OK_TOKEN, budget: OK_BUDGET, campaign: OK_CAMP, search: searchBudget('5000000000') });
-  await createGoogleAdsPlatform(cfg(g.t, { initialStatus: 'ENABLED' }))!.launch(req());
-  assert.equal(JSON.parse(g.calls.find((c) => c.url.endsWith('campaigns:mutate'))!.body).operations[0].create.status, 'ENABLED');
+  await createGoogleAdsPlatform(cfg(g.t, { initialStatus: 'ENABLED' } as never))!.launch(req());
+  assert.equal(JSON.parse(g.calls.find((c) => c.url.endsWith('campaigns:mutate'))!.body).operations[0].create.status, 'PAUSED');
 });
 test('GA11 API 버전: 기본 major v26, 지정은 major만(v26.2 같은 minor 거부), 모든 요청 URL이 major 경로', async () => {
   const f = fake({ token: OK_TOKEN, campaign: OK_CAMP });
