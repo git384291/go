@@ -1,4 +1,4 @@
-// 통화 수신 서명·인자(TypeScript ingestCall)와 DB api.call_ingest 규칙이 같은지 확인하는 SQL을 출력한다(0054, PM 11/25 ①).
+// 통화 수신 서명·인자(TypeScript ingestCall)와 DB api.call_ingest 규칙이 같은지 확인하는 SQL을 출력한다(0064, PM 11/25 ①).
 // scripts/db-test.sh가 psql로 실행. 가상 키·가상 연락처만, 외부 호출 없음.
 import { signToken } from '../src/server/security/token';
 import { createPiiCrypto } from '../src/server/security/piiCrypto';

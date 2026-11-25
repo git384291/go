@@ -1,4 +1,4 @@
--- 파기 보완(0053, PM 11/25 A안·법정 보존 분리): 상담 메모 함께 파기, 계약 완료 5년만 보존, 보존 중에도 다른 신청은 따로 파기. 가상 데이터만. 99_purge_scope 뒤.
+-- 파기 보완(0063, PM 11/25 A안·법정 보존 분리): 상담 메모 함께 파기, 계약 완료 5년만 보존, 보존 중에도 다른 신청은 따로 파기. 가상 데이터만. 99_purge_scope 뒤.
 \set ON_ERROR_STOP 1
 reset role;
 select set_config('t.n1', test.lead_sql(repeat('c9', 32), 'pn-test-0000000001', p_ip => repeat('5a', 32)), false);

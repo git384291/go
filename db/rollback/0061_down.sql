@@ -1,11 +1,6 @@
--- 0051_crm_unify.sql — 고객·접수·CRM 통합 (PM 11/25 ①③)
--- 1) api.create_lead: 중복 판정 기간(7일) 밖 재신청도 같은 연락처면 기존 고객에 연결(고객 행 중복 금지)
--- 2) api.recontact_schedule: 같은 연락처의 다른 리드에 같은 날 대기 일정이 있으면 중복 연락 금지
--- 3) api.customer_timeline: 한 고객의 리드·상태·후속 연락·재연락·신청서·수신 상태를 한 화면(가린 값만, 대표만, 감사 기록)
--- 4) api.crm_unhandled: 미처리 자동 분류(24시간 넘은 신규·지난 재연락·미완료 후속 연락) — 관리자 화면 알림용, 실제 발신 없음
--- 개인정보 원문·암호문은 어떤 새 함수도 돌려주지 않는다. 원문은 기존 api.reveal_contact(사유·감사·시간당 30회)로만.
+-- 0061 롤백: 새 함수 제거, create_lead(0007)·recontact_schedule(0060) 이전 정의 복원. 이미 묶인 고객 행은 그대로 둔다.
 begin;
-
+drop function if exists api.crm_unhandled(uuid, uuid, text);
 create or replace function api.create_lead(
   p_token text,
   p_name_enc text, p_name_masked text, p_phone_enc text, p_phone_hmac text, p_phone_last4 text,
@@ -104,18 +99,9 @@ begin
     return 'accepted';
   end if;
 
-  -- 0051: 중복 판정 기간이 지난 재신청도 같은 연락처면 기존 고객 1명에 묶는다(고객 중복 생성 금지).
-  --       연락처 잠금(7) 안이라 동시 신청도 고객 1명. 기존 암호문은 덮어쓰지 않고 보유기간만 늘린다.
-  select c.id into v_customer from pii.customers c
-  where c.phone_hmac = p_phone_hmac order by c.created_at desc limit 1;
-  if v_customer is null then
-    insert into pii.customers (name_enc, phone_enc, phone_hmac, retention_until)
-    values (p_name_enc, p_phone_enc, p_phone_hmac, now() + make_interval(days => v_retention_days))
-    returning id into v_customer;
-  else
-    update pii.customers c set retention_until = greatest(c.retention_until, now() + make_interval(days => v_retention_days))
-    where c.id = v_customer;
-  end if;
+  insert into pii.customers (name_enc, phone_enc, phone_hmac, retention_until)
+  values (p_name_enc, p_phone_enc, p_phone_hmac, now() + make_interval(days => v_retention_days))
+  returning id into v_customer;
 
   insert into pii.consents (customer_id, kind, doc_version, granted, channel)
   values (v_customer, 'collection_use', p_privacy_doc_version, true, 'web');
@@ -162,12 +148,7 @@ begin
   if v_ok <> 'OK' then
     raise exception '%', v_ok using errcode = '22023';
   end if;
-  -- 0051: 같은 사람(같은 연락처)의 다른 리드에 같은 날 대기 일정이 있으면 중복 연락 → 'exists'
-  perform pg_advisory_xact_lock(hashtextextended('lead:' || (select c.phone_hmac from pii.customers c where c.id = v_customer), 0));
-  if exists (select 1 from core.recontact_schedule s join core.leads l on l.id = s.lead_id
-             join pii.customers c on c.id = l.customer_id
-             where s.due_on = p_due_on and s.status = 'pending'
-               and c.phone_hmac = (select c2.phone_hmac from pii.customers c2 where c2.id = v_customer)) then
+  if exists (select 1 from core.recontact_schedule s where s.lead_id = p_lead and s.due_on = p_due_on and s.status = 'pending') then
     return 'exists';
   end if;
   if (select count(*) from core.recontact_schedule s where s.lead_id = p_lead and s.status = 'pending') >= 3 then
@@ -179,80 +160,4 @@ begin
   return 'scheduled';
 end
 $$;
-
-create or replace function api.customer_timeline(p_actor uuid, p_session uuid, p_token text, p_lead uuid)
-returns table (at timestamptz, kind text, lead_id uuid, detail jsonb)
-language plpgsql security definer set search_path = '' as $$
-declare
-  v_staff core.staff;
-  v_hmac  text;
-begin
-  v_staff := security.assert_staff(p_actor, p_session, p_token, array['owner']);   -- MVP: 대표만
-  select c.phone_hmac into v_hmac from core.leads l join pii.customers c on c.id = l.customer_id
-  where l.id = p_lead and l.purged_at is null;
-  if v_hmac is null then
-    raise exception 'FORBIDDEN' using errcode = '42501';   -- 없음·파기됨 구분 안 함
-  end if;
-  insert into core.audit_logs (actor_id, action, target_type, target_id)
-  values (v_staff.user_id, 'crm.timeline', 'lead', p_lead);
-  return query
-  with ls as (
-    select l.* from core.leads l join pii.customers c on c.id = l.customer_id
-    where c.phone_hmac = v_hmac and l.purged_at is null)
-  select x.at, x.kind, x.lead_id, x.detail from (
-    select ls.created_at as at, 'lead'::text as kind, ls.id as lead_id,
-           jsonb_build_object('name_masked', ls.name_masked, 'phone_masked', '010-****-' || ls.phone_last4,
-                              'interest', ls.interest, 'status', ls.status, 'utm_source', ls.utm_source) as detail
-    from ls
-    union all
-    select h.at, 'status', h.lead_id, jsonb_build_object('from', h.from_status, 'to', h.to_status, 'reason', h.reason)
-    from core.lead_status_history h join ls on ls.id = h.lead_id
-    union all
-    select f.created_at, 'followup', f.lead_id, jsonb_build_object('event', f.event)
-    from core.lead_followups f join ls on ls.id = f.lead_id
-    union all
-    select s.created_at, 'recontact', s.lead_id, jsonb_build_object('due_on', s.due_on, 'channel', s.channel, 'status', s.status)
-    from core.recontact_schedule s join ls on ls.id = s.lead_id
-    union all
-    select a.created_at, 'application', a.lead_id, a.summary
-    from pii.lead_applications a join ls on ls.id = a.lead_id
-    union all
-    select m.created_at, 'marketing', null::uuid, jsonb_build_object('event', m.event, 'channel', m.channel)
-    from pii.marketing_consents m
-    where m.customer_id in (select distinct ls.customer_id from ls)
-  ) x
-  order by x.at desc
-  limit 500;
-end
-$$;
-
-create or replace function api.crm_unhandled(p_actor uuid, p_session uuid, p_token text)
-returns table (lead_id uuid, name_masked text, interest text, reason text, since timestamptz)
-language plpgsql security definer set search_path = '' as $$
-declare
-  v_staff core.staff;
-  v_today date := (now() at time zone 'Asia/Seoul')::date;
-begin
-  v_staff := security.assert_staff(p_actor, p_session, p_token, array['owner']);
-  return query
-  select l.id, l.name_masked, l.interest, 'NEW_UNTOUCHED'::text, l.created_at
-  from core.leads l
-  where l.purged_at is null and l.status = 'new' and l.created_at < now() - interval '24 hours'
-    and not exists (select 1 from core.recontact_schedule s where s.lead_id = l.id and s.status = 'pending')
-  union all
-  select l.id, l.name_masked, l.interest, 'RECONTACT_OVERDUE', min(s.created_at)
-  from core.recontact_schedule s join core.leads l on l.id = s.lead_id
-  where l.purged_at is null and s.status = 'pending' and s.due_on < v_today
-  group by l.id, l.name_masked, l.interest
-  union all
-  select l.id, l.name_masked, l.interest, 'FOLLOWUP_OPEN', max(f.created_at)
-  from core.lead_followups f join core.leads l on l.id = f.lead_id
-  where l.purged_at is null and f.event = 'requested'
-    and not exists (select 1 from core.lead_followups d where d.lead_id = f.lead_id and d.event = 'done' and d.created_at >= f.created_at)
-  group by l.id, l.name_masked, l.interest
-  order by 5 asc
-  limit 500;
-end
-$$;
-
 commit;

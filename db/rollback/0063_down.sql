@@ -1,4 +1,4 @@
--- 0053 롤백: 메모 파기·5년 보존 판정 제거, 0002·0052 정의 복원
+-- 0063 롤백: 메모 파기·5년 보존 판정 제거, 0002·0062 정의 복원
 begin;
 create or replace function core.purge_customer_internal(p_lead_id uuid, p_actor uuid, p_reason text)
 returns void

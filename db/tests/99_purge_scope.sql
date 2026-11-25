@@ -1,4 +1,4 @@
--- 파기 범위 분리(0052, PM 11/25 B): 신청 1건 파기는 다른 신청·고객정보 보존, 마지막 신청이면 고객 파기, 계약 완료는 보존(LEGAL_HOLD). 가상 데이터만. 99_crm_unify 뒤에 실행.
+-- 파기 범위 분리(0062, PM 11/25 B): 신청 1건 파기는 다른 신청·고객정보 보존, 마지막 신청이면 고객 파기, 계약 완료는 보존(LEGAL_HOLD). 가상 데이터만. 99_crm_unify 뒤에 실행.
 \set ON_ERROR_STOP 1
 reset role;
 create function test.ps_sql(p_who text, p_fn text, p_lead text, p_reason text default '고객 요청 파기') returns text language plpgsql security definer set search_path = test, pg_catalog as $$

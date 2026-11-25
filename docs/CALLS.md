@@ -7,10 +7,10 @@
 
 | 단계 | DB | 서버 | 핵심 규칙 |
 |---|---|---|---|
-| ① 녹취·저장 | 0054 `api.call_ingest` 외 | `calls/ingest.ts`, `calls/recording.ts` | 안내 버전 일치 시에만 보관, AES-256-GCM 파일 암호화, 연락처는 HMAC만, (통신사, 통화ID) 유일, 열람은 대표·담당만·사유·감사·시간당 30회, 보존 기한·리드 파기 시 삭제 |
-| ② STT | 0055 `api.call_stt_claim/complete`, `api.call_job_fail` | `calls/stt.ts` | 월 한도 안에서 비용 먼저 예약한 작업만 처리, 잠금 10분·최대 3회, 늦은 작업자 덮어쓰기 차단, 원문 암호화·가린 글만 평문 |
-| ③ AI 요약 | 0056 `api.call_summary_*` | `calls/summary.ts` | 가린 변환문만 AI 입력, 근거 문장이 변환문에 없으면 unknown/null(DB도 거부), AI 1판 + 관리자 수정 판(추가 전용), AI 비용은 기존 AI 월 한도 원장 사용 |
-| ④ 고객 이력 | 0057 `api.customer_history`, `api.timeline_by_date`(0051 `customer_timeline` 보완) | (화면 미연결) | 같은 연락처 리드 묶음, 상담원은 자기 담당 리드 기록만, 미연결 통화는 대표만, 원문·해시·경로 미노출 |
+| ① 녹취·저장 | 0064 `api.call_ingest` 외 | `calls/ingest.ts`, `calls/recording.ts` | 안내 버전 일치 시에만 보관, AES-256-GCM 파일 암호화, 연락처는 HMAC만, (통신사, 통화ID) 유일, 열람은 대표·담당만·사유·감사·시간당 30회, 보존 기한·리드 파기 시 삭제 |
+| ② STT | 0065 `api.call_stt_claim/complete`, `api.call_job_fail` | `calls/stt.ts` | 월 한도 안에서 비용 먼저 예약한 작업만 처리, 잠금 10분·최대 3회, 늦은 작업자 덮어쓰기 차단, 원문 암호화·가린 글만 평문 |
+| ③ AI 요약 | 0066 `api.call_summary_*` | `calls/summary.ts` | 가린 변환문만 AI 입력, 근거 문장이 변환문에 없으면 unknown/null(DB도 거부), AI 1판 + 관리자 수정 판(추가 전용), AI 비용은 기존 AI 월 한도 원장 사용 |
+| ④ 고객 이력 | 0067 `api.customer_history`, `api.timeline_by_date`(0061은 `customer_timeline` 없음 — 고객 이력은 이 함수 하나) | (화면 미연결) | 같은 연락처 리드 묶음, 상담원은 자기 담당 리드 기록만, 미연결 통화는 대표만, 원문·해시·경로 미노출 |
 
 권한: 새 역할 `app_call`(작업자 함수 8개만, 테이블 권한 없음). 관리자 함수는 `app_staff`. `db/tests/10_grants.sql` 허용 목록에 반영.
 

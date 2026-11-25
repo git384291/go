@@ -1,4 +1,4 @@
--- 0053_purge_notes_retention.sql — 파기 보완 (PM 11/25 A안·법정 보존 분리)
+-- 0063_purge_notes_retention.sql — 파기 보완 (PM 11/25 A안·법정 보존 분리)
 -- 1) 상담 메모(core.lead_notes, 직원 자유 입력)를 신청·고객 파기 때 함께 삭제
 -- 2) 법정 보존 분리: 계약 완료 후 5년(core.legal_hold)만 보존. 5년이 지나면 일반 개인정보처럼 만료·수동 파기 가능.
 --    보존 중이어도 계약 완료가 아닌 다른 신청은 api.purge_lead로 따로 파기(고객·계약 신청은 보존).
@@ -26,7 +26,7 @@ begin
   if v_customer is null then
     return;
   end if;
-  -- 0053: 직원 상담 메모(자유 입력, 개인정보가 섞일 수 있음)도 함께 파기
+  -- 0063: 직원 상담 메모(자유 입력, 개인정보가 섞일 수 있음)도 함께 파기
   delete from core.lead_notes n using core.leads l where n.lead_id = l.id and l.customer_id = v_customer;
   update core.leads
      set customer_id = null, name_masked = '파기됨', phone_last4 = '0000',
@@ -55,7 +55,7 @@ begin
   end if;
   delete from pii.lead_applications a where a.lead_id = p_lead_id;
   delete from pii.lead_amendments a where a.lead_id = p_lead_id;
-  delete from core.lead_notes n where n.lead_id = p_lead_id;   -- 0053: 상담 메모도 파기
+  delete from core.lead_notes n where n.lead_id = p_lead_id;   -- 0063: 상담 메모도 파기
   update core.recontact_schedule s set status = 'blocked', closed_at = now()
    where s.lead_id = p_lead_id and s.status = 'pending';
   update core.leads
