@@ -30,7 +30,7 @@ function transport() {
   };
   return { t, calls };
 }
-const cfg = (t: BodyTransport): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: 'sk-test-' + 'A'.repeat(30), model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192 });
+const cfg = (t: BodyTransport): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: 'sk-test-' + 'A'.repeat(30), model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, prices: [{ model: 'test-model', currency: 'KRW', inputKrwPerMTok: 100, outputKrwPerMTok: 400 }], maxInputTokens: 4000 });
 const deps = (t: BodyTransport) => ({ provider: () => [rec], supplierId: 'supplier-a', model: createOpenAiChatModel(cfg(t)), budget: createAiBudget({ CONSULT_AI_MONTHLY_BUDGET_KRW: '1000000' }) }) as never;
 const input = (message: string) => ({ message, carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' });
 const userPart = (body: string) => String((JSON.parse(body) as { input: string }).input).split('[고객 문의(개인정보 가림)]\n')[1] ?? '';

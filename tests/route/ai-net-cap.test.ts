@@ -77,13 +77,13 @@ test('NC2 세션 10회 재발급(같은 와이파이): 사용자 키는 매번 �
 test('NC3 회선 한도 초과 = 같은 와이파이의 정상 고객도 AI 답변 대신 안전 안내 + 상담 신청 경로(next signup), 세션·개인정보는 섞이지 않음', async () => {
   const db = sharedBudget(); const s = server(db);
   const a = await s('192.0.2.50', good);
-  for (let i = 0; i < 80; i++) await s('192.0.2.50', { ...good, session: a.body.session, message: '010-1234-5678 요금?' });
+  for (let i = 0; i < 80; i++) await s('192.0.2.50', { ...good, session: a.body.session, message: '인터넷 요금 표지글-NC3A 궁금해요' }); // 통합 11/25: PR #2 최소화로 개인정보 글은 예약 없이 닫혀 한도를 못 채움 → 개인정보 없는 고유 표지 글
   const b = await s('192.0.2.50', good);
   assert.equal(b.status, 200);
   assert.equal(b.body.source, 'fallback');
   assert.equal(b.body.next, 'signup', '사람 상담 연결(신청) 경로 유지');
   assert.notEqual(b.body.session, a.body.session, '세션은 고객마다 따로');
-  assert.ok(!JSON.stringify(b.body).includes('1234-5678'), '다른 고객 글이 섞이지 않음');
+  assert.ok(!JSON.stringify(b.body).includes('NC3A'), '다른 고객 글이 섞이지 않음');
   // A 세션은 여전히 유효(만료·무효화 없음) — 다른 고객이 새 세션을 받아도 A 토큰은 그대로 통과
   const again = await s('192.0.2.50', { ...good, session: a.body.session });
   assert.equal(again.status, 200);

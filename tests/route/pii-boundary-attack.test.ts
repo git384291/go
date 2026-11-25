@@ -75,7 +75,7 @@ function transport(res: { text?: string; status?: number; throws?: string; chunk
   };
   return { t, calls };
 }
-const cfg = (t: BodyTransport): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192 });
+const cfg = (t: BodyTransport): OpenAiChatModelConfig => ({ transport: t, endpoint: 'https://model.example.test/v1/responses', apiKey: KEY, model: 'test-model', executionAllowed: true, costPerCallKrw: 5, maxOutputTokens: 200, timeoutMs: 5000, maxResponseBytes: 8192, prices: [{ model: 'test-model', currency: 'KRW', inputKrwPerMTok: 100, outputKrwPerMTok: 400 }], maxInputTokens: 4000 });
 let providerCalls = 0;
 const chatDeps = (t: BodyTransport, over: Record<string, unknown> = {}) => ({
   provider: () => { providerCalls++; return [rec()]; }, supplierId: 'supplier-a',

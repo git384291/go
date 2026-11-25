@@ -112,10 +112,10 @@ export function createOpenAiChatModel(config: OpenAiChatModelConfig | null): Cha
     costPerCallKrw: valid(config) ? config.costPerCallKrw : 1,
     async generate(input: ModelInput, signal: AbortSignal, meter?: CallMeter): Promise<string> {
       if (!valid(config)) throw new ModelNotCalledError('NOT_CONFIGURED');
-      if (!hasBudgetPermit(meter)) throw new ModelNotCalledError('NO_BUDGET_PERMIT'); // 비용 게이트 우회(직접 호출) 차단
-      if (signal.aborted) throw new ModelNotCalledError('ABORTED');
       // P0 외부 전송 직전 최종 검사: 개인정보 모양이 남아 있으면 보내지 않는다(전송 0회 → 예약 취소)
       if (!isSafeModelInput(input)) throw new ModelNotCalledError('PII_BLOCKED');
+      if (!hasBudgetPermit(meter)) throw new ModelNotCalledError('NO_BUDGET_PERMIT'); // 비용 게이트 우회(직접 호출) 차단
+      if (signal.aborted) throw new ModelNotCalledError('ABORTED');
       const bodyText = buildChatBody(config.model, input, config.maxOutputTokens);
       if (inputTokenUpperBound(bodyText) > config.maxInputTokens) throw new ModelNotCalledError('INPUT_TOO_LARGE');
       const r = await boundedRequest(config.transport, config.endpoint, {

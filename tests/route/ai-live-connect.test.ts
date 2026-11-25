@@ -41,7 +41,7 @@ function ledger() {
     return { async confirm(a) { ev.push(`confirm:${a}`); return r.confirm(a); }, async cancel() { ev.push('cancel'); return r.cancel(); }, async uncertain() { ev.push('uncertain'); return r.uncertain!(); } }; } };
   return { ev, budget };
 }
-const ask = (model: ReturnType<typeof withRecovery>, budget: AiBudget, log: AiFailureEvent[] = [], message = '제 번호 010-1234-5678 인데 요금이 궁금해요') =>
+const ask = (model: ReturnType<typeof withRecovery>, budget: AiBudget, log: AiFailureEvent[] = [], message = '인터넷이랑 TV 요금이 궁금해요') =>
   answerChat({ provider: () => [rec] as never, supplierId: 'supplier-a', model, budget, failureLog: (e) => log.push(e) }, { message, carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }, NOW);
 
 test('LC1 usage 파싱: 입력·캐시·출력 토큰, 형식 이상·음수·캐시 > 입력은 null(사용량 모름)', () => {
@@ -61,8 +61,15 @@ test('LC2 성공: 예약 1회 → 호출 1회 → usage 기준 확정(예약 이
   // usage 1원. 예약 = 1회 3원 × 2회(재시도 상한) = 6원
   assert.deepEqual(ev, ['reserve:6', 'confirm:1']);
   assert.equal(s.calls.length, 1);
-  assert.ok(!s.calls[0]!.body.includes('010-1234-5678') && !s.calls[0]!.body.includes(KEY), '연락처 가림, 키는 본문에 없음(헤더로만)');
+  assert.ok(!s.calls[0]!.body.includes(KEY), '키는 본문에 없음(헤더로만)');
   assert.ok(!JSON.stringify(r).includes(KEY));
+  // 통합(11/25): PR #2 데이터 최소화(P0) — 연락처가 있는 글은 가려서도 보내지 않는다(전송·예약 0회, 승인 안내문)
+  const s2 = script([{ status: 200, text: body(USAGE) }]);
+  const l2 = ledger();
+  const r2 = await ask(withRecovery(live(s2.t)), l2.budget, [], '제 번호 010-1234-5678 인데 요금이 궁금해요');
+  assert.ok(r2.ok && r2.source === 'fallback');
+  assert.equal(s2.calls.length, 0);
+  assert.deepEqual(l2.ev, []);
 });
 
 test('LC3 5xx 뒤 성공: 재시도 1회만, 확정 = 실패 전송 1회 예약분 + 성공 usage(이중 차감·예약 초과 없음)', async () => {

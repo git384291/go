@@ -268,8 +268,14 @@ test('RF8 개인정보·비밀(R11): 이름·연락처·주소·키·토큰이 �
   const r = await answerChat(deps(w, spyBudget(1000).budget, (e) => logged.push(JSON.stringify(e))), input(msg), NOW);
   const out = JSON.stringify(r) + logged.join('\n') + evs.join('\n');
   for (const s of SECRETS) assert.ok(!out.includes(s), `응답·기록에 노출: ${s}`);
+  // 통합(11/25): PR #2 데이터 최소화(P0) — 개인정보 신호가 있으면 모델 호출 0회·장애 기록 없음(더 엄격한 규칙으로 기대값 변경)
+  assert.equal(f.st.inputs.length, 0, '개인정보 글은 모델로 보내지 않는다');
+  assert.deepEqual(logged, []);
+  // 깨끗한 글 + 원문 섞인 알 수 없는 오류: 고정 코드만 기록(기존 RF8 검사 유지)
+  const r2 = await answerChat(deps(w, spyBudget(1000).budget, (e) => logged.push(JSON.stringify(e))), input('인터넷 요금이 궁금해요'), NOW);
+  const out2 = JSON.stringify(r2) + logged.join('\n') + evs.join('\n');
+  for (const s of [KEY, TOKEN, 'provider echo']) assert.ok(!out2.includes(s), `응답·기록에 노출: ${s}`);
   assert.deepEqual(logged.map((l) => JSON.parse(l).code), ['UNKNOWN'], '알 수 없는 오류의 원문 대신 고정 코드');
-  for (const s of ['홍길동', '010-1234-5678', '주안로 12']) assert.ok(!f.st.inputs.join('').includes(s), `모델 입력에 노출: ${s}`);
   // HTTP 경로: 오류·안내 응답 본문에도 원문 없음
   const post = (body: unknown) => new Request('http://x/api/consult/chat', { method: 'POST', body: JSON.stringify(body) });
   const HD = { enabled: true, chat: deps(w, spyBudget(1000).budget, (e) => logged.push(JSON.stringify(e))), limiter: createLimiter(1000, 60_000), ip: '203.0.113.9', now: () => NOW, sessionKey: Buffer.alloc(32, 7), newSessionLimiter: createLimiter(1000, 60_000), botCheck: async () => 'ok', rateLimit: async () => true, inflight: createInflightGuard() } as never;
