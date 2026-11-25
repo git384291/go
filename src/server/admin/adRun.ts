@@ -81,6 +81,10 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
       const tz = await callPlatform((deadlineAt) => platform.accountTimeZone({ deadlineAt }));
       if (tz.status !== 'success') return adJson({ ok: false, decision: 'BLOCK', reason: 'ACCOUNT_CHECK_FAILED' }, 503);
       if (tz.value !== 'Asia/Seoul') return adJson({ ok: false, decision: 'BLOCK', reason: 'ACCOUNT_TIMEZONE_MISMATCH' }, 409);
+      // 계정 통화가 KRW가 아니면 예산·한도·CPC 단위가 어긋난다 → 집행 금지(조회 실패도 금지)
+      const cur = await callPlatform((deadlineAt) => platform.accountCurrency({ deadlineAt }));
+      if (cur.status !== 'success') return adJson({ ok: false, decision: 'BLOCK', reason: 'ACCOUNT_CHECK_FAILED' }, 503);
+      if (cur.value !== 'KRW') return adJson({ ok: false, decision: 'BLOCK', reason: 'ACCOUNT_CURRENCY_MISMATCH' }, 409);
     }
     const dbErr = (e: unknown) => { const code = (e as { code?: string })?.code; return adBlock(code === '42501' ? 'FORBIDDEN' : 'ERROR', code === '42501' ? 403 : 503); };
     // 1) launch 시작 기록: 캠페인당 열린 launch 1건·같은 요청 키 1회. 막히면 지출 판정·플랫폼 호출 0회

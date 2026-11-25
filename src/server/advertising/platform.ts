@@ -43,6 +43,8 @@ export type AdPlatform = {
   activeCampaignCount(opts: CallOpts): Promise<number>;
   /** 광고 계정 시간대(IANA). 집행 전·정기 감시마다 확인 — Asia/Seoul이 아니거나 조회 실패면 서버는 집행하지 않는다(종료일·날짜 경계가 KST 기준) */
   accountTimeZone(opts: CallOpts): Promise<string>;
+  /** 광고 계정 통화(ISO 4217). 집행 전·정기 감시마다 확인 — KRW가 아니거나 조회 실패면 서버는 집행하지 않는다(예산·한도·CPC가 원화 기준) */
+  accountCurrency(opts: CallOpts): Promise<string>;
   /** 하루치 성과. 보고가 아직 없으면 costKrw를 null(UNKNOWN)로 돌려준다. 형식 검증은 호출측(서버)이 한다 — 어댑터 값은 믿지 않는다 */
   fetchPerformance(ref: PlatformRef, day: string, opts: CallOpts): Promise<unknown>;
   /**
@@ -102,6 +104,7 @@ export const mockPlatform: AdPlatform = Object.freeze({
   async enable(ref) { if (!ref.externalId) throw new PlatformError('failed', 'NO_EXTERNAL_ID'); mockStatus.set(ref.externalId, 'ENABLED'); return { enabled: true }; },
   async activeCampaignCount() { return 0; },
   async accountTimeZone() { return 'Asia/Seoul'; },
+  async accountCurrency() { return 'KRW'; },
   async fetchPerformance(ref, day) {
     const h = hash(`${ref.campaign}:${day}`);
     const impressions = 500 + (h % 2000);

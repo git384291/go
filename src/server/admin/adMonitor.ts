@@ -20,7 +20,7 @@ export type MonitorDeps = {
 };
 export type MonitorCode =
   | 'NO_ACTIVE_APPROVAL' | 'MONTHLY_CAP_REACHED' | 'MONTHLY_BUDGET_UNSET' | 'APPROVAL_EXPIRED' | 'WINDOW_ENDED' | 'NO_WINDOW' | 'DAY_OVER_MAX' | 'ACCOUNT_TOTAL_REACHED'
-  | 'ACCOUNT_TIMEZONE_MISMATCH' | 'ACCOUNT_CHECK_FAILED' | 'SPEND_UNKNOWN' | 'FETCH_FAILED' | 'LAUNCH_UNKNOWN' | 'PLATFORM_UNAVAILABLE' | 'STOP_FAILED' | 'STOP_RECORD_FAILED' | 'TARGETS_UNAVAILABLE' | 'RECORD_FAILED';
+  | 'ACCOUNT_TIMEZONE_MISMATCH' | 'ACCOUNT_CURRENCY_MISMATCH' | 'ACCOUNT_CHECK_FAILED' | 'SPEND_UNKNOWN' | 'FETCH_FAILED' | 'LAUNCH_UNKNOWN' | 'PLATFORM_UNAVAILABLE' | 'STOP_FAILED' | 'STOP_RECORD_FAILED' | 'TARGETS_UNAVAILABLE' | 'RECORD_FAILED';
 export type MonitorResult = {
   readonly ok: boolean;
   readonly checked: number;
@@ -91,6 +91,10 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
     const tz = await callPlatform((deadlineAt) => platform.accountTimeZone({ deadlineAt }));
     if (tz.status !== 'success') unknown.push({ campaign: '-', code: 'ACCOUNT_CHECK_FAILED' });
     else if (tz.value !== 'Asia/Seoul') tzBad = 'ACCOUNT_TIMEZONE_MISMATCH';
+    // 계정 통화: KRW가 아니면 열린 캠페인 전부 중지, 조회 실패는 UNKNOWN(새 집행 차단)
+    const cur = await callPlatform((deadlineAt) => platform.accountCurrency({ deadlineAt }));
+    if (cur.status !== 'success') unknown.push({ campaign: '-', code: 'ACCOUNT_CHECK_FAILED' });
+    else if (cur.value !== 'KRW') tzBad = tzBad ?? 'ACCOUNT_CURRENCY_MISMATCH';
   }
 
   const stop = async (campaign: string, externalId: string | null, code: MonitorCode) => {
@@ -111,7 +115,7 @@ export async function runAdMonitor(deps: MonitorDeps): Promise<MonitorResult> {
     if (!platform) { unknown.push({ campaign: l.campaign, code: 'PLATFORM_UNAVAILABLE' }); continue; }
     // 1) 기간·승인: 종료일 경과, 승인 없음·만료, 기간 기록 없음 → 중지
     let code: MonitorCode | null = tzBad;
-    if (code) { /* 시간대 불일치: 아래 판정 없이 중지 */ }
+    if (code) { /* 시간대·통화 불일치: 아래 판정 없이 중지 */ }
     else if (l.days.length === 0 || !l.endDate) code = 'NO_WINDOW';
     else if (l.validUntil === null) code = 'NO_ACTIVE_APPROVAL';
     else if (now.getTime() >= l.validUntil) code = 'APPROVAL_EXPIRED';

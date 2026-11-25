@@ -222,3 +222,17 @@ test('GA11 계정 시간대 조회: customer.time_zone 1행만 인정, 형식 �
     assert.ok(e && (e.outcome === 'failed' || e.outcome === 'unknown'));
   }
 });
+
+test('GA11b 계정 통화 조회(PM 11/25 KRW): customer.currency_code 1행·대문자 3글자만 인정, 형식 이상·빈 결과·HTTP 오류는 failed — 판정(KRW 여부)은 서버가 한다', async () => {
+  for (const code of ['KRW', 'USD']) {
+    const ok = fake({ token: OK_TOKEN, search: { status: 200, text: JSON.stringify({ results: [{ customer: { currencyCode: code } }] }) } });
+    assert.equal(await createGoogleAdsPlatform(cfg(ok.t))!.accountCurrency(opts()), code);
+    assert.match(JSON.parse(ok.calls.find((c) => c.url.endsWith('googleAds:search'))!.body).query, /^SELECT customer\.currency_code FROM customer$/);
+    assert.ok(ok.calls.every((c) => !c.url.includes(':mutate')), '읽기만');
+  }
+  for (const search of [{ status: 200, text: '{"results":[]}' }, { status: 200, text: '{"results":[{"customer":{"currencyCode":"krw"}}]}' }, { status: 200, text: '{"results":[{"customer":{"currencyCode":"<x>"}}]}' }, { status: 200, text: '{"results":[{"customer":{}},{"customer":{}}]}' }, { status: 500 }] as Resp[]) {
+    const f = fake({ token: OK_TOKEN, search });
+    const e = (await run(createGoogleAdsPlatform(cfg(f.t))!, (p) => p.accountCurrency(opts()))).err!;
+    assert.ok(e && (e.outcome === 'failed' || e.outcome === 'unknown'));
+  }
+});
