@@ -97,13 +97,14 @@ test('CH5 사용료 예약·확정·취소: 기본 0원이면 유료 모델 호�
   await h.confirm(5);
   await h.cancel();
 });
-test('CH6 개인정보는 모델에 가려서만 전달된다', async () => {
+test('CH6 개인정보가 있으면 고객 글은 가린 형태로도 모델에 보내지 않는다(데이터 최소화, PR #2)', async () => {
   let seen = '';
   const spy = fake(async (i) => { seen = JSON.stringify(i); return '확인했습니다'; });
   const msg = '이름은 김철수 전화 010-1234-5678 메일 a.b@c.com 주민 900101-1234567 서울시 강남구 테헤란로 123 101호 요금?';
-  await answerChat(deps({ model: spy }), input(msg), NOW);
-  for (const raw of ['김철수', '1234-5678', '010-1234', 'a.b@c.com', '900101', '1234567', '테헤란로']) assert.ok(!seen.includes(raw), raw);
-  assert.ok(seen.includes('[전화]') && seen.includes('[이메일]'));
+  const r = await answerChat(deps({ model: spy }), input(msg), NOW);
+  assert.equal(seen, '', '모델 호출 0회');
+  assert.ok(r.ok && r.source === 'fallback');
+  for (const raw of ['김철수', '1234-5678', '010-1234', 'a.b@c.com', '900101', '1234567', '테헤란로']) assert.ok(r.ok && !r.text.includes(raw), raw);
   assert.equal(maskPii('요금 문의'), '요금 문의');
 });
 test('CH7 모델 이름 설정: mock만 모델이 있고 나머지(실제 API 이름 포함)는 모델 없음 → 안전 안내', async () => {
