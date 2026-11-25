@@ -42,7 +42,7 @@ async function run(model: ChatModel | null, wrap: (m: ChatModel | null) => ChatM
   for (const k of ['log', 'warn', 'error'] as const) console[k] = (...a: unknown[]) => { out.push(a.map(String).join(' ')); };
   try {
     const r = await answerChat({ provider: () => [rec] as never, supplierId: 'supplier-a', model: wrap(model), budget, failureLog: (e) => log.push(e) },
-      { message: '제 번호는 010-1234-5678 입니다. 인터넷 요금 안내 부탁드려요.', carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }, NOW);
+      { message: '인터넷이랑 TV 결합 요금 안내 부탁드려요.' /* 통합 11/25: PR #2 최소화로 연락처가 있는 글은 전송 0회 → 실제 호출 시험은 개인정보 없는 글 */, carrier: 'carrier-x', productId: 'net500-tv-basic', regionCode: 'region-1' }, NOW);
     return { r, ev, log, out };
   } finally { Object.assign(console, orig); }
 }
