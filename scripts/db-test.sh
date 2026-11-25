@@ -198,6 +198,39 @@ if [ "$ok" = 10 ] && [ "$limited" = 2 ]; then
 else
   echo "FAIL | C3 accepted=$ok limited=$limited" | tee -a "$LOG_DIR/db-test.log"; exit 1
 fi
+echo "== concurrency: 전환 100건 동시 + gclid(PM 11/25 8번 D2) — 같은 고객 100건 / 서로 다른 고객 100건"
+rm -f "$LOG_DIR"/conc-*
+# (a) 같은 고객(연락처 HMAC 같음)·서로 다른 요청 키·서로 다른 IP·서로 다른 gclid 100건 동시 → 리드(전환) 1건, 재문의 99건, gclid 1개(먼저 확정된 값)
+for i in $(seq 1 100); do
+  { "${PSQL[@]}" -d "$DB" -At -c "select test.lead_sql(repeat('c', 64), 'idem-cv-same-' || lpad('$i', 8, '0'), p_ip => lpad(to_hex(70000 + $i), 64, 'a')) || ';'";
+    "${PSQL[@]}" -d "$DB" -At -c "select test.gclid_sql('idem-cv-same-' || lpad('$i', 8, '0'), repeat('c', 64), 'CvSame_gclid_' || lpad('$i', 3, '0')) || ';'"; } > "$LOG_DIR/conc-a$i.sql"
+done
+# (b) 서로 다른 고객 100명 동시, 각자 자기 gclid → 리드 100건, 각 리드의 gclid = 자기 값(섞임 0)
+for i in $(seq 1 100); do
+  { "${PSQL[@]}" -d "$DB" -At -c "select test.lead_sql(lpad(to_hex(80000 + $i), 64, 'f'), 'idem-cv-diff-' || lpad('$i', 8, '0'), p_ip => lpad(to_hex(90000 + $i), 64, 'b')) || ';'";
+    "${PSQL[@]}" -d "$DB" -At -c "select test.gclid_sql('idem-cv-diff-' || lpad('$i', 8, '0'), lpad(to_hex(80000 + $i), 64, 'f'), 'CvDiff_gclid_' || lpad('$i', 3, '0')) || ';'"; } > "$LOG_DIR/conc-b$i.sql"
+done
+for set in a b; do
+  pids=()
+  for i in $(seq 1 100); do
+    ( psql -X -q -At -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -v ON_ERROR_STOP=1 \
+        -c "begin" -c "set local role app_public" -f "$LOG_DIR/conc-$set$i.sql" -c "commit" > "$LOG_DIR/conc-$set$i.out" 2>&1 ) &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p" || true; done
+done
+errs=$(cat "$LOG_DIR"/conc-a*.out "$LOG_DIR"/conc-b*.out | grep -c 'ERROR' || true)
+a_leads=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads l join pii.customers c on c.id = l.customer_id where c.phone_hmac = repeat('c', 64)")
+a_rep=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.lead_status_history h join core.leads l on l.id = h.lead_id join pii.customers c on c.id = l.customer_id where c.phone_hmac = repeat('c', 64) and h.reason = 'repeat_inquiry'")
+a_clk=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) || ':' || coalesce(min(k.gclid) ~ '^CvSame_gclid_[0-9]{3}$', false) from pii.lead_clicks k join core.leads l on l.id = k.lead_id join pii.customers c on c.id = l.customer_id where c.phone_hmac = repeat('c', 64)")
+b_leads=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads where idempotency_key like 'idem-cv-diff-%'")
+b_mix=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads l join pii.lead_clicks k on k.lead_id = l.id where l.idempotency_key like 'idem-cv-diff-%' and k.gclid <> 'CvDiff_gclid_' || right(l.idempotency_key, 3)")
+b_clk=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.leads l join pii.lead_clicks k on k.lead_id = l.id where l.idempotency_key like 'idem-cv-diff-%'")
+if [ "$errs" = 0 ] && [ "$a_leads" = 1 ] && [ "$a_rep" = 99 ] && [ "$a_clk" = "1:true" ] && [ "$b_leads" = 100 ] && [ "$b_clk" = 100 ] && [ "$b_mix" = 0 ]; then
+  echo "NOTICE:  PASS | C5 전환 동시 100건: 같은 고객 → 리드 1건·재문의 99건·gclid 1개 / 다른 고객 100명 → 리드 100건·gclid 100개·섞임 0·오류 0" >> "$LOG_DIR/db-test.log"
+else
+  echo "FAIL | C5 errs=$errs a_leads=$a_leads a_rep=$a_rep a_clk=$a_clk b_leads=$b_leads b_clk=$b_clk b_mix=$b_mix" | tee -a "$LOG_DIR/db-test.log"; exit 1
+fi
 echo "== concurrency: consult chat rate, 25 parallel hits from one IP on separate connections (limit 10/min)"
 "${PSQL[@]}" -d "$DB" -c "delete from core.consult_rate" >/dev/null
 while [ "$(date +%S)" -ge 55 ]; do sleep 1; done   # 1분 창 경계를 넘지 않게
