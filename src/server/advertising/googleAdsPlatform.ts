@@ -1,12 +1,12 @@
 import 'server-only';
 import { boundedRequest, parseJsonSafe, type BodyTransport, type BoundedResult } from './boundedHttp';
 import { CAMPAIGN_KEY } from '../../content/attribution';
-import { adGroupAdCreatePayload, adGroupCreatePayload, finalUrlSuffixFor, type RsaCreative } from './googleAdsCreative';
+import { adGroupAdCreatePayload, adGroupCreatePayload, adGroupCriterionCreatePayload, finalUrlSuffixFor, isApprovedKeywordSet, type KeywordSet, type RsaCreative } from './googleAdsCreative';
 import { GOOGLE_MAX_DAY_MULTIPLIER, PlatformError, type AdPlatform, type CallOpts, type LaunchRequest, type LaunchResult, type PlatformRef } from './platform';
 
 // Google Ads 어댑터 (PM 11/22 지시, 11/23 B·C 승인으로 서버 연결·광고 그룹·반응형 검색광고 추가). **실계정 검증 없음(모의 transport 시험만).**
 // - 기존 AdPlatform 계약(platform.ts 1~4항)과 0018 launch 상태 구조를 그대로 쓴다. 서버는 platformSelect(AD_PLATFORM=google_ads + 설정 전부)로만 이 어댑터를 받는다.
-// - launch 순서: 예산 → 캠페인(PAUSED) → 광고 그룹(PAUSED, SEARCH_STANDARD) → 반응형 검색광고(PAUSED) → 다시 읽어 확인. 캠페인이 생긴 뒤의 실패는 전부 unknown(사람 확인, 자동 재시도 없음).
+// - launch 순서: 예산 → 캠페인(PAUSED) → 광고 그룹(PAUSED, SEARCH_STANDARD) → 키워드(PAUSED, EXACT만, 1요청) → 반응형 검색광고(PAUSED) → 다시 읽어 확인. 캠페인이 생긴 뒤의 실패는 전부 unknown(사람 확인, 자동 재시도 없음).
 // - transport(boundedHttp 주입형)·OAuth credential 4종(client ID·client secret·refresh token·customer ID)은 **필수 주입**이다. 기본 fetch·process.env·SDK·재시도·키 저장 없음.
 //   credential은 호출자가 환경변수에서 읽어 넘긴다(GOOGLE_ADS_ENV_NAMES). 이 파일·DB·로그·오류에 값이 남지 않는다.
 //   설정이 하나라도 비면 createGoogleAdsPlatform은 null(= 닫힘). 기본 transport 연결·AD_PLATFORM 선택은 제이님 승인 뒤 별도 단계다.
@@ -14,7 +14,9 @@ import { GOOGLE_MAX_DAY_MULTIPLIER, PlatformError, type AdPlatform, type CallOpt
 //   Google Cloud 프로젝트가 정한다(신규는 Test access; v25+에서 Test 프로젝트로 운영 계정 호출 시 CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION). legacyDeveloperToken을 주입한 때만 헤더로 보낸다.
 // - API 버전: 요청은 major(vNN)로만 보낸다. 공식 versioning 문서: minor(v26.2 등)는 같은 endpoint가 제자리에서 갱신되며 minor를 지정해 호출할 수 없다. 기본 v26, 'v26.2' 같은 minor 문자열은 거부(null).
 //   v26 sunset은 2027-11 추정(공식 일정 글). 바꿀 때는 GOOGLE_ADS_API_VERSION(major)만 바꾼다.
-// - 범위: 예산(CampaignBudget)+캠페인(Campaign)+광고 그룹(AdGroup)+반응형 검색광고(AdGroupAd) 생성·중지·성과 조회. 키워드·이미지·영상은 만들지 않는다(키워드가 없으면 검색 노출도 없음)(소재 생성·게시는 제이님 승인 전 금지).
+// - 범위: 예산(CampaignBudget)+캠페인(Campaign)+광고 그룹(AdGroup)+키워드(AdGroupCriterion, 승인 목록의 EXACT만, PM 11/24)+반응형 검색광고(AdGroupAd) 생성·중지·성과 조회. 이미지·영상은 만들지 않는다.
+//   키워드가 없거나(비어 있음) 승인 목록 밖이면 어댑터가 없다(닫힘) — 키워드 없는 광고는 만들지 않는다. 입찰가(CPC)는 정하지 않는다(Keyword Planner 실데이터·승인 전 확정 금지).
+//   키워드도 PAUSED로 만들고, 다시 읽어 개수·EXACT·PAUSED·승인 문구가 모두 맞을 때만 확인 완료(아니면 서버가 즉시 중지).
 //   캠페인은 기본 PAUSED로 만든다(initialStatus='ENABLED'를 명시해야 활성). 소재가 없으면 노출·과금도 없다.
 // - 예산 보호: 일 예산은 원화를 micros로 바꿔 req.platformDailyBudgetKrw 이하로만 설정하고, 만든 뒤 다시 읽어(read-back) 실제 값을 돌려준다.
 //   읽기에 실패하거나 값이 다르면 dailyBudgetKrw=0(미확인)을 돌려 서버가 즉시 중지·경고하게 한다(fail-closed). 계정 통화는 KRW여야 한다(아니면 예산 단위가 어긋난다). 서버가 집행 전·정기 감시마다 accountCurrency로 확인해 KRW가 아니면 차단·중지한다(모의 시험만, 실계정 미확인).
@@ -59,6 +61,8 @@ export type GoogleAdsConfig = {
   readonly creative?: RsaCreative | null;
   /** 최종 URL(googleAdsCreative.landingUrlFrom 통과값). 없으면 어댑터 없음(닫힘) */
   readonly landingUrl?: string | null;
+  /** 승인된 EXACT 키워드(googleAdsCreative.approvedKeywords 결과만). 비어 있거나 승인 목록 밖이면 어댑터 없음(닫힘) */
+  readonly keywords?: KeywordSet | null;
 };
 
 /** 환경변수 객체에서 설정을 만든다(값은 읽기만, 저장·출력 없음). transport는 호출자가 넣는다 */
@@ -103,6 +107,8 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
   const creative = cfg.creative ?? null;
   const landingUrl = cfg.landingUrl ?? null;
   if (!creative || !landingUrl || !/^https:\/\//.test(landingUrl)) return null;
+  const keywords = cfg.keywords ?? null;
+  if (!keywords || !isApprovedKeywordSet(keywords)) return null;
   const status = cfg.initialStatus === 'ENABLED' ? 'ENABLED' : 'PAUSED';
   const base = `${API_BASE}/${apiVersion}/customers/${customerId}`;
 
@@ -165,6 +171,12 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
       const groupRes = await call('adGroups:mutate', { operations: [{ create: adGroupCreatePayload(name, campRes!) }] }, token, req.deadlineAt, true)
         .then(resourceOf, (e) => { throw new PlatformError('unknown', e instanceof PlatformError ? `AD_GROUP_${e.code}`.slice(0, 40) : 'AD_GROUP_FAILED'); });
       if (!groupRes || !new RegExp(`^customers/${customerId}/adGroups/\\d{1,20}$`).test(groupRes)) throw new PlatformError('unknown', 'AD_GROUP_BAD_RESPONSE');
+      // 3-1) 키워드(PAUSED·EXACT, 1요청: 일부만 만들어지지 않게 전체 실패 처리). 실패·불명은 모두 unknown, 광고 요청 없음
+      const kwRes = await call('adGroupCriteria:mutate', { operations: keywords.map((k) => ({ create: adGroupCriterionCreatePayload(groupRes, k) })) }, token, req.deadlineAt, true)
+        .then((j) => (isObj(j) && Array.isArray(j.results) ? j.results.map((r) => (isObj(r) && typeof r.resourceName === 'string' ? r.resourceName : null)) : null),
+          (e) => { throw new PlatformError('unknown', e instanceof PlatformError ? `KEYWORD_${e.code}`.slice(0, 40) : 'KEYWORD_FAILED'); });
+      const kwPattern = new RegExp(`^customers/${customerId}/adGroupCriteria/\\d{1,20}~\\d{1,20}$`);
+      if (!kwRes || kwRes.length !== keywords.length || !kwRes.every((r) => typeof r === 'string' && kwPattern.test(r))) throw new PlatformError('unknown', 'KEYWORD_BAD_RESPONSE');
       const adRes = await call('adGroupAds:mutate', { operations: [{ create: adGroupAdCreatePayload(groupRes, creative, landingUrl, suffix) }] }, token, req.deadlineAt, true)
         .then(resourceOf, (e) => { throw new PlatformError('unknown', e instanceof PlatformError ? `AD_${e.code}`.slice(0, 40) : 'AD_FAILED'); });
       if (!adRes || !new RegExp(`^customers/${customerId}/adGroupAds/\\d{1,20}~\\d{1,20}$`).test(adRes)) throw new PlatformError('unknown', 'AD_BAD_RESPONSE');
@@ -185,6 +197,18 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
         const st = (r: unknown, k: string) => (isObj(r) && isObj(r[k]) ? (r[k] as Record<string, unknown>).status : undefined);
         const one = rows.length === 1 ? rows[0] : null;
         if (!(st(one, 'campaign') === status && st(one, 'adGroup') === 'PAUSED' && st(one, 'adGroupAd') === 'PAUSED')) endVerified = false;
+        // 키워드: 승인된 문구가 정확히 한 번씩, 모두 EXACT·PAUSED여야 한다(BROAD·ENABLED·추가·누락·중복이면 미확인 → 서버가 즉시 중지)
+        const kw = await call('googleAds:search', { query: `SELECT ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE campaign.id = ${externalId} AND ad_group_criterion.type = 'KEYWORD'` }, token, req.deadlineAt, false);
+        const kwRows = isObj(kw) && Array.isArray(kw.results) ? kw.results : [];
+        const texts = new Set<string>();
+        const kwOk = kwRows.length === keywords.length && kwRows.every((r) => {
+          const c = isObj(r) && isObj(r.adGroupCriterion) ? r.adGroupCriterion : null;
+          const k = c && isObj(c.keyword) ? c.keyword : null;
+          if (!c || !k || c.status !== 'PAUSED' || k.matchType !== 'EXACT' || typeof k.text !== 'string' || texts.has(k.text)) return false;
+          texts.add(k.text);
+          return keywords.some((x) => x.text === k.text);
+        });
+        if (!kwOk) endVerified = false;
       } catch { verified = 0; endVerified = false; }
       return { externalId, dailyBudgetKrw: verified, endVerified };
     },
