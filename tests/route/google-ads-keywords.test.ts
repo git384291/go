@@ -85,7 +85,7 @@ test('KW2 중복 생성 차단: 같은 문구·대소문자·띄어쓰기 변형
   assert.equal(g.calls.filter((c) => c.key === 'kw').length, 1);
 });
 
-test('KW3 빈 키워드 차단: 빈 목록·없음·잘못된 형식·개수 초과는 어댑터 없음(닫힘), ENABLED 지정이어도 마찬가지, 전송 0회', () => {
+test('KW3 빈 키워드 차단: 빈 목록·없음·잘못된 형식·개수 초과는 어댑터 없음(닫힘), 전송 0회', () => {
   assert.equal(keywordSetOrReason([]).reason, 'EMPTY');
   assert.equal(buildKeywordSet([]), null);
   assert.equal(keywordSetOrReason('인터넷 재약정').reason, 'SHAPE');
@@ -93,7 +93,6 @@ test('KW3 빈 키워드 차단: 빈 목록·없음·잘못된 형식·개수 초
   for (const keywords of [[], null, undefined, 'x', {}, [{}]]) {
     const f = fake();
     assert.equal(mk(f.t, { keywords }), null, JSON.stringify(keywords));
-    assert.equal(mk(f.t, { keywords, initialStatus: 'ENABLED' }), null, `ENABLED ${JSON.stringify(keywords)}`);
     assert.equal(f.calls.length, 0);
   }
   assert.equal(isApprovedKeywordSet([]), false);

@@ -17,7 +17,7 @@ import { GOOGLE_MAX_DAY_MULTIPLIER, PlatformError, type AdPlatform, type CallOpt
 // - 범위: 예산(CampaignBudget)+캠페인(Campaign)+광고 그룹(AdGroup)+키워드(AdGroupCriterion, 승인 목록의 EXACT만, PM 11/24)+반응형 검색광고(AdGroupAd) 생성·중지·성과 조회. 이미지·영상은 만들지 않는다.
 //   키워드가 없거나(비어 있음) 승인 목록 밖이면 어댑터가 없다(닫힘) — 키워드 없는 광고는 만들지 않는다. 입찰가(CPC)는 정하지 않는다(Keyword Planner 실데이터·승인 전 확정 금지).
 //   키워드도 PAUSED로 만들고, 다시 읽어 개수·EXACT·PAUSED·승인 문구가 모두 맞을 때만 확인 완료(아니면 서버가 즉시 중지).
-//   캠페인은 기본 PAUSED로 만든다(initialStatus='ENABLED'를 명시해야 활성). 소재가 없으면 노출·과금도 없다.
+//   캠페인은 항상 PAUSED로 만든다(ENABLED로 생성하는 설정·경로 없음, 11/26 보안 수정). 켜는 일은 사람이 Google Ads 화면에서만.
 // - 예산 보호: 일 예산은 원화를 micros로 바꿔 req.platformDailyBudgetKrw 이하로만 설정하고, 만든 뒤 다시 읽어(read-back) 실제 값을 돌려준다.
 //   읽기에 실패하거나 값이 다르면 dailyBudgetKrw=0(미확인)을 돌려 서버가 즉시 중지·경고하게 한다(fail-closed). 계정 통화는 KRW여야 한다(아니면 예산 단위가 어긋난다). 서버가 집행 전·정기 감시마다 accountCurrency로 확인해 KRW가 아니면 차단·중지한다(모의 시험만, 실계정 미확인).
 // - 오류 구분(응답 본문은 읽지 않는다 — 반사 금지): 요청 거부(400·401·403·404·429)는 집행 안 됨이 확실 → failed(코드 BAD_REQUEST·AUTH_ERROR·NOT_FOUND·RATE_LIMITED),
@@ -55,7 +55,6 @@ export type GoogleAdsConfig = {
   /** 하이픈 없는 10자리 고객 ID */
   readonly customerId: string | null;
   readonly loginCustomerId?: string | null;
-  readonly initialStatus?: 'PAUSED' | 'ENABLED';
   readonly validateOnly?: boolean;
   /** 반응형 검색광고 소재(googleAdsCreative.buildRsaCreative 결과만). 없으면 어댑터 없음(닫힘) */
   readonly creative?: RsaCreative | null;
@@ -78,7 +77,7 @@ export function googleAdsConfigFromEnv(env: Readonly<Record<string, string | und
 const enc = new TextEncoder();
 /** 예산·캠페인 생성 본문(어댑터와 테스트 계정 진단 스크립트가 같은 값을 쓰게 공유). 광고 그룹·소재 없음 */
 export const budgetCreatePayload = (name: string, krw: number) => ({ name, amountMicros: String(krw * MICROS), deliveryMethod: 'STANDARD', explicitlyShared: false });
-export const campaignCreatePayload = (name: string, status: 'PAUSED' | 'ENABLED', budget: string, endDateTime?: string) =>
+export const campaignCreatePayload = (name: string, status: 'PAUSED', budget: string, endDateTime?: string) =>
   ({ name, status, campaignBudget: budget, advertisingChannelType: 'SEARCH', manualCpc: {}, containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING', ...(endDateTime ? { endDateTime } : {}) });
 /** Google Ads API v23+ Campaign.end_date_time: "yyyy-MM-dd HH:mm:ss", 고객 계정 시간대. 일 단위는 23:59:59(검색 캠페인은 시간 단위 미지원) */
 export const campaignEndDateTime = (day: string) => `${day} 23:59:59`;
@@ -109,7 +108,7 @@ export function createGoogleAdsPlatform(cfg: GoogleAdsConfig): AdPlatform | null
   if (!creative || !landingUrl || !/^https:\/\//.test(landingUrl)) return null;
   const keywords = cfg.keywords ?? null;
   if (!keywords || !isApprovedKeywordSet(keywords)) return null;
-  const status = cfg.initialStatus === 'ENABLED' ? 'ENABLED' : 'PAUSED';
+  const status = 'PAUSED' as const;  // 설정으로 바꿀 수 없음(11/26 보안 수정)
   const base = `${API_BASE}/${apiVersion}/customers/${customerId}`;
 
   const accessToken = async (deadlineAt: number): Promise<string> => {

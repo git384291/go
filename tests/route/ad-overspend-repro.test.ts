@@ -51,18 +51,20 @@ function fakeAccount(o: { pauseFails?: 'http500' | 'throw'; reportRows?: boolean
     }
     throw new Error('unexpected url');
   };
+  /** 사람이 Google Ads 화면에서 켠 상황을 흉내 낸다(앱은 PAUSED로만 만든다) */
+  const enableAll = () => { for (const c of camps.values()) c.status = 'ENABLED'; };
   const worstDaySpend = () => [...camps.values()].filter((c) => c.status !== 'PAUSED').reduce((s, c) => s + budgets.get(c.budget)! * GOOGLE_MAX_DAY_MULTIPLIER, 0);
-  return { t, camps, worstDaySpend };
+  return { t, camps, worstDaySpend, enableAll };
 }
-// 실제 집행 구성(initialStatus='ENABLED')을 흉내 낸다. 기본값 PAUSED면 소재·노출이 없어 지출 0(OS0)
-const plat = (t: BodyTransport, initialStatus: 'ENABLED' | 'PAUSED' = 'ENABLED') => createGoogleAdsPlatform({ transport: t, clientId: 'cid', clientSecret: 'cs', refreshToken: 'rt', customerId: CID, initialStatus, creative: approvedRsaCreative(), keywords: candidateKeywords(), landingUrl: 'https://example.com/internet-tv' })!;
+// 앱은 항상 PAUSED로 만든다(지출 0, OS0). 초과 위험 시험은 생성 뒤 enableAll()로 '사람이 화면에서 켬'을 흉내 낸다
+const plat = (t: BodyTransport) => createGoogleAdsPlatform({ transport: t, clientId: 'cid', clientSecret: 'cs', refreshToken: 'rt', customerId: CID, creative: approvedRsaCreative(), keywords: candidateKeywords(), landingUrl: 'https://example.com/internet-tv' })!;
 // 서버(adRun)와 같은 규칙: 매체 일예산 = 승인액 ÷ 2
 const launch = (p: ReturnType<typeof plat>, campaign: string, krw: number, k: string) =>
   callPlatform((deadlineAt) => p.launch({ campaign, amountKrw: krw, requestKey: k, platformDailyBudgetKrw: platformDailyBudgetFor(krw), endDate: '2026-12-03', deadlineAt }));
 
 test('OS0 기본 구성(PAUSED 생성)은 지출 0 — 초과 위험은 ENABLED로 집행할 때 생긴다', async () => {
   const a = fakeAccount();
-  assert.equal((await launch(plat(a.t, 'PAUSED'), 'camp-os', AD_DAILY_CAP_KRW, 'req-os-000000000000')).status, 'success');
+  assert.equal((await launch(plat(a.t), 'camp-os', AD_DAILY_CAP_KRW, 'req-os-000000000000')).status, 'success');
   assert.equal(a.worstDaySpend(), 0);
 });
 test('OS1 수정: 매체 일예산 = 승인액 ÷ 2 → Google 2배 지출이 나가도 하루 최악 1만원(승인 일 한도 이하), 승인액 그대로 설정은 전송 전 거부', async () => {
@@ -71,6 +73,8 @@ test('OS1 수정: 매체 일예산 = 승인액 ÷ 2 → Google 2배 지출이 �
   assert.equal(r.status, 'success');
   assert.equal(r.status === 'success' && r.value.dailyBudgetKrw, 5_000);
   assert.equal(r.status === 'success' && r.value.endVerified, true, '매체 종료일·시간대 read-back 확인');
+  assert.equal(a.worstDaySpend(), 0, '앱은 PAUSED로만 생성');
+  a.enableAll();
   assert.equal(a.worstDaySpend(), 10_000);
   assert.ok(a.worstDaySpend() <= AD_DAILY_CAP_KRW);
   const b = fakeAccount();
@@ -83,6 +87,7 @@ test('OS1 수정: 매체 일예산 = 승인액 ÷ 2 → Google 2배 지출이 �
 test('OS2 수정: 두 번째 캠페인 집행은 계정에 노출 가능 캠페인이 있으면 차단(외부 생성 포함), 조회 실패도 차단 — 계정 하루 최악 1만 유지', async () => {
   const a = fakeAccount(); const p = plat(a.t);
   assert.equal((await launch(p, 'camp-os-a', 10_000, 'req-os-a-0000000001')).status, 'success');
+  a.enableAll();
   assert.equal(await callPlatform((deadlineAt) => p.activeCampaignCount({ deadlineAt })).then((r) => r.status === 'success' && r.value), 1);
   // 서버 집행 경로: 외부 활성 캠페인 확인이 DB·플랫폼 launch보다 먼저
   const calls: string[] = [];
@@ -119,6 +124,7 @@ test('OS4 수정: 중지 API 장애(500·연결 끊김) → 중지 실패로 끝
   for (const f of ['http500', 'throw'] as const) {
     const a = fakeAccount({ pauseFails: f }); const p = plat(a.t);
     const r = await launch(p, 'camp-os', 10_000, 'req-os-000000000002');
+    a.enableAll();
     const ext = r.status === 'success' ? r.value.externalId : '';
     const s = await callPlatform((deadlineAt) => p.pause({ campaign: 'camp-os', externalId: ext }, { deadlineAt }));
     assert.notEqual(s.status, 'success');
