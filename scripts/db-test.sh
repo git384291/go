@@ -76,6 +76,7 @@ run db/tests/99_purge_scope.sql >/dev/null   # 파기 범위 분리(0062, PM 11/
 run db/tests/99_purge_notes_retention.sql >/dev/null   # 메모 파기·5년 보존 분리(0063)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
+run db/tests/99_calls.sql >/dev/null   # 통화 녹취·STT·AI 요약·고객 이력(0064~0067, PM 11/25)
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
@@ -100,6 +101,8 @@ echo "NOTICE:  PASS | PG6 [필수4] 게이트 통과한 접수 트랜잭션 중 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
 run "$LOG_DIR/parity.sql" >/dev/null
+npx --no-install tsx scripts/call-parity.ts > "$LOG_DIR/call-parity.sql"   # 0064 통화 수신 서명·인자 일치
+run "$LOG_DIR/call-parity.sql" >/dev/null
 
 echo "== app_server login role has no direct table access"
 if psql -X -q -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -c "select count(*) from core.leads" >/dev/null 2>"$LOG_DIR/app_server.err"; then

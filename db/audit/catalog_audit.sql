@@ -9,7 +9,7 @@
 with
 app_roles(rolname) as (
   select r.rolname from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'anon', 'authenticated', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'app_call', 'anon', 'authenticated', 'release_auditor')
 ),
 guarded_tables as (
   select c.oid, n.nspname || '.' || c.relname as name, c.relrowsecurity, c.relforcerowsecurity
@@ -42,7 +42,13 @@ exec_allow(rolname, proname) as (
     -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
     ('app_staff', 'ad_spend_request_window'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'), ('app_public', 'marketing_opt_out'), ('app_staff', 'recontact_schedule'), ('app_staff', 'recontact_due'), ('app_staff', 'recontact_close'), ('app_staff', 'recontact_sweep'), ('app_staff', 'crm_unhandled'), ('app_staff', 'purge_lead'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
-    ('release_auditor', 'release_probe_product_scope')
+    ('release_auditor', 'release_probe_product_scope'),
+    -- 0064~0067 통화 녹취·STT·요약·고객 이력: 작업자 전용 역할(app_call) 8개, 관리자 11개
+    ('app_call', 'call_ingest'), ('app_call', 'call_stt_claim'), ('app_call', 'call_stt_complete'), ('app_call', 'call_job_fail'),
+    ('app_call', 'call_summary_claim'), ('app_call', 'call_summary_complete'), ('app_call', 'call_object_deletion_next'), ('app_call', 'call_object_deletion_done'),
+    ('app_staff', 'call_settings_get'), ('app_staff', 'call_settings_set'), ('app_staff', 'call_recording_access'), ('app_staff', 'call_link'),
+    ('app_staff', 'call_recording_delete'), ('app_staff', 'call_job_requeue'), ('app_staff', 'call_stt_status'), ('app_staff', 'call_summary_edit'),
+    ('app_staff', 'call_summary_versions'), ('app_staff', 'customer_history'), ('app_staff', 'timeline_by_date')
 ),
 -- PHASE 1 보완(검수 지적 3항): 상품 비활성화 구조의 보호 장치가 실제로 켜져 있는지
 required_triggers(tbl, tgname) as (
@@ -89,7 +95,7 @@ violations(v) as (
   from app_roles r cross join pg_namespace s
   where s.nspname in ('core', 'pii', 'security', 'api', 'extensions')
     and has_schema_privilege(r.rolname, s.oid, 'USAGE')
-    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'release_auditor') and s.nspname = 'api')
+    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_call', 'release_auditor') and s.nspname = 'api')
   union all
   -- V4 SECURITY DEFINER 함수는 search_path 고정
   select 'V4 search_path not fixed: ' || f.name
@@ -125,7 +131,7 @@ violations(v) as (
   -- V9 로그인 가능한 앱 역할은 app_server와 release_auditor뿐, 둘 다 슈퍼유저·RLS 우회 아님
   select 'V9 role attribute: ' || r.rolname
   from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'fideon_api', 'app_server', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_call', 'fideon_api', 'app_server', 'release_auditor')
     and (r.rolsuper or r.rolbypassrls
          or (r.rolcanlogin and r.rolname not in ('app_server', 'release_auditor')))
   union all
