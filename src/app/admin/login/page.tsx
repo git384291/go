@@ -4,7 +4,7 @@ export default function AdminLoginPage() {
   return (
     <main className="login">
       <div className="login-card">
-        <span className="brand"><span className="brand-mark" aria-hidden="true" />바른통신365</span>
+        <span className="brand"><span className="brand-mark" aria-hidden="true" />바른365</span>
         <h1>관리자 로그인</h1>
         <ol className="login-steps" aria-label="로그인 단계">
           <li className="on">계정 확인</li>

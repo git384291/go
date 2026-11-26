@@ -4,9 +4,9 @@ import { KAKAO_CHANNEL_URL } from '@/content/products';
 export function SiteHeader() {
   return (
     <header className="site-header">
-      <a href="/" className="brand" aria-label="바른통신365 홈">
+      <a href="/" className="brand" aria-label="바른365 홈">
         <span className="brand-mark" aria-hidden="true" />
-        바른통신365
+        바른365
       </a>
       <nav className="site-nav" aria-label="상품">
         <a href="/products/internet-tv">인터넷·TV</a>
@@ -20,7 +20,7 @@ export function SiteHeader() {
 export function SiteFooter() {
   return (
     <footer className="site-footer">
-      <p className="footer-brand">바른통신365</p>
+      <p className="footer-brand">바른365</p>
       <p>인터넷·TV·집전화·CCTV 가입 상담 및 접수 대행 서비스입니다.</p>
       <p>요금·사은품·설치 조건은 상담 시점에 통신사 확정 조건으로 안내합니다.</p>
       <p className="footer-links">

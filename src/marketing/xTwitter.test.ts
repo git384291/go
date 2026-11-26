@@ -22,7 +22,7 @@ function assert(label: string, condition: boolean) {
 
 // ── 1. 검증 ──────────────────────────────────────────────────────────────────
 {
-  const v = validateTweet({ text: '인천 인터넷 가입 상담 무료입니다 #바른통신365' });
+  const v = validateTweet({ text: '인천 인터넷 가입 상담 무료입니다 #바른365' });
   assert('정상 트윗 검증 통과', v.valid);
 }
 {
