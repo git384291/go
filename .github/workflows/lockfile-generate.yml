@@ -84,6 +84,10 @@ jobs:
           fi
       # artifact 업로드 제거 — GitHub 무료 스토리지 초과 방지
       # 결과는 위 Step Summary에서 확인
+      - name: Print lockfile (gzip+base64, 로그로 전달 — 비밀값 없음)
+        run: |
+          echo "LOCK_SHA256 $(sha256sum package-lock.json | cut -d' ' -f1)"
+          gzip -9nc package-lock.json | base64 -w 0 | fold -w 8000 | sed 's/^/LOCKB64 /'
       - name: Upload lockfile only (1일 보관 — 스토리지 최소)
         uses: actions/upload-artifact@v4
         with:
