@@ -34,3 +34,10 @@ c96ec5661220eb49e5123e443c715647d9b314fe:tests/unit/lead-ip64.test.ts:generic-ap
 #   - 조치: 현재 파일은 'req-keyword-test-0001'로 교체. 첫 커밋의 탐지만 아래 지문으로 예외 처리(이력 재작성·force push 없음)
 #   - 범위: 이 커밋·이 파일·이 규칙·이 줄에만 적용
 22d8be97d291ef3bf1fbdd53650150b05afd9499:tests/route/google-ads-keywords.test.ts:generic-api-key:51
+
+# [GL-004] 2026-11-26 CRM·통화 통합 PR(#34)에서 탐지 — PM 검수 필요
+#   - 내용: 브라우저 저장소(sessionStorage) 항목 이름 'fideon_attr_v1'(상수 ATTRIBUTION_STORAGE_KEY). 인증키·자격증명 아님, 값은 UTM·gclid 형식 데이터만 담음
+#   - 근거: 서버·외부 서비스 접근에 쓰이지 않는 클라이언트 쪽 저장소 키 이름. 변수명에 KEY가 들어가 generic-api-key 규칙이 오탐
+#   - 조치: 이력 재작성·force push 없이 해당 커밋의 탐지만 아래 지문으로 예외 처리
+#   - 범위: 이 커밋·이 파일·이 규칙·이 줄에만 적용(규칙 전체·파일 전체 제외 아님)
+10e2e8cf64440c3bfa6306393ce04e90182709b2:src/content/attribution.ts:generic-api-key:9
