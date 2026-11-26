@@ -17,6 +17,7 @@ const OUT = process.argv[2] ?? 'test-results/screens';
 
 async function main() {
   const css = await readFile('src/app/globals.css', 'utf8');
+  /* eslint-disable react/jsx-key -- 목록 렌더링이 아니라 [이름, 화면] 쌍의 배열이라 key가 필요 없음 */
   const pages: [string, ReactElement][] = [
     ['01-home', <Home />],
     ['02-internet-tv', <InternetTv />],
@@ -26,6 +27,7 @@ async function main() {
     ['06-admin-login', <AdminLogin />],
     ['07-admin-leads', <Admin />],
   ];
+  /* eslint-enable react/jsx-key */
   await mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
