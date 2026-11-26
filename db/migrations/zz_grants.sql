@@ -81,7 +81,8 @@ grant execute on function
   security.assert_staff(uuid, uuid, text, text[]),
   security.verify_token(text, text, text[]),
   core.purge_customer_internal(uuid, uuid, text),
-  core.policy_terms_shape(jsonb)   -- 0008: terms 형태 검사(check 제약이 쓴다)
+  core.policy_terms_shape(jsonb),   -- 0008: terms 형태 검사(check 제약이 쓴다)
+  core.recontact_allowed(uuid, text)   -- 0060: 재연락 가능 판정(api 함수 소유자만 실행)
   to fideon_api;
 
 grant execute on function
@@ -94,7 +95,8 @@ grant execute on function
   api.lead_gclid_attach(text, text, text, text),  -- 0027: 서버 서명이 있어야 기록되는 광고 클릭 식별값(gclid) 귀속
   api.followup_request(text, text, text, text),  -- 0023: 서버 서명이 있어야 기록되는 대표 직접 연락 동의
   api.consult_rate_hit(text, text),  -- 0024: 상담 채팅 공용 횟수 제한(IP HMAC만)
-  api.application_amend(text, text, text, text, text, text)  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
+  api.application_amend(text, text, text, text, text, text),  -- 0019: 같은 연락처 재접수의 변경 요청(서버 서명·암호화 본문)
+  api.marketing_opt_out(text, text, text)  -- 0060: 서버 서명이 있어야 기록되는 수신 거부
   to app_public;
 
 grant execute on function
@@ -152,7 +154,11 @@ grant execute on function
   api.ad_keyword_approve(uuid, uuid, text, text, text),   -- 0035: PM 승인 키워드 등록(대표만, EXACT)
   api.ad_keyword_revoke(uuid, uuid, text, text, text),   -- 0035: 키워드 철회 → 예약 취소·활성 캠페인 승인 철회
   api.ad_enable_schedule(uuid, uuid, text, text, text, timestamptz, text[], text, int, text),   -- 0035: 활성화 예약(대표만)
-  api.ad_enable_cancel(uuid, uuid, text, text, text)   -- 0035: 활성화 예약 취소(대표만)
+  api.ad_enable_cancel(uuid, uuid, text, text, text),   -- 0035: 활성화 예약 취소(대표만)
+  api.recontact_schedule(uuid, uuid, text, uuid, date, text),   -- 0060: 날짜별 재연락 일정(대표만)
+  api.recontact_due(uuid, uuid, text),
+  api.recontact_close(uuid, uuid, text, bigint, text),
+  api.recontact_sweep(uuid, uuid, text)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행

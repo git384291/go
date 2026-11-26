@@ -123,6 +123,7 @@ sch_state=$("${PSQL[@]}" -d "$DB" -At -c "select state || '/' || (select count(*
 echo "NOTICE:  PASS | SCH-par 스케줄러 100회 동시(여러 연결): 예약 1건을 정확히 1회만 잡음, 99회 없음, 감사 1건" >> "$LOG_DIR/db-test.log"
 "${PSQL[@]}" -d "$DB" -q -c "set session_replication_role = replica; delete from core.ad_enable_jobs where campaign_key = 'camp-sch-par'" >/dev/null
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
+run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0060, PM 11/25 ③)
 run db/tests/99_consult_rate.sql >/dev/null   # 상담 채팅 공용 횟수 제한(0024, PM 11/22 F1)
 run db/tests/99_ai_cost_hardlimit.sql >/dev/null   # AI 사용료 하드 한도: 일·사용자 한도·긴급 차단·멱등·불확실 정산(0028)
 run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접수 게이트(0025, PM 11/24)
@@ -833,6 +834,14 @@ D -f db/migrations/0023_lead_followups.sql >/dev/null
 back23=$(D -At -c "select to_regprocedure('api.followup_done(uuid,uuid,text,uuid)') is not null")
 [ "$gone23" = t ] && [ "$back23" = t ] || { echo "FAIL | M23 0023 롤백 gone=$gone23 재적용=$back23" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M23 대표 직접 연락 동의 0023 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0060 날짜별 재연락·수신 거부: 적용 → 롤백(함수 제거, 기록 보존) → 재적용
+D -f db/migrations/0060_recontact_schedule.sql >/dev/null
+D -f db/rollback/0060_down.sql >/dev/null
+gone60=$(D -At -c "select (to_regprocedure('api.recontact_schedule(uuid,uuid,text,uuid,date,text)') is null and to_regprocedure('api.marketing_opt_out(text,text,text)') is null and to_regclass('core.recontact_schedule') is not null)")
+D -f db/migrations/0060_recontact_schedule.sql >/dev/null
+back60=$(D -At -c "select to_regprocedure('api.recontact_sweep(uuid,uuid,text)') is not null")
+[ "$gone60" = t ] && [ "$back60" = t ] || { echo "FAIL | M60 0060 롤백 gone=$gone60 재적용=$back60" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M60 날짜별 재연락 0060 롤백: 함수 제거·기록 보존, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0024 상담 공용 횟수 제한: 적용 → 롤백(함수 제거, 집계 보존) → 재적용
 D -f db/migrations/0024_consult_rate.sql >/dev/null
 D -f db/rollback/0024_down.sql >/dev/null
