@@ -18,13 +18,13 @@ const OUT = process.argv[2] ?? 'test-results/screens';
 async function main() {
   const css = await readFile('src/app/globals.css', 'utf8');
   const pages: [string, ReactElement][] = [
-    ['01-home', <Home />],
-    ['02-internet-tv', <InternetTv />],
-    ['03-internet-phone', <InternetPhone />],
-    ['04-cctv-security', <Cctv />],
+    ['01-home', <Home key="home" />],
+    ['02-internet-tv', <InternetTv key="itv" />],
+    ['03-internet-phone', <InternetPhone key="iph" />],
+    ['04-cctv-security', <Cctv key="cctv" />],
     ['05-consult', await Consult({ searchParams: Promise.resolve({ interest: 'internet_tv' }) })],
-    ['06-admin-login', <AdminLogin />],
-    ['07-admin-leads', <Admin />],
+    ['06-admin-login', <AdminLogin key="login" />],
+    ['07-admin-leads', <Admin key="admin" />],
   ];
   await mkdir(OUT, { recursive: true });
   const browser = await chromium.launch();
