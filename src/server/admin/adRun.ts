@@ -22,6 +22,7 @@ export type AdRunDeps = AdBudgetDeps & { platform: AdPlatform | null };
 
 const CAMPAIGN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const REQ_KEY = /^[A-Za-z0-9-]{16,64}$/;
+const MAX_REPORTED_COST_KRW = 100_000;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -169,7 +170,12 @@ export async function adRunAction(deps: AdRunDeps, body: unknown): Promise<Respo
   const perf: unknown = pr.value;
   // 보고 지연(성과 행 없음): 0원으로 기록하지 않고 UNKNOWN으로 돌려준다(초과를 0으로 숨기지 않음). 원장·성과 미기록
   if (isObj(perf) && perf.costKrw === null) return adJson({ ok: false, recorded: false, spend: 'UNKNOWN', reason: 'SPEND_UNKNOWN' }, 202);
-  if (!isObj(perf) || !isInt(perf.impressions, 0, 100_000_000) || !isInt(perf.clicks, 0, 100_000_000) || !isInt(perf.costKrw, 0, 100_000) || (perf.clicks as number) > (perf.impressions as number)) return adFail('PLATFORM_DATA_INVALID', 502);
+  // 보고 광고비가 기록 허용 범위(10만 원)를 넘으면 단순 형식 오류로 끝내지 않는다: 일 한도 초과가 확실하므로 자동 중지한다(원장에는 기록하지 않음)
+  if (isObj(perf) && typeof perf.costKrw === 'number' && Number.isSafeInteger(perf.costKrw) && perf.costKrw > MAX_REPORTED_COST_KRW) {
+    const autoStop = await stopCampaign(deps, g, platform, b.campaign, '보고 광고비가 허용 범위를 넘음 — 자동 중지', 'overspend');
+    return adJson({ ok: false, recorded: false, reason: 'SPEND_OUT_OF_RANGE', autoStop }, 502);
+  }
+  if (!isObj(perf) || !isInt(perf.impressions, 0, 100_000_000) || !isInt(perf.clicks, 0, 100_000_000) || !isInt(perf.costKrw, 0, MAX_REPORTED_COST_KRW) || (perf.clicks as number) > (perf.impressions as number)) return adFail('PLATFORM_DATA_INVALID', 502);
   const source = platform.live ? 'platform' : 'mock';
   try {
     const rows = await deps.runInTransaction(async (tx) =>
