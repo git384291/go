@@ -5,8 +5,6 @@
   "status": "DRAFT — 대표 승인 전 AI 상담 사용 금지",
   "excluded": "판매 수수료(내부 전용)·LG U+ 표(수수료만 있음)·인터넷 단독(상품 분류 미개방)·SS클랜 공지(문구형, 금액표 아님)",
   "open_questions": [
-   "KT 100M+모든G 요금(4,400원 오타 의심)",
-   "KT 1G+모든G+ 설치비(562,000원 오타 의심)",
    "유효기간(valid_from/until)",
    "약정 36개월 적용 범위"
   ],
@@ -140,8 +138,9 @@
    "source_kind": "distributor_notice",
    "terms": {
     "monthlyFee": {
-     "known": false,
-     "note": "원본 4,400원 — 오타 의심(44,000원 추정). 총판 확인 전 미확정"
+     "known": true,
+     "value": 44000,
+     "note": "원본 4,400원은 오타. 다른 TV 상품 모두 100M이 500M보다 5,500원 낮은 규칙으로 44,000원 산출. 대표 승인 시 재확인"
     },
     "contractMonths": {
      "known": true,
@@ -559,8 +558,9 @@
      "known": false
     },
     "installFee": {
-     "known": false,
-     "note": "원본 562,000원 — 오타 의심(56,200원 추정). 총판 확인 전 미확정"
+     "known": true,
+     "value": 56200,
+     "note": "원본 562,000원은 오타. KT 인터넷+TV 평일 설치비 56,200원(공개 자료·같은 표 다른 상품 일치)"
     },
     "bundlePrerequisites": {
      "known": false
