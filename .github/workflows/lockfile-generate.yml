@@ -84,4 +84,3 @@ jobs:
           fi
       # artifact 업로드 제거 — GitHub 무료 스토리지 초과 방지
       # 결과는 위 Step Summary에서 확인
-          retention-days: 14
