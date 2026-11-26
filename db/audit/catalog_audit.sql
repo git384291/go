@@ -42,7 +42,7 @@ exec_allow(rolname, proname) as (
     -- 0028 AI 하드 한도: 일·사용자 한도·긴급 차단·조정(대표)
     ('app_staff', 'ai_budget_limits_set'), ('app_staff', 'ai_budget_pause_set'), ('app_staff', 'ai_budget_adjust'),
     -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
-    ('app_staff', 'ad_spend_request_window'), ('app_staff', 'ad_monthly_budget_set'), ('app_staff', 'ad_monthly_budget_get'), ('app_staff', 'ad_cpc_policy_set'), ('app_staff', 'ad_keyword_approve'), ('app_staff', 'ad_keyword_revoke'), ('app_staff', 'ad_enable_schedule'), ('app_staff', 'ad_enable_cancel'), ('app_ad_scheduler', 'ad_sched_claim'), ('app_ad_scheduler', 'ad_sched_gate'), ('app_ad_scheduler', 'ad_sched_finish'), ('app_ad_scheduler', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'lead_gclid_attach'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'), ('app_public', 'marketing_opt_out'), ('app_staff', 'recontact_schedule'), ('app_staff', 'recontact_due'), ('app_staff', 'recontact_close'), ('app_staff', 'recontact_sweep'),
+    ('app_staff', 'ad_spend_request_window'), ('app_staff', 'ad_monthly_budget_set'), ('app_staff', 'ad_monthly_budget_get'), ('app_staff', 'ad_cpc_policy_set'), ('app_staff', 'ad_keyword_approve'), ('app_staff', 'ad_keyword_revoke'), ('app_staff', 'ad_enable_schedule'), ('app_staff', 'ad_enable_cancel'), ('app_ad_scheduler', 'ad_sched_claim'), ('app_ad_scheduler', 'ad_sched_gate'), ('app_ad_scheduler', 'ad_sched_finish'), ('app_ad_scheduler', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'lead_gclid_attach'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'), ('app_public', 'marketing_opt_out'), ('app_staff', 'recontact_schedule'), ('app_staff', 'recontact_due'), ('app_staff', 'recontact_close'), ('app_staff', 'recontact_sweep'), ('app_staff', 'crm_unhandled'), ('app_staff', 'purge_lead'),
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope')
 ),
@@ -60,7 +60,7 @@ required_triggers(tbl, tgname) as (
 -- 점검 계정은 core 스키마 USAGE가 없으므로 이름 해석(to_regprocedure) 대신 시스템 카탈로그를 직접 조인한다(인자는 타입 목록으로 비교).
 pinned_funcs(nsp, fname, args, body_md5) as (
   values
-    ('api', 'create_lead', 'text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text', '684c04bb7dc8d75721ecb0f82a2c09c0'),  -- 0007 필수 고지 반영본(롤백 시 이전 a99eddfc2884a4e7e588925a5664c811로 되돌린다)
+    ('api', 'create_lead', 'text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text', '060aee71de42fe0a776634b70791c227'),  -- 0007 필수 고지 반영본(롤백 시 이전 a99eddfc2884a4e7e588925a5664c811로 되돌린다)
     ('core', 'notice_texts_guard', '', '1f63bb70b44a56550fec3c6a2c6cd866'),
     ('core', 'product_catalog_guard', '', '197931d02b9aa30e9fe7406aba652784'),
     ('core', 'product_approval_guard', '', '9ef087dbd466ef5e1c2f57836a2fff7e'),
