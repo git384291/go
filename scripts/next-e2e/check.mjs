@@ -126,12 +126,12 @@ try {
   const forgedC = cookieFor({ sub: U(1), session_id: S(1), aal: 'aal2' }, evil);
   const revokedC = cookieFor({ sub: U(1), session_id: S(7), aal: 'aal2' });
   const PAGES = [
-    ['/admin/progress', 'FIDEON 진행 상황', new Set(['owner'])],
-    ['/admin/policies', 'FIDEON 관리 · 정책', new Set(['owner', 'editor', 'reviewer'])],
-    ['/admin/ads', 'FIDEON 관리 · 광고 예산', new Set(['owner', 'reviewer'])],
-    ['/admin/ads/funnel', 'FIDEON 관리 · 광고 성과', new Set(['owner', 'reviewer'])],
-    ['/admin/ai-budget', 'FIDEON 관리 · AI 월 비용 한도', new Set(['owner', 'reviewer'])],
-    ['/admin/notices', 'FIDEON 관리 · 필수 고지', new Set(['owner', 'reviewer'])],
+    ['/admin/progress', '바른365 진행 상황', new Set(['owner'])],
+    ['/admin/policies', '바른365 관리 · 정책', new Set(['owner', 'editor', 'reviewer'])],
+    ['/admin/ads', '바른365 관리 · 광고 예산', new Set(['owner', 'reviewer'])],
+    ['/admin/ads/funnel', '바른365 관리 · 광고 성과', new Set(['owner', 'reviewer'])],
+    ['/admin/ai-budget', '바른365 관리 · AI 월 비용 한도', new Set(['owner', 'reviewer'])],
+    ['/admin/notices', '바른365 관리 · 필수 고지', new Set(['owner', 'reviewer'])],
   ];
   const get = (p, cookie, headers = {}) => fetch(BASE + p, { redirect: 'manual', headers: { ...(cookie ? { cookie } : {}), ...headers } });
   const who = { owner: ownerC, reviewer: reviewerC, editor: editorC, counselor: counselorC };

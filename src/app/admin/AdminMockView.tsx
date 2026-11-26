@@ -10,7 +10,7 @@ export function AdminMockView({ headerExtra }: { headerExtra?: ReactNode }) {
   return (
     <div className="admin">
       <header className="admin-bar">
-        <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />FIDEON 관리</span>
+        <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />바른365 관리</span>
         <span className="admin-bar-end">
           <span className="mock-badge">가상 데이터</span>
           {headerExtra}

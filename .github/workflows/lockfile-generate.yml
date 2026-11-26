@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Generate package-lock.json (no install scripts)
@@ -82,15 +82,18 @@ jobs:
           if grep -q $'\tERROR\t' npm-audit-summary.txt || [ "$(wc -l < npm-audit-summary.txt)" -ne 2 ]; then
             echo "::error::npm audit 검사 실행 오류 — 통과로 보지 않는다"; exit 1
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+      # artifact 업로드 제거 — GitHub 무료 스토리지 초과 방지
+      # 결과는 위 Step Summary에서 확인
+      - name: Print lockfile (gzip+base64, 로그로 전달 — 비밀값 없음)
+        run: |
+          echo "LOCK_SHA256 $(sha256sum package-lock.json | cut -d' ' -f1)"
+          gzip -9nc package-lock.json | base64 -w 0 | fold -w 8000 | sed 's/^/LOCKB64 /'
+      - name: Upload lockfile only (1일 보관 — 스토리지 최소)
+        uses: actions/upload-artifact@v4
         with:
           name: package-lock
           path: |
             package-lock.json
             lockfile-report.txt
-            npm-audit-summary.txt
-            npm-audit-production.txt
-            npm-audit-all.txt
-            audit-*.json
-          retention-days: 14
+          retention-days: 1
+          if-no-files-found: error

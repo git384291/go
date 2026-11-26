@@ -69,7 +69,7 @@ const ENTRIES: ReadonlyMap<Exclude<GuideTopicId, 'apply'>, Entry> = new Map<Excl
 
 const APPLY_TITLE = '신청은 어떻게 하나요?';
 const APPLY_ON = Object.freeze([
-  '공식 접수처 화면에서 고객님이 직접 신청 정보를 입력합니다. FIDEON은 이 안내에서 개인정보를 받지 않습니다.',
+  '공식 접수처 화면에서 고객님이 직접 신청 정보를 입력합니다. 바른365는 이 안내에서 개인정보를 받지 않습니다.',
   CHECK_NOTE,
 ]);
 const APPLY_OFF = Object.freeze([

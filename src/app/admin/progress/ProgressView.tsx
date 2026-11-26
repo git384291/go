@@ -7,7 +7,7 @@ export function ProgressView({ snapshot, now }: { snapshot: ProgressSnapshot; no
   return (
     <div className="admin">
       <header className="admin-bar">
-        <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />FIDEON 진행 상황</span>
+        <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />바른365 진행 상황</span>
         <a className="admin-link" href="/admin">관리 화면</a>
       </header>
       <main className="admin-main progress">

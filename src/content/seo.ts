@@ -8,14 +8,14 @@
  */
 type Env = Record<string, string | undefined>;
 
-export const SITE_NAME = 'FIDEON';
+export const SITE_NAME = '바른365';
 
 /** 화면에 실제로 있는 내용만 요약한다(가격·혜택·평점·사업자 정보 없음) */
 export const PAGE_META = {
   home: {
     path: '/',
     title: '인터넷 + TV 가입 상담',
-    description: '인터넷과 TV를 이용 환경에 맞춰 통신사별 조건으로 비교해 상담하는 FIDEON입니다. 온라인 상담 신청은 준비 중입니다.',
+    description: '인터넷과 TV를 이용 환경에 맞춰 통신사별 조건으로 비교해 상담하는 바른365입니다. 온라인 상담 신청은 준비 중입니다.',
   },
   internetTv: {
     path: '/products/internet-tv',
@@ -25,12 +25,12 @@ export const PAGE_META = {
   consult: {
     path: '/consult',
     title: '상담 신청 안내',
-    description: '현재 FIDEON 온라인 상담 신청은 준비 중입니다.',
+    description: '현재 바른365 온라인 상담 신청은 준비 중입니다.',
   },
   privacy: {
     path: '/privacy',
     title: '개인정보처리방침',
-    description: 'FIDEON 개인정보처리방침입니다.',
+    description: '바른365 개인정보처리방침입니다.',
   },
 } as const;
 export type PageKey = keyof typeof PAGE_META;

@@ -9,7 +9,7 @@ export function AiBudgetView({ data }: { data: AiBudgetData }) {
   return (
     <main className="admin-main" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <header className="admin-bar">
-        <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />FIDEON 관리 · AI 월 비용 한도</span>
+        <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />바른365 관리 · AI 월 비용 한도</span>
         <span className="admin-bar-end"><span className="test-badge">로컬 시험 데이터</span><span className="admin-role">{ROLE[data.role] ?? data.role}</span></span>
       </header>
       <p className="muted">

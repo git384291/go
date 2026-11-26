@@ -16,7 +16,7 @@ export default async function AdminLoginPage({ searchParams }: Props) {
     return (
       <main className="login">
         <div className="login-card">
-          <span className="brand"><span className="brand-mark" aria-hidden="true" />FIDEON</span>
+          <span className="brand"><span className="brand-mark" aria-hidden="true" />바른365</span>
           <h1>관리자 로그인</h1>
           {notice && <p className="form-error" role="alert">{notice}</p>}
           <LoginForm />

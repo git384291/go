@@ -4,7 +4,7 @@ import './globals.css';
 import { AttributionCapture } from '../components/AttributionCapture';
 
 export const metadata: Metadata = {
-  title: { default: 'FIDEON · 인터넷 + TV 가입 상담', template: '%s · FIDEON' },
+  title: { default: '바른365 · 인터넷 + TV 가입 상담', template: '%s · 바른365' },
   description: '인터넷 + TV 결합 조건을 통신사별로 비교해 상담해 드립니다.',
   robots: { index: false, follow: false }, // 1단계 공개 승인 전까지 검색 노출 차단
 };

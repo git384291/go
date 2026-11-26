@@ -142,7 +142,7 @@ export function ConsultPreviewChat({ now }: { now?: Date }) {
       <header className="cp-head">
         <span className="brand">
           <span className="brand-mark" aria-hidden="true" />
-          FIDEON
+          바른365
         </span>
         <span className="cp-badge">AI 도우미 · 가상 대화 시안</span>
       </header>

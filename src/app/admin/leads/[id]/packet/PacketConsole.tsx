@@ -48,7 +48,7 @@ export function PacketConsole({ leadId, history }: { leadId: string; history: re
 
   return (
     <main className="admin-main" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <header className="admin-bar"><span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />FIDEON 관리 · 총판 전달용 신청서</span><span className="test-badge">로컬 시험 데이터</span></header>
+      <header className="admin-bar"><span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />바른365 관리 · 총판 전달용 신청서</span><span className="test-badge">로컬 시험 데이터</span></header>
       {packet === null ? (
         <section className="admin-card" aria-label="열람 사유">
           <h2>신청서 열람</h2>

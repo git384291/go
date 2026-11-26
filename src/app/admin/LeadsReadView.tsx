@@ -13,7 +13,7 @@ const INTEREST_LABEL: Record<string, string> = { internet_tv: '인터넷+TV' };
 function Bar({ headerExtra }: { headerExtra?: ReactNode }) {
   return (
     <header className="admin-bar">
-      <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />FIDEON 관리</span>
+      <span className="brand brand-sm"><span className="brand-mark" aria-hidden="true" />바른365 관리</span>
       <span className="admin-bar-end">
         <span className="test-badge">로컬 시험 데이터</span>
         {headerExtra}

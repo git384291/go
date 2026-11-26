@@ -26,7 +26,7 @@ export function OfficialIntakeCta({ intake }: { intake: OfficialIntakeResult }) 
         ))}
       </ul>
       <p className="official-intake-note">
-        신청 정보는 이동한 공식 접수처 화면에서 직접 입력합니다. FIDEON은 이 화면에서 이름·연락처·주소를 받지 않습니다.
+        신청 정보는 이동한 공식 접수처 화면에서 직접 입력합니다. 바른365는 이 화면에서 이름·연락처·주소를 받지 않습니다.
         요금·혜택·설치 가능 여부는 접수처에서 확인되는 조건을 따릅니다.
       </p>
     </div>

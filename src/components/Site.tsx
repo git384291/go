@@ -6,9 +6,9 @@ import { ONLINE_CONSULT_NOTICE } from '@/content/channels';
 export function SiteHeader() {
   return (
     <header className="site-header">
-      <Link href="/" className="brand" aria-label="FIDEON 홈">
+      <Link href="/" className="brand" aria-label="바른365 홈">
         <span className="brand-mark" aria-hidden="true" />
-        FIDEON
+        바른365
       </Link>
       <nav className="site-nav" aria-label="상품">
         {/* PHASE 1: 활성 상품만 메뉴에 표시 */}
@@ -23,7 +23,7 @@ export function SiteHeader() {
 export function SiteFooter() {
   return (
     <footer className="site-footer">
-      <p className="footer-brand">FIDEON</p>
+      <p className="footer-brand">바른365</p>
       <p>인터넷 + TV 가입 상담 및 접수 대행 서비스입니다.</p>
       <p>요금·사은품·설치 조건은 상담 시점에 통신사 확정 조건으로 안내합니다.</p>
       <p className="footer-links">

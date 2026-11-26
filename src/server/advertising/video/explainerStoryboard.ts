@@ -316,7 +316,7 @@ export const EXPLAINER_PLAN: ExplainerPlan = deepFreeze({
     { id: 's3_r3', text: '희망 일정', size: 40, c: P.ink, x: 200, y: 778, maxW: 300, tin: S3[0] + 0.9, tout: OUT(S3), dy: 0 },
     ...caption('s3', S3, '셋째, 설치비와 설치 가능 여부,', '희망 일정도 확인하세요.'),
 
-    { id: 's4_brand', text: 'FIDEON', size: 112, c: P.navy, x: -1, y: 476, maxW: 600, tin: S4[0] + 0.3, tout: 30, dy: 20 },
+    { id: 's4_brand', text: '바른365', size: 112, c: P.navy, x: -1, y: 476, maxW: 600, tin: S4[0] + 0.3, tout: 30, dy: 20 },
     { id: 's4_l1', text: '인터넷·TV,', size: 44, c: P.ink, x: -1, y: 724, maxW: 600, tin: S4[0] + 1.0, tout: 30, dy: 16 },
     { id: 's4_l2', text: '나에게 맞는 조건부터', size: 44, c: P.ink, x: -1, y: 786, maxW: 600, tin: S4[0] + 1.15, tout: 30, dy: 16 },
     { id: 's4_l3', text: '꼼꼼하게', size: 44, c: P.teal, x: -1, y: 848, maxW: 600, tin: S4[0] + 1.3, tout: 30, dy: 16 },
