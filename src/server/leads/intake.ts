@@ -24,7 +24,7 @@ export const LeadRequestSchema = z
     phone: z.string().trim().min(10).max(20),
     interest: z.enum(INTERESTS),
     contactTime: optionalShort(50),
-    consentCollection: z.literal(true, { errorMap: () => ({ message: 'CONSENT_REQUIRED' }) }),
+    consentCollection: z.literal(true, { error: 'CONSENT_REQUIRED' }),
     marketingOptIn: z.boolean().default(false),
     privacyVersion: z.string().min(1).max(40),
     idempotencyKey: z.string().regex(/^[A-Za-z0-9-]{16,64}$/),
