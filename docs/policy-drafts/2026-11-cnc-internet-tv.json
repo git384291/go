@@ -5,7 +5,6 @@
   "status": "DRAFT — 대표 승인 전 AI 상담 사용 금지",
   "excluded": "판매 수수료(내부 전용)·LG U+ 표(수수료만 있음)·인터넷 단독(상품 분류 미개방)·SS클랜 공지(문구형, 금액표 아님)",
   "open_questions": [
-   "KT 요금에 와이파이(1,100원) 포함 여부",
    "KT 100M+모든G 요금(4,400원 오타 의심)",
    "KT 1G+모든G+ 설치비(562,000원 오타 의심)",
    "유효기간(valid_from/until)",
@@ -15,7 +14,8 @@
    "KT 설치비 36,000/56,200(평일), 주말·야간 45,000/71,250 — 공개 자료 일치",
    "KT 500M 단독 33,000 — 공개 자료 일치",
    "SKB 500M+스탠다드 46,200·설치비 56,100 — 별도 안내표 일치",
-   "KT 셋톱박스3 임대료 4,400(3년 약정, VAT 포함) — KT 공식 페이지 일치"
+   "KT 셋톱박스3 임대료 4,400(3년 약정, VAT 포함) — KT 공식 페이지 일치",
+   "KT 안내표 1,100원 차이 = WiFi 6D·7D 공유기 추가 요금(월 1,100원) — 다주다 2026-10-21 수정 글"
   ]
  },
  "drafts": [
@@ -31,7 +31,7 @@
     "monthlyFee": {
      "known": true,
      "value": 38500,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -68,7 +68,7 @@
     "monthlyFee": {
      "known": true,
      "value": 39600,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -105,7 +105,7 @@
     "monthlyFee": {
      "known": true,
      "value": 42900,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -178,7 +178,7 @@
     "monthlyFee": {
      "known": true,
      "value": 46300,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -215,7 +215,7 @@
     "monthlyFee": {
      "known": true,
      "value": 44000,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -252,7 +252,7 @@
     "monthlyFee": {
      "known": true,
      "value": 45100,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -289,7 +289,7 @@
     "monthlyFee": {
      "known": true,
      "value": 48400,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -326,7 +326,7 @@
     "monthlyFee": {
      "known": true,
      "value": 49500,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -363,7 +363,7 @@
     "monthlyFee": {
      "known": true,
      "value": 51800,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -400,7 +400,7 @@
     "monthlyFee": {
      "known": true,
      "value": 49500,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -437,7 +437,7 @@
     "monthlyFee": {
      "known": true,
      "value": 50600,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -474,7 +474,7 @@
     "monthlyFee": {
      "known": true,
      "value": 53900,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -511,7 +511,7 @@
     "monthlyFee": {
      "known": true,
      "value": 55000,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
@@ -548,7 +548,7 @@
     "monthlyFee": {
      "known": true,
      "value": 57300,
-     "note": "VAT 포함 고객 요금으로 판단(공개 요금 KT 500M 단독 33,000원과 일치). VAT 별도는 수수료 기준으로 봄. 단 KT는 와이파이 임대료(1,100원) 제외 금액일 수 있음 — 다른 안내표는 1,100원 높음"
+     "note": "VAT 포함 고객 요금(공개 요금과 일치). 기본 공유기(GiGA WiFi home) 포함 금액. WiFi 6D·7D 선택 시 월 1,100원 추가"
     },
     "contractMonths": {
      "known": true,
