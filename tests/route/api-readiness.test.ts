@@ -22,10 +22,10 @@ test('RD2 정적: 실제 AI·광고 서비스 주소·SDK·fetch 호출 코드�
   for (const f of walk('src').filter((p) => /\.(ts|tsx)$/.test(p))) {
     const s = readFileSync(f, 'utf8');
     // 광고 문구 생성기(주입형 전송, 호출 코드 미연결)만 예외. 아래에서 어디서도 불러 쓰지 않음을 확인한다
-    if (!f.endsWith('advertising/openAiAdGenerator.ts') && !f.endsWith('advertising/googleAdsPlatform.ts') && !f.endsWith('advertising/googleAdsTransport.ts') && !f.endsWith(path.join('ai', 'openAiTransport.ts'))) assert.ok(!hosts.test(s), `${f}: 실제 AI·광고 서비스 연동 코드`);
+    if (!f.endsWith('advertising/openAiAdGenerator.ts') && !f.endsWith('advertising/googleAdsPlatform.ts') && !f.endsWith('advertising/googleAdsTransport.ts') && !f.endsWith(path.join('ai', 'openAiTransport.ts')) && !f.endsWith(path.join('ai', 'geminiTransport.ts'))) assert.ok(!hosts.test(s), `${f}: 실제 AI·광고 서비스 연동 코드`);
     if (!f.includes(`${path.sep}advertising${path.sep}`)) assert.ok(!/openAiAdGenerator|googleAdsPlatform/.test(s), `${f}: 광고 문구 생성기를 앱 경로에서 사용`);
-    // 11/23 B 승인: Google Ads 전용 전송(허용 주소 2곳 고정), 11/24 ④: 상담 AI 전용 전송(허용 주소 1곳 고정)만 추가 예외
-    if (!f.endsWith('advertising/openAiAdGenerator.ts') && !f.endsWith('advertising/googleAdsTransport.ts') && !f.endsWith(path.join('ai', 'openAiTransport.ts')) && /\bfetch\(/.test(s) && !/^['"]use client['"]/.test(s.trimStart())) assert.ok(/leads\/turnstile\.ts$|supabase/i.test(f), `${f}: 서버 외부 호출은 봇 확인뿐`);
+    // 11/23 B 승인: Google Ads 전용 전송(허용 주소 2곳 고정), 11/24 ④: 상담 AI 전용 전송(허용 주소 1곳 고정), 11/26 PM 승인: Gemini 무료 등급 전용 전송(허용 주소 형식 1곳 고정, geminiTransport)만 추가 예외
+    if (!f.endsWith('advertising/openAiAdGenerator.ts') && !f.endsWith('advertising/googleAdsTransport.ts') && !f.endsWith(path.join('ai', 'openAiTransport.ts')) && !f.endsWith(path.join('ai', 'geminiTransport.ts')) && /\bfetch\(/.test(s) && !/^['"]use client['"]/.test(s.trimStart())) assert.ok(/leads\/turnstile\.ts$|supabase/i.test(f), `${f}: 서버 외부 호출은 봇 확인뿐`);
   }
 });
 test('RD3 봇 확인 주소: 기본은 Cloudflare 고정값, 시험 주소는 로컬 시험 환경의 loopback http만, 운영·미리보기·외부 주소는 무시', () => {
