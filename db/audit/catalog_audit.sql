@@ -9,7 +9,7 @@
 with
 app_roles(rolname) as (
   select r.rolname from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'anon', 'authenticated', 'release_auditor'), 'app_call'
+  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'anon', 'authenticated', 'release_auditor', 'app_call')
 ),
 guarded_tables as (
   select c.oid, n.nspname || '.' || c.relname as name, c.relrowsecurity, c.relforcerowsecurity
@@ -97,7 +97,7 @@ violations(v) as (
   from app_roles r cross join pg_namespace s
   where s.nspname in ('core', 'pii', 'security', 'api', 'extensions')
     and has_schema_privilege(r.rolname, s.oid, 'USAGE')
-    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'release_auditor') and s.nspname = 'api'), 'app_call'
+    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'release_auditor', 'app_call') and s.nspname = 'api')
   union all
   -- V4 SECURITY DEFINER 함수는 search_path 고정
   select 'V4 search_path not fixed: ' || f.name
@@ -133,7 +133,7 @@ violations(v) as (
   -- V9 로그인 가능한 앱 역할은 app_server와 release_auditor뿐, 둘 다 슈퍼유저·RLS 우회 아님
   select 'V9 role attribute: ' || r.rolname
   from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'fideon_api', 'app_server', 'release_auditor'), 'app_call'
+  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'fideon_api', 'app_server', 'release_auditor', 'app_call')
     and (r.rolsuper or r.rolbypassrls
          or (r.rolcanlogin and r.rolname not in ('app_server', 'release_auditor')))
   union all
