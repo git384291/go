@@ -133,6 +133,7 @@ run db/tests/99_policy_intake_gate.sql >/dev/null   # 정책 검증 장애 접�
 run db/tests/99_ad_precheck.sql >/dev/null   # 광고 사전검증 10: 예약 시작 전 집행 차단·대조군·1회 실행
 run db/tests/99_lead_gclid.sql >/dev/null   # 광고 사전검증 8: gclid 접수 귀속·첫 값 보존·형식·변조·보존기간(0027)
 run db/tests/99_policy_pr16_verify.sql >/dev/null   # PR #16 추가 검증(PM 11/25): 비활성 상품 차단·정확성·캐시 구조·실패 롤백·Supabase 보안 구조(한 트랜잭션, 마지막에 되돌림)
+run db/tests/99_calls.sql >/dev/null   # 통화 녹취·STT·AI 요약·고객 이력(0064~0067, PM 11/25)
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
@@ -157,6 +158,8 @@ echo "NOTICE:  PASS | PG6 [필수4] 게이트 통과한 접수 트랜잭션 중 
 echo "== TypeScript ↔ DB signature parity"
 npx --no-install tsx scripts/sign-parity.ts > "$LOG_DIR/parity.sql"   # 프로젝트에 설치된 tsx 사용(PATH에 없어도 동작)
 run "$LOG_DIR/parity.sql" >/dev/null
+npx --no-install tsx scripts/call-parity.ts > "$LOG_DIR/call-parity.sql"   # 0064 통화 수신 서명·인자 일치
+run "$LOG_DIR/call-parity.sql" >/dev/null
 
 echo "== app_server login role has no direct table access"
 if psql -X -q -h "$SOCK" -p "$PORT" -U app_server -d "$DB" -c "select count(*) from core.leads" >/dev/null 2>"$LOG_DIR/app_server.err"; then

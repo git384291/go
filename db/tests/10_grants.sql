@@ -6,7 +6,7 @@ select n.nspname || '.' || p.proname as function,
        pg_get_userbyid(p.proowner) as owner,
        coalesce(array_to_string(array(
          select r.rolname from pg_roles r
-         where r.rolname in ('public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'fideon_api')
+         where r.rolname in ('public', 'anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'app_call', 'fideon_api')
            and has_function_privilege(r.oid, p.oid, 'EXECUTE')
          order by r.rolname), ', '), '') as execute_roles,
        coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%' as search_path_fixed
@@ -24,14 +24,14 @@ select test.expect_eq($$
 select test.expect_eq($$
   select count(*)::text from information_schema.role_table_grants
   where table_schema in ('core', 'pii', 'security')
-    and grantee in ('PUBLIC', 'app_public', 'app_staff', 'app_server', 'app_ai')$$, '0', 'G2 앱 역할 테이블 권한 0');
+    and grantee in ('PUBLIC', 'app_public', 'app_staff', 'app_server', 'app_ai', 'app_call')$$, '0', 'G2 앱 역할 테이블 권한 0');
 
 -- 3) 앱 역할의 스키마 USAGE: api만
 select test.expect_eq($$
   select string_agg(r || ':' || s, ',' order by r, s) from
-    unnest(array['app_public', 'app_staff', 'app_server', 'app_ai']) r,
+    unnest(array['app_public', 'app_staff', 'app_server', 'app_ai', 'app_call']) r,
     unnest(array['core', 'pii', 'security', 'api', 'extensions']) s
-  where has_schema_privilege(r, s, 'USAGE')$$, 'app_ai:api,app_public:api,app_staff:api', 'G3 앱 역할 USAGE는 api만');
+  where has_schema_privilege(r, s, 'USAGE')$$, 'app_ai:api,app_call:api,app_public:api,app_staff:api', 'G3 앱 역할 USAGE는 api만');
 
 -- 4) SECURITY DEFINER 함수는 모두 search_path 고정
 select test.expect_eq($$
@@ -44,7 +44,7 @@ select test.expect_eq($$
   select coalesce(string_agg(x, ' ; ' order by x), '') from (
     select r.rolname || ' -> ' || p.proname as x
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    cross join (select oid, rolname from pg_roles where rolname in ('app_public', 'app_staff', 'app_server', 'app_ai')) r
+    cross join (select oid, rolname from pg_roles where rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_call')) r
     where n.nspname in ('core', 'pii', 'security', 'api')
       and has_function_privilege(r.oid, p.oid, 'EXECUTE')
     except
@@ -60,6 +60,12 @@ select test.expect_eq($$
       'app_public -> consult_event_record', 'app_staff -> ad_funnel_full', 'app_staff -> ad_alert_open', 'app_staff -> ad_alert_resolve', 'app_staff -> ad_alert_list', 'app_staff -> ai_budget_limit_get', 'app_staff -> ai_budget_limit_set', 'app_staff -> policy_publish_get', 'app_staff -> policy_publish_set', 'app_staff -> notice_text_list', 'app_staff -> notice_text_add', 'app_public -> notice_intake_gate', 'app_public -> application_save', 'app_staff -> dealer_packet_get', 'app_staff -> dealer_packet_status', 'app_staff -> handoff_record', 'app_staff -> handoff_list', 'app_staff -> notice_review_add', 'app_staff -> notice_review_list',
       'app_staff -> ad_spend_request_window', 'app_staff -> ad_monthly_budget_set', 'app_staff -> ad_monthly_budget_get', 'app_staff -> ad_cpc_policy_set', 'app_staff -> ad_keyword_approve', 'app_staff -> ad_keyword_revoke', 'app_staff -> ad_enable_schedule', 'app_staff -> ad_enable_cancel', 'app_ad_scheduler -> ad_sched_claim', 'app_ad_scheduler -> ad_sched_gate', 'app_ad_scheduler -> ad_sched_finish', 'app_ad_scheduler -> ad_monitor_stop', 'app_public -> followup_request', 'app_public -> lead_gclid_attach', 'app_public -> consult_rate_hit', 'app_public -> policy_intake_gate', 'app_staff -> followup_list', 'app_staff -> followup_done', 'app_staff -> ad_launch_begin', 'app_staff -> ad_launch_finish', 'app_staff -> ad_launch_active', 'app_staff -> ad_launch_paused', 'app_staff -> ad_launch_resolve', 'app_public -> application_amend', 'app_staff -> application_amendments', 'app_public -> marketing_opt_out', 'app_staff -> recontact_schedule', 'app_staff -> recontact_due', 'app_staff -> recontact_close', 'app_staff -> recontact_sweep', 'app_staff -> crm_unhandled', 'app_staff -> purge_lead',
       'app_ai -> ai_budget_hold', 'app_ai -> ai_budget_confirm', 'app_ai -> ai_budget_release', 'app_ai -> ai_budget_uncertain', 'app_staff -> ai_budget_limits_set', 'app_staff -> ai_budget_pause_set', 'app_staff -> ai_budget_adjust',  -- 0028
+      -- 0064~0067 통화 녹취·STT·요약·이력
+      'app_call -> call_ingest', 'app_call -> call_stt_claim', 'app_call -> call_stt_complete', 'app_call -> call_job_fail',
+      'app_call -> call_summary_claim', 'app_call -> call_summary_complete', 'app_call -> call_object_deletion_next', 'app_call -> call_object_deletion_done',
+      'app_staff -> call_settings_get', 'app_staff -> call_settings_set', 'app_staff -> call_recording_access', 'app_staff -> call_link',
+      'app_staff -> call_recording_delete', 'app_staff -> call_job_requeue', 'app_staff -> call_stt_status', 'app_staff -> call_summary_edit',
+      'app_staff -> call_summary_versions', 'app_staff -> customer_history', 'app_staff -> timeline_by_date',
       -- app_server는 두 역할의 멤버지만 NOINHERIT라 직접 실행 권한이 없어야 한다
       'none'])
   ) t$$, '', 'G5 EXECUTE 허용 목록 외 권한 0');
