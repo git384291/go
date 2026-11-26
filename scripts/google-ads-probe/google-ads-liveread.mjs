@@ -52,7 +52,7 @@ function capPlan(capKrw               , cpcKrw               )                  
   return { dailyBudgetKrw: daily, maxClicksPerMonth: cpcKrw ? Math.floor(capKrw / cpcKrw) : null };
 }
 
-/** 종료 코드: 0 확인 완료, 2 설정 없음, 3 인증·조회 실패, 5 ENABLED 캠페인 발견(변경하지 않고 보고), 6 집계 불일치·중복, 7 계정 통화 KRW 아님(PM 11/25) */
+/** 종료 코드: 0 확인 완료, 2 설정 없음, 3 인증·조회 실패, 5 ENABLED 캠페인 발견(변경하지 않고 보고), 6 집계 불일치·중복, 7 계정 통화 KRW 아님(PM 11/25), 8 키워드 CPC 조회 실패(권한 403·서버 오류 등 — 나머지가 정상이어도 최종 성공이 아님, PM 11/26) */
 async function runLiveRead(env                                              , raw                , log                        )                  {
   const v = (k        ) => (typeof env[k] === 'string' && env[k] .trim() !== '' ? env[k] .trim() : null);
   const missing = GOOGLE_ADS_ENV_NAMES.filter((k) => v(k) === null);
@@ -131,7 +131,8 @@ async function runLiveRead(env                                              , ra
   const kr = await transport(`${base}:generateKeywordHistoricalMetrics`, { method: 'POST', headers,
     body: JSON.stringify({ keywords: [...CANDIDATE_KEYWORDS], language: KO, geoTargetConstants: [KR], keywordPlanNetwork: 'GOOGLE_SEARCH', historicalMetricsOptions: { includeAverageCpc: true } }) });
   const kj = parse(kr.text);
-  if (kr.status !== 200 || !isObj(kj)) log({ step: 'keyword_cpc', ok: false, http: kr.status, googleErrorCodes: googleErrorCodes(kr.text) });
+  const cpcFetched = kr.status === 200 && isObj(kj);  // 조회 실패(403·5xx·통신 실패)는 최종 성공(0)으로 처리하지 않는다(종료 8, PM 11/26)
+  if (!cpcFetched) log({ step: 'keyword_cpc', ok: false, http: kr.status, googleErrorCodes: googleErrorCodes(kr.text) });
   else {
     const results = (Array.isArray(kj.results) ? kj.results : []).filter(isObj);
     const variants = (x) => (Array.isArray(x.closeVariants) ? x.closeVariants.filter((v) => typeof v === 'string') : []);
@@ -151,7 +152,8 @@ async function runLiveRead(env                                              , ra
   }
   log({ step: 'cap', ok: cap !== null, monthlyCapKrw: cap, dailyBudgetKrw: cap === null ? null : Math.floor(cap / MONTH_FACTOR), launchBlocked: cap === null || enabled > 0 });
   if (enabled > 0) return 5;
-  return dup === 0 && match ? 0 : 6;
+  if (!(dup === 0 && match)) return 6;
+  return cpcFetched ? 0 : 8;
 }
 
 import readline from 'node:readline';
@@ -173,4 +175,4 @@ const transport = async (url, init) => {
   catch { return { status: 0, text: '' }; }
 };
 const code = await runLiveRead(env, transport, (l) => console.log(JSON.stringify(l)));
-console.log('종료 코드: ' + code + '  (0 확인 완료 · 2 값 없음 · 3 인증·권한·조회 실패 · 5 켜진 캠페인 있음 · 6 실적 불일치 · 7 계정 통화가 원화(KRW) 아님)');
+console.log('종료 코드: ' + code + '  (0 확인 완료 · 2 값 없음 · 3 인증·권한·조회 실패 · 5 켜진 캠페인 있음 · 6 실적 불일치 · 7 계정 통화가 원화(KRW) 아님 · 8 CPC 조회 실패 = 최종 성공 아님)');

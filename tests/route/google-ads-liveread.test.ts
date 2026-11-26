@@ -108,8 +108,19 @@ test('GL8 키워드 조회 실패(권한 없음 403·서버 오류)는 오류 �
     const k = r.lines.filter((l) => l.step === 'keyword_cpc');
     assert.equal(k.length, 1);
     assert.deepEqual([k[0]!.ok, k[0]!.http], [false, kwStatus]);
+    assert.equal(r.code, 8, 'CPC 조회 실패는 최종 성공(0)이 아님');
     assert.ok(r.lines.some((l) => l.step === 'metrics_30d' && l.ok === true));
   }
+});
+
+test('GL8b CPC 조회 실패(8)는 ENABLED(5)·집계 불일치(6)보다 낮은 우선순위, CPC 조회 성공이면 기존대로 0', async () => {
+  const en = await run({ kwStatus: 403, campaigns: [{ campaign: { id: '1', status: 'ENABLED' } }] });
+  assert.equal(en.code, 5);
+  const daily = [day('2026-11-20', '1', 10, 2, 1_500_000_000, 1)];
+  const mis = await run({ kwStatus: 500, daily, total: [{ metrics: { impressions: '99', clicks: '2', costMicros: '1500000000', conversions: 1 } }] });
+  assert.equal(mis.code, 6);
+  assert.equal((await run({ kwStatus: 403 })).code, 8);
+  assert.equal((await run({})).code, 0);
 });
 
 test('GL9 Mac mini 단일 파일(.mjs)도 같은 키워드·같은 주소·같은 읽기 전용 제한(원본 liveread.ts와 일치)', () => {

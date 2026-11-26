@@ -29,7 +29,7 @@ export function capPlan(capKrw: number | null, cpcKrw: number | null): { dailyBu
   return { dailyBudgetKrw: daily, maxClicksPerMonth: cpcKrw ? Math.floor(capKrw / cpcKrw) : null };
 }
 
-/** 종료 코드: 0 확인 완료, 2 설정 없음, 3 인증·조회 실패, 5 ENABLED 캠페인 발견(변경하지 않고 보고), 6 집계 불일치·중복, 7 계정 통화 KRW 아님(PM 11/25) */
+/** 종료 코드: 0 확인 완료, 2 설정 없음, 3 인증·조회 실패, 5 ENABLED 캠페인 발견(변경하지 않고 보고), 6 집계 불일치·중복, 7 계정 통화 KRW 아님(PM 11/25), 8 키워드 CPC 조회 실패(권한 403·서버 오류 등 — 나머지가 정상이어도 최종 성공이 아님, PM 11/26) */
 export async function runLiveRead(env: Readonly<Record<string, string | undefined>>, raw: ProbeTransport, log: (l: ProbeLine) => void): Promise<number> {
   const v = (k: string) => (typeof env[k] === 'string' && env[k]!.trim() !== '' ? env[k]!.trim() : null);
   const missing = GOOGLE_ADS_ENV_NAMES.filter((k) => v(k) === null);
@@ -108,7 +108,8 @@ export async function runLiveRead(env: Readonly<Record<string, string | undefine
   const kr = await transport(`${base}:generateKeywordHistoricalMetrics`, { method: 'POST', headers,
     body: JSON.stringify({ keywords: [...CANDIDATE_KEYWORDS], language: KO, geoTargetConstants: [KR], keywordPlanNetwork: 'GOOGLE_SEARCH', historicalMetricsOptions: { includeAverageCpc: true } }) });
   const kj = parse(kr.text);
-  if (kr.status !== 200 || !isObj(kj)) log({ step: 'keyword_cpc', ok: false, http: kr.status, googleErrorCodes: googleErrorCodes(kr.text) });
+  const cpcFetched = kr.status === 200 && isObj(kj);  // 조회 실패(403·5xx·통신 실패)는 최종 성공(0)으로 처리하지 않는다(종료 8, PM 11/26)
+  if (!cpcFetched) log({ step: 'keyword_cpc', ok: false, http: kr.status, googleErrorCodes: googleErrorCodes(kr.text) });
   else {
     const results = (Array.isArray(kj.results) ? kj.results : []).filter(isObj);
     const variants = (x: Record<string, unknown>) => (Array.isArray(x.closeVariants) ? x.closeVariants.filter((v): v is string => typeof v === 'string') : []);
@@ -128,5 +129,6 @@ export async function runLiveRead(env: Readonly<Record<string, string | undefine
   }
   log({ step: 'cap', ok: cap !== null, monthlyCapKrw: cap, dailyBudgetKrw: cap === null ? null : Math.floor(cap / MONTH_FACTOR), launchBlocked: cap === null || enabled > 0 });
   if (enabled > 0) return 5;
-  return dup === 0 && match ? 0 : 6;
+  if (!(dup === 0 && match)) return 6;
+  return cpcFetched ? 0 : 8;
 }
