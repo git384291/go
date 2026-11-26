@@ -4,6 +4,7 @@ import { KAKAO_CHANNEL_URL } from '@/content/products';
 export function SiteHeader() {
   return (
     <header className="site-header">
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 앱 라우터라 pages 디렉터리 검사는 해당 없음. next/link 교체는 실제 서버 검증 후 */}
       <a href="/" className="brand" aria-label="FIDEON 홈">
         <span className="brand-mark" aria-hidden="true" />
         FIDEON

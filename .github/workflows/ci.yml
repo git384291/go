@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # gitleaks-action이 PR 커밋 목록을 읽는 데 필요 (읽기 전용)
 
 jobs:
   verify:
@@ -24,8 +25,8 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Dependency audit
-        run: npm audit --audit-level=high --omit=dev
+          # 아티팩트 저장 한도 초과 대응(임시): SARIF 업로드만 끔. 누출 발견 시 검사는 그대로 실패함
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
@@ -42,8 +43,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Mobile screens (no price text, no horizontal overflow)
         run: npm run test:preview
+      - name: Dependency audit (마지막 단계로 이동, 취약점이 있으면 CI는 그대로 실패)
+        run: npm audit --audit-level=high --omit=dev
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true  # 임시: 저장 한도 초과로 업로드만 실패해도 검증 결과는 유지
         with:
           name: test-results
           path: test-results/
