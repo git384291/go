@@ -81,7 +81,7 @@ node --conditions=react-server --import tsx scripts/google-ads-probe/run.mts; ec
 read -rs GOOGLE_ADS_MONTHLY_CAP_KRW && export GOOGLE_ADS_MONTHLY_CAP_KRW   # 월 광고비 하드 한도(원, 숫자만). 비우면 "집행 차단"으로 표시
 node --conditions=react-server --import tsx scripts/google-ads-probe/liveread.mts; echo "종료 코드: $?"
 ```
-- 종료 코드: 0 확인 완료 · 2 설정 없음 · 3 인증·권한·조회 실패(오류코드만 표시) · 5 ENABLED 캠페인 발견(바꾸지 않음) · 6 실적 중복·합계 불일치
+- 종료 코드: 0 확인 완료 · 2 설정 없음 · 3 인증·권한·조회 실패(오류코드만 표시) · 5 ENABLED 캠페인 발견(바꾸지 않음) · 6 실적 중복·합계 불일치 · 8 키워드 CPC 조회 실패(403 등, 나머지가 정상이어도 **최종 성공 아님** — 권장 CPC 승인 전 재조회 필요)
 - 출력 JSON 줄을 그대로 Claude에게 붙여 넣으면 됩니다(토큰·고객 ID·캠페인 ID는 출력되지 않음).
 
 **값 지우기(끝나면)**
