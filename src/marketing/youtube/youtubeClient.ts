@@ -271,7 +271,7 @@ export async function uploadVideo(
           'Content-Type': 'video/*',
           'Content-Length': String(fileSize),
         },
-        body: fileBuffer,
+        body: new Uint8Array(fileBuffer), // Buffer → ArrayBuffer 기반 복사(BodyInit 타입 호환)
       });
 
       if (uploadRes.ok || uploadRes.status === 201) {
