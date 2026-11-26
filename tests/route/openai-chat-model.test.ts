@@ -74,9 +74,9 @@ test('OC4 상담 흐름에 넣어도 가드 유지: 승인 밖 금액을 말하�
 test('OC5 연결 범위(PM 11/24 ④): createModel은 여전히 mock뿐, 라우트는 consultModelFromEnv(가격표)로만 이 어댑터를 쓰고 transport는 허용 주소 1곳 고정 전송(openAiFetchTransport)', () => {
   for (const v of ['openai', 'gpt', 'real', '', 'gpt-5.6-luna']) assert.equal(createModel({ CONSULT_AI_MODEL: v }), null);
   for (const f of ['src/server/consult/chatModel.ts', 'src/server/consult/chatAnswer.ts', 'src/server/consult/chatHandler.ts']) {
-    assert.ok(!readFileSync(f, 'utf8').includes('openAiChatModel'), f);
+    assert.ok(!readFileSync(f, 'utf8').includes('openAiChatModel') && !readFileSync(f, 'utf8').includes('geminiChatModel'), f);
   }
   const route = readFileSync('src/app/api/consult/chat/route.ts', 'utf8');
-  assert.match(route, /recoveringModelFor\(consultModelFromEnv\(process\.env, openAiFetchTransport\), CONSULT_RECOVERY_TIMING\)/);
+  assert.match(route, /recoveringModelFor\(process\.env\.CONSULT_AI_PROVIDER === 'gemini-free' \? geminiFreeModelFromEnv\(process\.env, geminiFetchTransport\) : consultModelFromEnv\(process\.env, openAiFetchTransport\), CONSULT_RECOVERY_TIMING\)/);
   assert.equal((route.match(/consultModelFromEnv\(/g) ?? []).length, 1);
 });

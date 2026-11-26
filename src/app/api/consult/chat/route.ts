@@ -3,6 +3,8 @@ import { createLimiter, handleChat } from '@/server/consult/chatHandler';
 import { createDbAiBudget } from '@/server/consult/chatModel';
 import { consultModelFromEnv, CONSULT_RECOVERY_TIMING } from '@/server/consult/openAiChatModel';
 import { openAiFetchTransport } from '@/server/ai/openAiTransport';
+import { geminiFetchTransport } from '@/server/ai/geminiTransport';
+import { geminiFreeModelFromEnv } from '@/server/consult/geminiChatModel';
 import { recoveringModelFor } from '@/server/consult/modelRecovery';
 import { sessionKeyFromEnv } from '@/server/consult/consultSession';
 import { dbPolicyProvider } from '@/server/consult/publishedPolicies';
@@ -24,7 +26,7 @@ export async function POST(req: Request) {
   return handleChat(req, {
     enabled: process.env.CONSULT_CHAT_ENABLED === 'true',
     chat: {
-      supplierId, model: recoveringModelFor(consultModelFromEnv(process.env, openAiFetchTransport), CONSULT_RECOVERY_TIMING), budget,
+      supplierId, model: recoveringModelFor(process.env.CONSULT_AI_PROVIDER === 'gemini-free' ? geminiFreeModelFromEnv(process.env, geminiFetchTransport) : consultModelFromEnv(process.env, openAiFetchTransport), CONSULT_RECOVERY_TIMING), budget,
       provider: dbPolicyProvider(async () => {
         const rows = await withRole('public', (tx) => tx`select api.policy_published() as p`);
         return (rows as unknown as { p: unknown }[]).map((r) => r.p);
