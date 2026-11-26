@@ -314,3 +314,22 @@ test('AR17b 계정 통화(PM 11/25 KRW): 실제 어댑터는 KRW가 아니면 AC
     assert.deepEqual([r.status, (await j(r)).reason, m.c.tx, s.c.launch], [status, reason, 0, 0]);
   }
 });
+
+test('AR7b 보고 광고비가 허용 범위(10만 원)를 넘으면 오류로만 끝내지 않고 자동 중지(철회·pause), 원장 기록 없음', async () => {
+  for (const costKrw of [100_001, 250_000, 5_000_000]) {
+    const s = spy(false, { async fetchPerformance() { return { impressions: 10, clicks: 2, costKrw }; } });
+    const order: string[] = [];
+    const m = mk({ platform: s.p, tx: (q) => { order.push(q.includes('ad_budget_revoke') ? 'revoke' : q.includes('ad_performance_record') ? 'record' : 'other'); return [{ r: { recorded: true, over_ledger: true } }]; } });
+    const r = await adRunAction(m.d, collect());
+    const b = await j(r);
+    assert.deepEqual([r.status, b.reason, b.recorded], [502, 'SPEND_OUT_OF_RANGE', false]);
+    assert.equal((b.autoStop as { revoked: boolean }).revoked, true);
+    assert.equal(s.c.pause, 1);
+    assert.ok(!order.includes('record'), '원장·성과 기록은 하지 않는다');
+  }
+  // 경계값: 정확히 10만 원은 기존대로 기록 경로(자동 중지는 DB over_ledger 판정에 따름)
+  const s0 = spy(false, { async fetchPerformance() { return { impressions: 10, clicks: 2, costKrw: 100_000 }; } });
+  const m0 = mk({ platform: s0.p, tx: () => [{ r: { recorded: true, over_ledger: false } }] });
+  const b0 = await j(await adRunAction(m0.d, collect()));
+  assert.deepEqual([b0.ok, b0.recorded, 'autoStop' in b0], [true, true, false]);
+});
