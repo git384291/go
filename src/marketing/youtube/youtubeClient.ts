@@ -1,5 +1,5 @@
 /**
- * 바른통신365 — YouTube Data API v3 클라이언트
+ * 바른365 — YouTube Data API v3 클라이언트
  * 보안: PUBLISH_ENABLED=false 기본 — 사용자 승인 전 실제 게시 금지
  * 과금·계정 생성·배포 금지
  * 구글 유료 광고 보류 유지 (광고 API 미사용)

@@ -31,9 +31,9 @@ function assert(label: string, condition: boolean) {
 // ── 1. 메타 검증 ──────────────────────────────────────────────────────────────
 
 const goodMeta: VideoMeta = {
-  title: '바른통신365 인터넷TV 가입 혜택 총정리',
+  title: '바른365 인터넷TV 가입 혜택 총정리',
   description: '인천 미추홀구 인터넷·TV 전문 상담. 무료 비교 견적 제공.',
-  tags: ['인터넷가입', '바른통신365', 'KT', 'SKB', 'LG유플러스'],
+  tags: ['인터넷가입', '바른365', 'KT', 'SKB', 'LG유플러스'],
   privacyStatus: 'private',
   isShorts: false,
 };
