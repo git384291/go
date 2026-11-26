@@ -185,9 +185,11 @@ reset role;
 select test.expect_eq(format($$select string_agg(attempt::text, ',' order by attempt) from core.call_stt_ledger where job_id = %s$$, :'j2'), '0,1,2', 'ST19b 원장 번호는 작업별 증가값(가져갈 때마다 +1)');
 
 -- ============ ③ AI 요약 ============
-update core.ai_budget_config set monthly_limit_krw = 100000 where singleton;
-select api.ai_budget_hold(5) as r1 \gset
-select api.ai_budget_hold(5) as r2 \gset
+-- 0028 이후 예약 함수는 (금액, 요청 번호, 사용자 구분 해시)이고 일·사용자 한도 기본 0원 = 차단 → 시험용 한도를 모두 연다
+update core.ai_budget_config set paused = false, monthly_limit_krw = 100000, daily_limit_krw = 100000,
+       scope_daily_limit_krw = 100000, scope_monthly_limit_krw = 100000, max_inflight = 1000, scope_max_inflight = 100 where singleton;
+select api.ai_budget_hold(5, 'req-call-sm-000000001', repeat('a', 64)) as r1 \gset
+select api.ai_budget_hold(5, 'req-call-sm-000000002', repeat('a', 64)) as r2 \gset
 set role app_call;
 select test.expect_error_msg($$select * from api.call_summary_claim(999999999)$$, '22023', 'INVALID_RESERVATION', 'SM1 없는 AI 비용 예약 거부');
 select test.expect_eq(format($$select count(*)::text from api.call_summary_claim(%s)$$, :'r1'), '0', 'SM2 요약 꺼짐: 안 가져감');
