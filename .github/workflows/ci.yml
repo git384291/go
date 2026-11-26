@@ -3,6 +3,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # 실제 OpenAI 호출 시험은 수동 실행(Actions → ci → Run workflow)에서만 한다(PM 11/26: 일반 CI 자동 호출 금지·비용 통제).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,6 +34,8 @@ jobs:
           # PR 댓글 기능 끔. 댓글은 pull-requests: write 권한이 필요하고, 이 워크플로는 읽기 권한만 갖는다.
           # 탐지 결과는 작업 실패 + 작업 요약(job summary) + SARIF 산출물로 확인한다.
           GITLEAKS_ENABLE_COMMENTS: "false"
+          # SARIF 산출물 업로드 끔(11/26 artifact 저장 공간 초과 원인 중 하나, 347개). 탐지 시 작업 실패·작업 요약으로 확인한다.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - name: Dependency audit
         run: npm audit --audit-level=high --omit=dev
       - run: npm run typecheck
@@ -39,9 +43,10 @@ jobs:
       - run: npm run test:unit
       - name: API route test (reserved products → 403 PRODUCT_NOT_ACTIVE, no server/DB/external calls)
         run: npm run test:route
-      - name: Live AI integration (real OpenAI call only when CI secret CONSULT_AI_API_KEY exists; otherwise SKIP)
+      - name: Live AI integration (real OpenAI call only on manual workflow_dispatch with CI secret; otherwise SKIP)
         env:
-          CONSULT_AI_API_KEY: ${{ secrets.CONSULT_AI_API_KEY }}
+          # PR·push 자동 실행에서는 키를 넘기지 않는다 → 시험은 SKIP(통과로 세지 않음). 수동 실행에서만 실제 호출.
+          CONSULT_AI_API_KEY: ${{ github.event_name == 'workflow_dispatch' && secrets.CONSULT_AI_API_KEY || '' }}
         run: npm run test:live-ai
       - name: DB security tests (local virtual DB, PostgreSQL from runner image)
         run: npm run test:db
@@ -63,3 +68,4 @@ jobs:
         with:
           name: test-results
           path: test-results/
+          retention-days: 7   # 11/26 저장 공간 초과(701개·4.9GB) 재발 방지
