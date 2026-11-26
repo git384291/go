@@ -1,5 +1,5 @@
 /**
- * 바른365 — Google Ads 성과 기반 CPC 자동 조정 모듈
+ * 바른365 — (앱 밖 도구, 미연결) Google Ads 성과 기반 CPC 자동 조정 모듈
  * 보안: PUBLISH_ENABLED=false 기본 — 사용자 승인 전 실제 CPC 변경 금지
  * 광고비 한도 초과·ENABLED 자동전환·과금 금지
  * Google Ads API Basic 승인 완료 후에만 실계정 사용 가능
