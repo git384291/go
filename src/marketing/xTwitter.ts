@@ -5,6 +5,8 @@
  * 과금·계정 생성·배포 금지 / 토큰 출력 금지
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
+
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 
 export interface TweetMeta {
@@ -145,7 +147,6 @@ function buildOAuth1Header(
   creds: XCredentials,
   bodyParams: Record<string, string> = {},
 ): string {
-  const { createHmac, randomBytes } = require('node:crypto');
 
   const oauthParams: Record<string, string> = {
     oauth_consumer_key: creds.apiKey,

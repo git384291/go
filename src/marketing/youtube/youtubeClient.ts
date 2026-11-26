@@ -5,6 +5,9 @@
  * 구글 유료 광고 보류 유지 (광고 API 미사용)
  */
 
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
+
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 
 export type PrivacyStatus = 'private' | 'unlisted' | 'public';
@@ -103,7 +106,6 @@ export interface OAuthTokens {
  * 키: process.env.YT_TOKEN_ENCRYPTION_KEY (base64, 32바이트 이상)
  */
 export function encryptTokens(tokens: OAuthTokens): string {
-  const { createCipheriv, randomBytes } = require('node:crypto');
   const keyEnv = process.env.YT_TOKEN_ENCRYPTION_KEY;
   if (!keyEnv) throw new Error('YT_TOKEN_ENCRYPTION_KEY 환경변수 없음');
   const key = Buffer.from(keyEnv, 'base64');
@@ -118,7 +120,6 @@ export function encryptTokens(tokens: OAuthTokens): string {
 }
 
 export function decryptTokens(encrypted: string): OAuthTokens {
-  const { createDecipheriv } = require('node:crypto');
   const keyEnv = process.env.YT_TOKEN_ENCRYPTION_KEY;
   if (!keyEnv) throw new Error('YT_TOKEN_ENCRYPTION_KEY 환경변수 없음');
   const key = Buffer.from(keyEnv, 'base64');
@@ -214,7 +215,6 @@ export async function uploadVideo(
   }
 
   // 4. 파일 읽기
-  const { readFileSync, statSync } = require('node:fs');
   let fileBuffer: Buffer;
   let fileSize: number;
   try {

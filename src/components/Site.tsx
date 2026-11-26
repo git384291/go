@@ -1,13 +1,14 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { KAKAO_CHANNEL_URL } from '@/content/products';
 
 export function SiteHeader() {
   return (
     <header className="site-header">
-      <a href="/" className="brand" aria-label="바른365 홈">
+      <Link href="/" className="brand" aria-label="바른365 홈">
         <span className="brand-mark" aria-hidden="true" />
         바른365
-      </a>
+      </Link>
       <nav className="site-nav" aria-label="상품">
         <a href="/products/internet-tv">인터넷·TV</a>
         <a href="/products/internet-phone">집전화</a>
