@@ -1,4 +1,5 @@
 import 'server-only';
+import { isHostedDeploy } from '../env/deployEnv';
 
 /**
  * 관리자 리드 데이터 출처 판정 (PM 6913462268). 순수 함수 — 환경 객체를 인자로 받는다.
@@ -29,7 +30,7 @@ export function dbReadReady(env: Env): boolean {
   if (leadsSource(env) !== 'db') return false;
   // 개발·시험 프로세스만: NODE_ENV가 정확히 development·test가 아니면(production·미설정·빈 값·알 수 없는 값) 거부
   if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') return false;
-  if (env.VERCEL === '1' || env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview') return false;
+  if (isHostedDeploy(env)) return false; // 호스팅 배포(Vercel·Cloud Run·APP_ENV=production) 전부 거부
   const raw = env.DATABASE_URL;
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > 512) return false;
   let u: URL;

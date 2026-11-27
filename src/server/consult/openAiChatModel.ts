@@ -17,6 +17,7 @@ import { verifiedKrwPrices } from '@/server/ai/verifiedPrices';
 import { createModel } from './chatModel';
 import { ModelCallError } from './modelRecovery';
 import { isSafeModelInput } from './piiBoundary';
+import { isProduction } from '../env/deployEnv';
 
 export const MAX_REPLY_CHARS = 600;
 
@@ -156,7 +157,7 @@ let last: { sig: string; transport: BodyTransport | null; prices: readonly Model
  */
 export function consultModelFromEnv(env: Record<string, string | undefined>, transport: BodyTransport | null, prices: readonly ModelPrice[] = VERIFIED_KRW_PRICES): ChatModel | null {
   const name = env.CONSULT_AI_MODEL;
-  if (name === 'mock') return env.VERCEL_ENV === 'production' ? null : createModel(env); // PM 11/24 ④: 모의 모델은 운영 배포 금지(시험·로컬·미리보기 전용)
+  if (name === 'mock') return isProduction(env) ? null : createModel(env); // PM 11/24 ④: 모의 모델은 운영 배포 금지(시험·로컬·미리보기 전용)
   if (typeof name !== 'string') return null;
   const p = priceFor(prices, name);
   if (!p) return null;
