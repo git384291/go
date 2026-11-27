@@ -13,6 +13,7 @@ import { inputTokenUpperBound } from '@/server/ai/costModel';
 import { ModelCallError } from './modelRecovery';
 import { isSafeModelInput } from './piiBoundary';
 import { CONSULT_CALL_LIMITS, MAX_REPLY_CHARS } from './openAiChatModel';
+import { isProduction } from '../env/deployEnv';
 
 /** 무료 호출 1회에 DB 한도로 예약하는 '요청 단위'(원). 실제 비용 0원, 요청 횟수 상한용 */
 export const GEMINI_FREE_UNIT_KRW = 1;
@@ -122,7 +123,7 @@ export function createGeminiChatModel(config: GeminiChatModelConfig | null): Cha
  * Vercel 미리보기/개발, 명시 APP_ENV=dev, 로컬 개발·시험(NODE_ENV)만 true. VERCEL_ENV=production 또는 APP_ENV=production은 항상 false. 그 밖(환경 불명)도 false.
  */
 export function freeTierEnvAllowed(env: Record<string, string | undefined>): boolean {
-  if (env.VERCEL_ENV === 'production' || env.APP_ENV === 'production') return false;
+  if (isProduction(env)) return false; // Cloud Run(K_SERVICE)·APP_ENV·VERCEL_ENV 운영 표식이 하나라도 있으면 거부
   return env.VERCEL_ENV === 'preview' || env.VERCEL_ENV === 'development' || env.APP_ENV === 'dev' || env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
 }
 

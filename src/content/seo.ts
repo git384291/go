@@ -1,3 +1,4 @@
+import { isLiveProduction } from '../server/env/deployEnv';
 /**
  * 검색 노출 준비(PHASE 1). 기본값은 닫힘.
  * - 공식 주소(PUBLIC_SITE_ORIGIN)가 확정·설정되기 전에는 canonical·OG URL·sitemap을 만들지 않는다.
@@ -78,7 +79,7 @@ export function publicSiteOrigin(env: Env = process.env): string | null {
 }
 
 export function searchIndexingAllowed(env: Env = process.env): boolean {
-  return env.VERCEL_ENV === 'production' && env.SEARCH_INDEXING === 'allow' && publicSiteOrigin(env) !== null;
+  return isLiveProduction(env) && env.SEARCH_INDEXING === 'allow' && publicSiteOrigin(env) !== null;
 }
 
 /** 페이지 메타데이터: 공식 주소가 없으면 canonical·OG URL을 넣지 않는다 */

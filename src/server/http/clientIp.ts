@@ -1,3 +1,4 @@
+import { isHostedDeploy, isPreview, onVercel } from '../env/deployEnv';
 /**
  * 상담 신청의 IP별 횟수 제한에 쓰는 고객 IP.
  *
@@ -19,19 +20,24 @@ export function isIp(value: string): boolean {
   return IPV4.test(value) || (IPV6.test(value) && value.includes(':'));
 }
 
-export type ClientIpOptions = { onVercel: boolean };
+/**
+ * hosted: Vercel이 아닌 호스팅 배포(Cloud Run 등). 신뢰할 프록시 경계가 공식 문서로 확인되지 않았으므로 요청 헤더를 믿지 않는다
+ * → 항상 '0.0.0.0'(모든 요청이 같은 횟수 제한 버킷 = 안전한 쪽으로 실패). Cloud Run의 X-Forwarded-For 위치는 Google 공식 근거 확보 뒤 별도 승인으로 연다(미완료).
+ */
+export type ClientIpOptions = { onVercel: boolean; hosted?: boolean };
 
 /** /api/diag/ip 진단 경로는 검수(프리뷰) 배포에서 명시적으로 켰을 때만 열린다. 운영·로컬에서는 404 */
 export function diagIpEnabled(env: Record<string, string | undefined>): boolean {
-  return env.VERCEL === '1' && env.VERCEL_ENV === 'preview' && env.DIAG_IP_ENABLED === '1';
+  return onVercel(env) && isPreview(env) && env.DIAG_IP_ENABLED === '1';
 }
 
 export function clientIpFrom(
   header: (name: string) => string | null | undefined,
-  opts: ClientIpOptions = { onVercel: process.env.VERCEL === '1' },
+  opts: ClientIpOptions = { onVercel: onVercel(), hosted: isHostedDeploy() && !onVercel() },
 ): string {
   const real = (header('x-real-ip') ?? '').trim();
   if (opts.onVercel) return isIp(real) ? real : '0.0.0.0';
+  if (opts.hosted) return '0.0.0.0';
 
   if (isIp(real)) return real;
   const forwarded = (header('x-forwarded-for') ?? '')
