@@ -2,7 +2,8 @@
  * 광고성 전화 수신거부·판정·시도 기록의 DB 어댑터(0070). 실행 역할은 통화 작업자(app_call) — 연결은 호출자가 주는 트랜잭션 실행기로만.
  * - 조회 실패·형태 불량은 절대 clear로 보지 않는다(error로 돌려 판정에서 차단).
  * - 원문 번호·이름·고지문은 보내지 않는다(사업자 ID·HMAC·코드만). 값은 바인딩으로만 전달.
- * - 🟡 아직 실제 선택 경로(selectSuppressionStore 등)에 연결하지 않았다 — 선택 함수는 여전히 Mock만. 운영 연결은 법률 자문·신고·두낫콜 커넥터 뒤 별도 승인.
+ * - 상태: PR 스택에서는 assemble.ts가 OUTBOUND_PERSISTENCE=db로 이 어댑터를 고를 수 있다. 병합된 main·운영은 미적용, 실제 업무 호출자(route·worker·스케줄러)는 0개.
+ *   운영 연결은 법률 자문·전화권유판매업 신고·두낫콜 커넥터 뒤 별도 승인.
  */
 import type { SuppressionStatus } from './compliance';
 import { OutboundError, type AttemptEntry, type AttemptResult, type DecisionEntry, type OutboundLedger, type SuppressionStore } from './providers';
