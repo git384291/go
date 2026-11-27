@@ -38,6 +38,7 @@ select test.expect_error_msg(test.ct('owner', format($$select api.contract_statu
 select test.expect_eq(test.ct('owner', format($$select api.contract_status($A, $S, $T, %L, 'installed', %L::date - 10)$$, :'c1', :'today')), 'installed', 'CT12 리드1 설치 완료');
 select test.expect_error_msg(test.ct('owner', format($$select api.contract_schedule($A, $S, $T, %L, 'KT', %L::date, 36, 12)$$, :'c1', :'today')), '22023', 'CONTRACT_TRANSITION', 'CT13 설치 뒤 일정 변경 거부');
 select test.expect_error_msg(test.ct('owner', format($$select api.contract_status($A, $S, $T, %L, 'installed', %L::date)$$, :'c1', :'today')), '22023', 'CONTRACT_TRANSITION', 'CT14 두 번 설치 완료 거부');
+select test.expect_error_msg(test.ct('owner', format($$select api.settlement_record($A, $S, $T, %L, 'received', 300000, %L::date - 11)$$, :'c1', :'today')), '22023', 'INVALID_INPUT', 'CT15a 지급일이 설치일보다 빠르면 거부(날짜 역전)');
 select test.expect_ok(test.ct('owner', format($$select api.settlement_record($A, $S, $T, %L, 'received', 300000, %L::date)$$, :'c1', :'today')), 'CT15 총판 지급 받음 기록');
 select test.expect_error_msg(test.ct('owner', format($$select api.settlement_record($A, $S, $T, %L, 'clawback', 300000, %L::date)$$, :'c1', :'today')), '22023', 'CONTRACT_TRANSITION', 'CT16 해지 전 환수 기록 거부');
 select test.expect_error_msg(test.ct('owner', format($$select api.settlement_record($A, $S, $T, %L, 'received', 0, %L::date)$$, :'c1', :'today')), '22023', 'INVALID_INPUT', 'CT17 0원 거부');
@@ -45,6 +46,7 @@ select test.expect_error_msg(test.ct('owner', format($$select api.contract_statu
 -- 환수 기간(12개월) 안 해지 → 위험
 select test.expect_eq(test.ct('owner', format($$select api.contract_status($A, $S, $T, %L, 'terminated', %L::date)$$, :'c1', :'today')), 'clawback_risk', 'CT19 환수 기간 안 해지 = 환수 위험');
 select test.expect_eq(test.ct('owner', $$select count(*)::text from api.contract_list($A, $S, $T, 'clawback_risk')$$), '1', 'CT20 환수 위험 목록 1건');
+select test.expect_error_msg(test.ct('owner', format($$select api.settlement_record($A, $S, $T, %L, 'clawback', 300000, %L::date - 1)$$, :'c1', :'today')), '22023', 'INVALID_INPUT', 'CT21a 환수일이 해지일보다 빠르면 거부(날짜 역전)');
 select test.expect_ok(test.ct('owner', format($$select api.settlement_record($A, $S, $T, %L, 'clawback', 300000, %L::date)$$, :'c1', :'today')), 'CT21 환수 기록');
 select test.expect_eq(test.ct('owner', $$select count(*)::text from api.contract_list($A, $S, $T, 'clawback_risk')$$), '0', 'CT22 환수 기록 뒤 위험 해소');
 select test.expect_eq(test.ct('owner', format($$select received_krw || '/' || clawback_krw || '/' || status from api.contract_list($A, $S, $T, 'all') where lead_id = %L$$, :'c1')), '300000/300000/terminated', 'CT23 목록 합계·상태');
@@ -68,3 +70,4 @@ select test.expect_error(format($$update core.lead_contracts set status = 'insta
 select test.expect_error($$delete from core.lead_contracts$$, '42501', 'CT36 계약 삭제 불가');
 select test.expect_eq($$select count(*)::text from core.audit_logs where action like 'contract.%' or action like 'settlement.%'$$, '8', 'CT37 쓰기 8건 모두 감사 기록');
 select test.expect_eq($$select count(*)::text from core.audit_logs where (action like 'contract.%' or action like 'settlement.%') and detail::text ~ '[0-9a-f]{64}|300000'$$, '0', 'CT38 감사에 연락처 해시·금액 없음');
+select test.expect_eq($$select count(*)::text from core.settlements$$, '2', 'CT39 거부된 역전 건은 원장에 남지 않음(지급 1·환수 1만)');

@@ -167,6 +167,10 @@ begin
      or (p_kind = 'clawback' and v_cur.status <> 'terminated') then
     raise exception 'CONTRACT_TRANSITION' using errcode = '22023';
   end if;
+  -- 날짜 역전 금지: 지급 받음 >= 설치일, 환수 >= 해지일
+  if (p_kind = 'received' and p_on < v_cur.installed_on) or (p_kind = 'clawback' and p_on < v_cur.terminated_on) then
+    raise exception 'INVALID_INPUT' using errcode = '22023';
+  end if;
   insert into core.settlements (lead_id, kind, amount_krw, occurred_on, created_by)
   values (p_lead, p_kind, p_amount_krw, p_on, v_staff.user_id) returning id into v_id;
   insert into core.audit_logs (actor_id, action, target_type, target_id, detail)

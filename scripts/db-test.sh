@@ -593,7 +593,17 @@ for role in app_public app_staff; do
   done
 done
 echo "NOTICE:  PASS | F2 공개 고객·관리자 역할 모두 수수료·정산 테이블 조회 불가(permission denied)" >> "$LOG_DIR/db-test.log"
-leak=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'api' and p.prosrc ~* '(commission|settlement)'")
+# F3 예외(코사장 11/27 결정 A): 대표 전용 정산 함수 2개만 정확히 허용. 그 밖의 api 함수는 여전히 0개여야 한다
+F3_ALLOW="'api.settlement_record(uuid,uuid,text,uuid,text,integer,date)','api.contract_list(uuid,uuid,text,text)'"
+leak=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'api' and p.prosrc ~* '(commission|settlement)' and p.oid::regprocedure::text not in ($F3_ALLOW)")
+allow=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from pg_proc p where p.oid::regprocedure::text in ($F3_ALLOW) and p.prosecdef and pg_get_userbyid(p.proowner) = 'fideon_api' and p.prosrc ~ 'assert_staff\(p_actor, p_session, p_token, array\[''owner''\]\)' and not has_function_privilege('app_public', p.oid, 'execute')")
+[ "$allow" = 2 ] || { echo "FAIL | F3a 예외 함수 2개가 대표 전용·소유자 fideon_api·공개 실행 불가가 아님: $allow" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | F3a 예외는 대표 전용 정산 함수 2개뿐(owner 검증·fideon_api 소유·공개 역할 실행 불가)" >> "$LOG_DIR/db-test.log"
+tbl=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from (values ('app_public'),('app_staff'),('app_ai'),('app_call'),('app_server')) r(role), (values ('core.settlements'),('core.lead_contracts')) t(tb) where has_table_privilege(r.role, t.tb, 'select,insert,update,delete')")
+[ "$tbl" = 0 ] || { echo "FAIL | F3b 앱 역할이 정산·계약 표 직접 권한 보유: $tbl" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+rls=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from pg_class where oid in ('core.settlements'::regclass, 'core.lead_contracts'::regclass) and relrowsecurity and relforcerowsecurity")
+[ "$rls" = 2 ] || { echo "FAIL | F3c 정산·계약 표 강제 RLS 아님" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | F3b·F3c 앱 역할 정산·계약 표 직접 권한 0, 강제 RLS 2/2" >> "$LOG_DIR/db-test.log"
 if [ "$leak" = 0 ]; then
   echo "NOTICE:  PASS | F3 api 함수 중 수수료·정산 테이블을 읽는 함수 0개" >> "$LOG_DIR/db-test.log"
 else
