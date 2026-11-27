@@ -1,4 +1,5 @@
 import 'server-only';
+import { isHostedDeploy } from '../env/deployEnv';
 
 /**
  * Turnstile 서버 확인. 결과는 세 가지뿐이다.
@@ -19,7 +20,7 @@ export const TURNSTILE_TIMEOUT_MS = 5000;
  */
 export function turnstileVerifyUrl(env: Record<string, string | undefined> = process.env): string {
   const o = env.TURNSTILE_VERIFY_URL_TEST;
-  if (!o || (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') || env.VERCEL === '1' || env.VERCEL_ENV) return TURNSTILE_VERIFY_URL;
+  if (!o || (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') || isHostedDeploy(env)) return TURNSTILE_VERIFY_URL;
   return /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/[A-Za-z0-9/_-]*$/.test(o) ? o : TURNSTILE_VERIFY_URL;
 }
 

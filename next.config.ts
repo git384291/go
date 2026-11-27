@@ -24,6 +24,8 @@ const securityHeaders = [
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // Cloud Run 이미지 빌드(Dockerfile)에서만 NEXT_OUTPUT=standalone. 그 밖(CI·로컬·next start)은 기존 출력 그대로
+  ...(process.env.NEXT_OUTPUT === 'standalone' ? { output: 'standalone' as const } : {}),
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
