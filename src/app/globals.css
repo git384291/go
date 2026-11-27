@@ -189,6 +189,10 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
 .admin-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--ink); color: #fff; }
 .mock-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #fde68a; color: #713f12; }
 .admin-main { padding: 14px 16px; display: grid; gap: 14px; }
+.admin-card { background: #fff; border-radius: 12px; padding: 14px; display: grid; gap: 10px; }
+.contract-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.contract-forms form { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.contract-forms input, .contract-forms select { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .admin-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .admin-kpis div { background: #fff; border-radius: 12px; padding: 12px; display: grid; }
 .admin-kpis b { font-size: 24px; }
@@ -282,7 +286,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .read-pager { display: flex; justify-content: space-between; font-size: 14px; }
 .read-pager a { padding: 8px 12px; background: #fff; border-radius: 10px; }
 
-/* 총판 공식 접수처 연결(기본 꺼짐 — 등록·검수 전에는 그려지지 않음) */
+/* 공식 접수처 연결(서버 고정 등록부가 유효할 때만 표시) */
 .official-intake { margin-top: 18px; display: grid; gap: 10px; }
 .official-intake-title { margin: 0; font-weight: 700; }
 .official-intake-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

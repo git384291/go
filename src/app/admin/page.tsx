@@ -19,7 +19,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     searchParams: await searchParams,
     headerExtra: (role) => (
       <form action={logoutAction} className="admin-logout">
-        {role === 'owner' && <a className="admin-link" href="/admin/progress">진행 상황</a>}
+        {role === 'owner' && <><a className="admin-link" href="/admin/contracts">설치·정산</a><a className="admin-link" href="/admin/progress">진행 상황</a></>}
         <span className="admin-role">{ROLE_LABEL[role] ?? role}</span>
         <button className="btn btn-ghost" type="submit">로그아웃</button>
       </form>

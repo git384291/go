@@ -26,6 +26,9 @@ test('스위치: 기본·오타·설정 누락·운영이면 꺼짐, 명시 + �
     assert.equal(adminAuthMode({ ...FULL, [k]: ' ' }), 'disabled', k);
   }
   assert.equal(adminAuthMode({ ...FULL, VERCEL_ENV: 'production' }), 'disabled');
+  assert.equal(adminAuthMode({ ...FULL, VERCEL_ENV: 'production', ADMIN_PRODUCTION_ENABLED: 'true' }), 'supabase');
+  assert.equal(adminAuthMode({ ...FULL, K_SERVICE: 'bareun365', ADMIN_PRODUCTION_ENABLED: 'true' }), 'supabase');
+  assert.equal(adminAuthMode({ ...FULL, K_SERVICE: 'bareun365', VERCEL_ENV: 'preview', ADMIN_PRODUCTION_ENABLED: 'true' }), 'disabled');
   assert.equal(adminAuthMode({ ...FULL, VERCEL_ENV: 'preview' }), 'supabase');
 });
 

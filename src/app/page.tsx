@@ -12,7 +12,7 @@ export function generateMetadata(): Metadata {
 }
 
 export default function HomePage() {
-  // 총판 공식 접수처 연결: 서버 상수 등록부만 사용(현재 꺼짐·빈 등록부 → 아무것도 그리지 않음)
+  // 공식 접수처 연결: 서버 고정 등록부만 사용(요청·환경값으로 목적지를 바꿀 수 없음)
   const intake = officialIntakeFor('internet-tv');
   return (
     <PageShell>

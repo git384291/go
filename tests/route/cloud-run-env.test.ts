@@ -53,6 +53,7 @@ test('CR-ENV4 Cloud Run: Gemini 무료 등급 차단(APP_ENV=dev 충돌 포함)'
 test('CR-ENV5 Cloud Run: 관리자 인증 자동 차단·가상 관리자 화면 숨김', () => {
   const full = { ADMIN_AUTH_MODE: 'supabase', NEXT_PUBLIC_SUPABASE_URL: 'https://example.invalid', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'x', FIDEON_STAFF_SIGNING_KEY: 'x', DATABASE_URL: 'x', SUPABASE_DB_CA_CERT: 'x' };
   assert.equal(adminAuthMode({ ...full, ...CR }), 'disabled');
+  assert.equal(adminAuthMode({ ...full, ...CR, ADMIN_PRODUCTION_ENABLED: 'true' }), 'supabase');
   assert.equal(adminAuthMode(full), 'supabase', '대조');
   assert.equal(adminMockVisible({ NODE_ENV: 'development', K_SERVICE: 'x' }), false);
   assert.equal(adminMockVisible({ NODE_ENV: 'development' }), true, '대조');
@@ -63,6 +64,13 @@ test('CR-ENV6 Cloud Run: 로컬 가상 DB 읽기·로컬 접수 차단', () => {
   assert.equal(dbReadReady(ok), true, '대조');
   assert.equal(dbReadReady({ ...ok, K_SERVICE: 'x' }), false);
   assert.equal(dbReadReady({ ...ok, APP_ENV: 'production' }), false);
+  const ref = 'abcdefghijklmnopqrst';
+  const prod = {
+    ...CR, ADMIN_LEADS_SOURCE: 'db', ADMIN_AUTH_MODE: 'supabase', ADMIN_PRODUCTION_ENABLED: 'true',
+    NEXT_PUBLIC_SUPABASE_URL: `https://${ref}.supabase.co`,
+    DATABASE_URL: `postgresql://app_server.${ref}:secret@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require`,
+  };
+  assert.equal(dbReadReady(prod), true, '명시 승인 + 프로젝트 ref 일치 운영 DB');
   const local = { LEAD_INTAKE_MODE: 'local', DATABASE_URL: 'postgres://u@127.0.0.1:5432/x' };
   assert.equal(leadIntakeGate(local).enabled, true, '대조');
   assert.deepEqual(leadIntakeGate({ ...local, K_SERVICE: 'x' }), { enabled: false, reason: 'LOCAL_MODE_NOT_ALLOWED_ON_VERCEL' });
