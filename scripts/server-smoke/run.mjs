@@ -218,14 +218,19 @@ try {
   r = await get('/');
   t = await r.text();
   report('H7 /: noindex 메타', r.status === 200 && /<meta name="robots" content="noindex, nofollow"/.test(t));
-  // H9 인터넷TV 상세(기본 꺼짐, PM 6925800166): 상품 안내 패널·공식 접수 표식 없음, 준비 중 안내·검색 차단 유지
-  const GUIDE_MARKS = ['data-product-guide', 'data-guide-topic', 'data-official-intake', '규칙 기반 상품 안내', '자주 묻는 질문'];
+  // H9 인터넷TV 상세: 상품 안내 패널은 꺼짐, 검수한 공식 접수 링크 1개와 준비 중 안내·검색 차단 유지
+  const GUIDE_MARKS = ['data-product-guide', 'data-guide-topic', '규칙 기반 상품 안내', '자주 묻는 질문'];
+  const OFFICIAL_INTAKE_MARKS = ['data-official-intake'];
+  const OFFICIAL_INTAKE_URL = 'https://form.naver.com/response/By757YMGRuN';
   for (const [label, h] of [['HTML', {}], ['RSC', { RSC: '1' }]]) {
     r = await get('/products/internet-tv', h);
     t = await r.text();
     const robots = label === 'HTML' ? /<meta name="robots" content="noindex, nofollow"/.test(t) : true;
-    report(`H9 /products/internet-tv ${label}: 안내 패널·공식 접수 표식 0·준비 중 안내${label === 'HTML' ? '·noindex' : ''}`,
-      r.status === 200 && leaks(t, GUIDE_MARKS) === 0 && t.includes('온라인 상담 서비스 준비 중') && robots, `표식 ${leaks(t, GUIDE_MARKS)}개`);
+    const guideMarks = leaks(t, GUIDE_MARKS);
+    const intakeMarks = leaks(t, OFFICIAL_INTAKE_MARKS);
+    report(`H9 /products/internet-tv ${label}: 안내 패널 0·공식 접수 링크 1·준비 중 안내${label === 'HTML' ? '·noindex' : ''}`,
+      r.status === 200 && guideMarks === 0 && intakeMarks === 1 && t.includes(OFFICIAL_INTAKE_URL) && t.includes('온라인 상담 서비스 준비 중') && robots,
+      `안내 표식 ${guideMarks}개, 접수 표식 ${intakeMarks}개`);
   }
   // H10 카카오톡 상품 문의(기본 꺼짐, PM 6938169689): 상담·인터넷TV HTML·RSC에 카톡 링크·버튼·안내 표식 0, 준비 중·잠금 유지
   const KAKAO_MARKS = ['data-kakao-inquiry', 'btn-kakao', 'kakao.com', '카카오톡', 'kakao-inquiry-note', '#kakao-channel'];
