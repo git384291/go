@@ -9,7 +9,8 @@
  *   '무작위'는 그 목록 안에서 순서만 섞는다(planDialOrder).
  * - ARS(자동 음성) 광고: 명시적 사전동의 증거가 있는 번호만.
  * - 육성 전화권유 예외(상담원이 직접 통화): 신고 확인 + 적법 수집출처 + 통화 시작 고지(상호·목적·수집출처) + 두낫콜 최신 조회 '등록 안 됨'
- *   + 내부 수신거부 없음 + 실제 상담원 연결이 모두 확인될 때만. 예측발신(PDS)은 상담원 예약이 확인된 경우에만 육성으로 본다.
+ *   + 내부 수신거부 없음 + 사람 상담원 배정·대기(humanAgentReady)가 모두 확인될 때만. 예측발신(PDS)은 상담원 예약(agentReserved)도 필수.
+ *   발신 뒤 실제 연결은 dial 계약(providers.ts): live_agent는 자동음성 금지, 응답 시 배정된 사람 상담원에게만 연결.
  * - 08:00~21:00(KST)만. 야간 별도 동의 기능은 열지 않는다.
  * - 발신번호·상호 표시 필수. 수신거부는 저장소 조회 결과(5분 이내 clear)만 통과 — 지속 저장소는 아직 없음(닫힌 Mock, 별도 마이그레이션 필요).
  * - 재시도 상한. 감사 기록은 연락처 HMAC·사유만(전화번호 원문 없음). 런타임 형태가 어긋나면 예외 없이 INVALID_INPUT.
@@ -56,7 +57,7 @@ export type CallContext = {
   disclosure: { businessName: string; purpose: string; announcesSource: boolean };
   callerIdShown: boolean;
   businessNameShown: boolean;
-  agentConnected: boolean | null;   // live_agent: 실제 상담원이 통화에 연결됨(확인 못 하면 null)
+  humanAgentReady: boolean | null;  // 발신 전: 사람 상담원이 배정되어 대기 중(응답 즉시 연결 가능). 확인 못 하면 null
   agentReserved: boolean | null;    // pds: 발신 전에 상담원이 예약됨(무응답 끊김 방지)
   dnc: DncStatus;
   suppression: SuppressionStatus;   // 내부 수신거부 저장소 조회 결과(발신 직전)
@@ -64,7 +65,7 @@ export type CallContext = {
 
 export type Reason =
   | 'NIGHT_BLOCKED' | 'OPTED_OUT' | 'FORBIDDEN_SOURCE' | 'SOURCE_UNVERIFIED' | 'NO_PRIOR_CONSENT' | 'CONSENT_WITHDRAWN'
-  | 'NOT_REGISTERED' | 'DISCLOSURE_MISSING' | 'DNC_LISTED' | 'DNC_UNCONFIRMED' | 'AGENT_NOT_CONNECTED' | 'PDS_REQUIRES_AGENT'
+  | 'NOT_REGISTERED' | 'DISCLOSURE_MISSING' | 'DNC_LISTED' | 'DNC_UNCONFIRMED' | 'AGENT_NOT_READY' | 'PDS_REQUIRES_AGENT'
   | 'CALLER_ID_REQUIRED' | 'RETRY_LIMIT' | 'RETRY_TOO_SOON' | 'SUPPRESSION_UNCONFIRMED' | 'CONSENT_SCOPE_MISMATCH' | 'INVALID_INPUT';
 
 export type Decision = { allowed: boolean; basis: 'consent' | 'live_exception' | null; reasons: Reason[] };
@@ -150,12 +151,12 @@ function decide(t: Target, ctx: CallContext): Decision {
     if (cs !== 'valid') r.add('NO_PRIOR_CONSENT'); else basis = 'consent';
   } else if (cs === 'valid') {
     basis = 'consent';
-    if (ctx.agentConnected !== true) r.add('AGENT_NOT_CONNECTED');
+    if (ctx.humanAgentReady !== true) r.add('AGENT_NOT_READY');
   } else {
     // 육성 전화권유 예외(정보통신망법 제50조 제1항 단서 + 방문판매법 제5조): 모두 확인돼야 함
     if (ctx.seller.telemarketingRegistered !== true || !nonEmpty(ctx.seller.registrationNo)) r.add('NOT_REGISTERED');
     if (!nonEmpty(ctx.disclosure.purpose) || ctx.disclosure.announcesSource !== true || !nonEmpty(ctx.disclosure.businessName)) r.add('DISCLOSURE_MISSING');
-    if (ctx.agentConnected !== true) r.add('AGENT_NOT_CONNECTED');
+    if (ctx.humanAgentReady !== true) r.add('AGENT_NOT_READY');
     basis = 'live_exception';
   }
   const reasons = [...r];

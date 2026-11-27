@@ -18,7 +18,7 @@ const ctx = (o: Partial<CallContext> = {}): CallContext => ({
   now: NOON, mode: 'live_agent', dialer: 'manual', purposeId: 'ad-internet-tv', businessId: 'bareun365',
   seller: { telemarketingRegistered: true, registrationNo: '제2026-인천-0001호' },
   disclosure: { businessName: '바른365', purpose: '인터넷·TV 가입 안내', announcesSource: true },
-  callerIdShown: true, businessNameShown: true, agentConnected: true, agentReserved: null,
+  callerIdShown: true, businessNameShown: true, humanAgentReady: true, agentReserved: null,
   dnc: { result: 'clear', checkedAt: NOON }, suppression: { result: 'clear', checkedAt: NOON }, ...o,
 });
 const reasons = (t: Target, c: CallContext) => decideOutbound(t, c).reasons;
@@ -34,8 +34,8 @@ test('OB2 육성 예외: 조건 하나라도 미확인이면 차단(신고·고�
     [{ disclosure: { businessName: '바른365', purpose: '안내', announcesSource: false } }, {}, 'DISCLOSURE_MISSING'],
     [{ disclosure: { businessName: '바른365', purpose: '', announcesSource: true } }, {}, 'DISCLOSURE_MISSING'],
     [{}, { source: { kind: 'customer_inquiry', recordId: 'x', lawfulVerified: false, label: 'x' } }, 'SOURCE_UNVERIFIED'],
-    [{ agentConnected: null }, {}, 'AGENT_NOT_CONNECTED'],
-    [{ agentConnected: false }, {}, 'AGENT_NOT_CONNECTED'],
+    [{ humanAgentReady: null }, {}, 'AGENT_NOT_READY'],
+    [{ humanAgentReady: false }, {}, 'AGENT_NOT_READY'],
   ];
   for (const [c, t, why] of cases) {
     const d = decideOutbound(target(t), ctx(c));
@@ -54,7 +54,7 @@ test('OB3 두낫콜: 등록·미조회·조회 실패·24시간 지난 결과는
 
 test('OB4 ARS 광고: 명시적 사전동의 증거만 허용, 육성 예외 적용 안 됨', () => {
   assert.deepEqual(reasons(target(), ctx({ mode: 'ars_ad' })), ['NO_PRIOR_CONSENT']);
-  assert.deepEqual(decideOutbound(target({ adConsent: consent }), ctx({ mode: 'ars_ad', agentConnected: null })), { allowed: true, basis: 'consent', reasons: [] });
+  assert.deepEqual(decideOutbound(target({ adConsent: consent }), ctx({ mode: 'ars_ad', humanAgentReady: null })), { allowed: true, basis: 'consent', reasons: [] });
   assert.ok(reasons(target({ adConsent: { ...consent, evidenceId: '' } }), ctx({ mode: 'ars_ad' })).includes('NO_PRIOR_CONSENT'));
   assert.ok(reasons(target({ adConsent: { ...consent, withdrawnAt: NOON } }), ctx({ mode: 'ars_ad' })).includes('CONSENT_WITHDRAWN'));
 });
@@ -109,7 +109,7 @@ test('OB11 무작위 순서: 입력 목록의 부분집합만(새 번호 0), 중
 });
 
 test('OB12 감사 기록: 연락처 HMAC·사유만, 전화번호 원문·이름 없음', () => {
-  const t = target(); const c = ctx({ agentConnected: null }); const a = auditRecord(t, c, decideOutbound(t, c));
+  const t = target(); const c = ctx({ humanAgentReady: null }); const a = auditRecord(t, c, decideOutbound(t, c));
   const s = JSON.stringify(a);
   assert.equal(/01[016789]-?\d{3,4}-?\d{4}/.test(s), false);
   assert.deepEqual(Object.keys(a).sort(), ['allowed', 'at', 'basis', 'dialer', 'mode', 'phoneHmac', 'reasons']);
@@ -167,17 +167,19 @@ test('OB16 사전동의: 미래 시각·목적 불일치·사업자 불일치는
 test('OB17 오케스트레이터: 발신 직전 두낫콜·수신거부를 새로 조회해 판정, 통과 시에만 dial(호출자 값 무시)', async () => {
   const dialer = new ClosedMockDialer(); const sup = new ClosedMockSuppressionStore();
   const dnc = new ClosedMockDnc({ [H('a')]: 'clear', [H('b')]: 'listed', [H('c')]: 'clear' });
-  const { dnc: _d, suppression: _s, ...base } = ctx();
-  const ok = await placeOutboundCall({ dnc, suppression: sup, dialer }, target({ phoneHmac: H('a') }), base);
+  const { dnc: _d, suppression: _s, now: _n, ...base } = ctx();
+  void _d; void _s; void _n;
+  const clock = () => NOON;
+  const ok = await placeOutboundCall({ dnc, suppression: sup, dialer, clock }, target({ phoneHmac: H('a') }), base);
   assert.equal(ok.decision.allowed, true); assert.equal(ok.callId, 'mock-1');
-  const listed = await placeOutboundCall({ dnc, suppression: sup, dialer }, target({ phoneHmac: H('b') }), { ...base, dnc: { result: 'clear', checkedAt: NOON } } as never);
+  const listed = await placeOutboundCall({ dnc, suppression: sup, dialer, clock }, target({ phoneHmac: H('b') }), { ...base, dnc: { result: 'clear', checkedAt: NOON } } as never);
   assert.equal(listed.callId, null); assert.ok(listed.decision.reasons.includes('DNC_LISTED'), '호출자가 넣은 clear를 무시');
   await sup.block(H('c'), NOON);
-  const blocked = await placeOutboundCall({ dnc, suppression: sup, dialer }, target({ phoneHmac: H('c') }), base);
+  const blocked = await placeOutboundCall({ dnc, suppression: sup, dialer, clock }, target({ phoneHmac: H('c') }), base);
   assert.ok(blocked.decision.reasons.includes('OPTED_OUT')); assert.equal(blocked.callId, null);
-  const failing = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(true), dialer }, target({ phoneHmac: H('a') }), base);
+  const failing = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(true), dialer, clock }, target({ phoneHmac: H('a') }), base);
   assert.ok(failing.decision.reasons.includes('SUPPRESSION_UNCONFIRMED'));
-  const throwing = await placeOutboundCall({ dnc: { name: 'x', check: async () => { throw new Error('down'); } }, suppression: sup, dialer }, target({ phoneHmac: H('a') }), base);
+  const throwing = await placeOutboundCall({ dnc: { name: 'x', check: async () => { throw new Error('down'); } }, suppression: sup, dialer, clock }, target({ phoneHmac: H('a') }), base);
   assert.ok(throwing.decision.reasons.includes('DNC_UNCONFIRMED'));
   assert.equal(dialer.placed.length, 1, '실제 발신 기록은 통과 1건뿐(비용 0 Mock)');
   assert.equal(sup.persistent, false, '지속 저장 아님(미완료)');
@@ -191,4 +193,47 @@ test('OB-ORCH 발신 경계: src 전체에서 .dial( 호출은 placeOutboundCall
     return [...src.matchAll(/\.dial\(/g)].map(() => f);
   });
   assert.deepEqual(hits, ['src/server/outbound/providers.ts']);
+});
+
+test('OB18 시각 위조 불가: base.now(낮)를 넣어도 서버 Clock(밤 22시)으로 판정·조회·감사', async () => {
+  const night = kst(22);
+  const dialer = new ClosedMockDialer();
+  const seen: Date[] = [];
+  const dnc = { name: 'spy', check: async (_h: string, now: Date) => { seen.push(now); return { result: 'clear' as const, checkedAt: now }; } };
+  const { dnc: _d, suppression: _s, ...withNow } = ctx({ now: NOON }); void _d; void _s;
+  const r = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(), dialer, clock: () => night }, target(), withNow as never);
+  assert.equal(r.decision.allowed, false); assert.ok(r.decision.reasons.includes('NIGHT_BLOCKED'));
+  assert.equal(r.audit.at, night.toISOString()); assert.deepEqual(seen, [night]); assert.equal(dialer.placed.length, 0);
+});
+
+test('OB19 placeOutboundCall은 예외 없음: null·형태 불량·동기 throw 조회·발신 실패를 차단 결과로 반환', async () => {
+  const { dnc: _d, suppression: _s, now: _n, ...base } = ctx(); void _d; void _s; void _n;
+  const clock = () => NOON;
+  const good = { dnc: new ClosedMockDnc({ [H('a')]: 'clear' }), suppression: new ClosedMockSuppressionStore(), dialer: new ClosedMockDialer(), clock };
+  for (const [deps, t] of [[null, target()], [{ ...good, dnc: null }, target()], [good, null], [good, { phoneHmac: 'x' }], [{ ...good, clock: () => { throw new Error('clock'); } }, target()]] as const) {
+    const r = await placeOutboundCall(deps as never, t as never, base);
+    assert.deepEqual(r.decision.reasons, ['INVALID_INPUT']); assert.equal(r.callId, null);
+  }
+  const syncThrow = { ...good, dnc: { name: 'x', check: (() => { throw new Error('sync'); }) as never } };
+  const r1 = await placeOutboundCall(syncThrow, target(), base);
+  assert.ok(r1.decision.reasons.includes('DNC_UNCONFIRMED')); assert.equal(r1.callId, null);
+  const syncSup = { ...good, suppression: { name: 'x', persistent: false, check: (() => { throw new Error('sync'); }) as never, block: async () => {} } };
+  assert.ok((await placeOutboundCall(syncSup, target(), base)).decision.reasons.includes('SUPPRESSION_UNCONFIRMED'));
+  const failDial = { ...good, dialer: { name: 'x', dial: (() => { throw new Error('carrier'); }) as never } };
+  const r2 = await placeOutboundCall(failDial, target(), base);
+  assert.equal(r2.decision.allowed, true); assert.equal(r2.callId, null); assert.equal(r2.error, 'DIAL_FAILED');
+});
+
+test('OB20 dial 계약: live_agent 요청에 mode 전달(자동음성 금지·사람 상담원만), 사람 상담원 미배정이면 발신 안 함', async () => {
+  const { dnc: _d, suppression: _s, now: _n, ...base } = ctx(); void _d; void _s; void _n;
+  const dialer = new ClosedMockDialer(); const clock = () => NOON;
+  const deps = { dnc: new ClosedMockDnc({ [H('a')]: 'clear' }), suppression: new ClosedMockSuppressionStore(), dialer, clock };
+  await placeOutboundCall(deps, target(), base);
+  assert.deepEqual(dialer.placed.map((p) => p.mode), ['live_agent']);
+  const r = await placeOutboundCall(deps, target(), { ...base, humanAgentReady: false });
+  assert.ok(r.decision.reasons.includes('AGENT_NOT_READY')); assert.equal(dialer.placed.length, 1);
+  const pds = await placeOutboundCall(deps, target(), { ...base, dialer: 'pds', agentReserved: null });
+  assert.ok(pds.decision.reasons.includes('PDS_REQUIRES_AGENT'));
+  const src = readFileSync('src/server/outbound/providers.ts', 'utf8');
+  assert.match(src, /자동 음성 재생 금지/); assert.match(src, /사람 상담원에게만 연결/);
 });

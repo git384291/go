@@ -16,7 +16,7 @@
 |---|---|---|
 | 번호 생성 금지 | 생성 기능 없음. 출처 `generated`·`sequential`·`external_auto_import`·`unknown`은 항상 차단. '무작위'는 적법 목록 안 **순서만** 섞기(`planDialOrder`, 출력 ⊆ 입력) | OB6·OB11·OB14 |
 | ARS 광고 | 명시적 사전동의 증거(전화 채널·증거 ID·철회 없음)만. 육성 예외 없음 | OB4 |
-| 육성 예외 | 신고 확인 + 신고번호 + 적법 수집출처(기록 ID·라벨) + 통화 시작 고지(상호·목적·수집출처) + 두낫콜 24시간 내 '등록 안 됨' + 내부 수신거부 없음 + 실제 상담원 연결 — 하나라도 미확인이면 차단 | OB1·OB2·OB3 |
+| 육성 예외 | 신고 확인 + 신고번호 + 적법 수집출처(기록 ID·라벨) + 통화 시작 고지(상호·목적·수집출처) + 두낫콜 24시간 내 '등록 안 됨' + 내부 수신거부 없음 + 사람 상담원 배정·대기(humanAgentReady) — 하나라도 미확인이면 차단 | OB1·OB2·OB3 |
 | PDS(예측발신) | 육성 모드 + 발신 전 상담원 예약 확인만(무응답 끊김·자동음성 방지) | OB5 |
 | 시간 | KST 08:00~20:59만. 야간 별도 동의 기능은 열지 않음 | OB7 |
 | 표시 | 발신번호·상호 표시 필수 | OB8 |
@@ -26,7 +26,8 @@
 | 연동 | `selectDncChecker`·`selectSuppressionStore`·`selectOutboundDialer`: 기본 닫힌 Mock, 그 밖 선택은 `LIVE_OUTBOUND_NOT_APPROVED` | OB13·OB17 |
 | 동의 범위 | 동의 시각 ≤ 지금, 광고 목적(purposeId)·동의받은 사업자(granteeBusinessId)가 이번 발신과 일치해야 근거 | OB16 |
 | 런타임 검사 | 출처는 허용 목록(customer_inquiry·consent_form·existing_customer)만, 형태 이상·Invalid Date는 예외 없이 INVALID_INPUT | OB6·OB15 |
-| 발신 경로 | `placeOutboundCall`만: 발신 직전 두낫콜·수신거부 새로 조회(호출자 값 무시) → 판정 → 통과 시 dial | OB17·OB-ORCH |
+| 발신 경로 | `placeOutboundCall`만: 서버 Clock 시각(호출자 now 무시)으로 두낫콜·수신거부 새로 조회 → 판정 → 통과 시 dial. 예외 없음(형태 불량·동기 throw·발신 실패 → 차단 결과) | OB17~OB19·OB-ORCH |
+| dial 계약 | live_agent: 자동음성 금지, 응답 시 배정된 사람 상담원에게만 연결(없으면 무음 종료). PDS는 agentReserved도 필수 | OB5·OB20 |
 
 두낫콜 24시간 기준은 법정 주기가 아니라 **내부 운영 기준(더 엄격)**이다.
 

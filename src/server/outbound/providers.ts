@@ -6,6 +6,10 @@
  * - ⚠ 위험: OutboundDialer.dial은 인터페이스라 누구든 직접 부를 수 있다. 그래서 dial 호출은 이 파일의 placeOutboundCall 한 곳에서만 한다
  *   (시험 OB-ORCH가 src 전체에서 `.dial(` 호출 위치를 검사). live 발신기를 만들 때도 이 경로만 쓴다.
  * - placeOutboundCall은 발신 직전에 두낫콜·내부 수신거부를 새로 조회해 판정(decideOutbound)에 넣고, 통과했을 때만 dial을 부른다.
+ * - 시각은 서버 신뢰 Clock만 쓴다(호출자가 now를 넘길 수 없음). 발신 직전 clock 값 하나를 판정·조회·감사에 똑같이 쓴다.
+ * - placeOutboundCall은 예외를 던지지 않는다: 형태 불량·의존성 오류(동기/비동기 throw 포함)는 차단 결과로 돌려준다.
+ * - dial 계약: mode='live_agent'면 자동 음성 재생 금지, 수신자가 받으면 배정된 사람 상담원에게만 연결하고 상담원이 없으면 아무 말 없이 즉시 종료.
+ *   mode='ars_ad'는 판정에서 목적·사업자 일치 명시 동의가 확인된 경우에만 온다. live 발신기는 여전히 금지(LIVE_OUTBOUND_NOT_APPROVED).
  * - 내부 수신거부 저장소는 지금 프로세스 메모리 Mock이다 — 재시작하면 사라지므로 '영구'가 아니다. 지속 DB 저장은 별도 마이그레이션 PR 필요(미완료).
  */
 import { auditRecord, decideOutbound, type CallContext, type Decision, type DncStatus, type OutboundAudit, type SuppressionStatus, type Target } from './compliance';
@@ -25,10 +29,12 @@ export interface SuppressionStore {
   block(phoneHmac: string, now: Date): Promise<void>;
 }
 
+export type DialRequest = { phoneHmac: string; mode: 'live_agent' | 'ars_ad'; callerIdShown: true; businessName: string };
+
 export interface OutboundDialer {
   readonly name: string;
-  /** 직접 호출 금지 — placeOutboundCall만 부른다. 반환: 업체 통화 ID */
-  dial(req: { phoneHmac: string; callerIdShown: true; businessName: string }): Promise<string>;
+  /** 직접 호출 금지 — placeOutboundCall만 부른다. 계약은 파일 머리말(live_agent: 자동음성 금지·사람 상담원만 연결). 반환: 업체 통화 ID */
+  dial(req: DialRequest): Promise<string>;
 }
 
 /** 시험용 두낫콜: 미리 정한 결과만(외부 호출 0). 정하지 않은 번호는 'unknown'(= 차단) */
@@ -64,9 +70,9 @@ export class ClosedMockSuppressionStore implements SuppressionStore {
 /** 시험용 발신기: 실제로 걸지 않고 요청만 기록(비용 0) */
 export class ClosedMockDialer implements OutboundDialer {
   readonly name = 'mock_dialer';
-  readonly placed: { phoneHmac: string; businessName: string }[] = [];
-  async dial(req: { phoneHmac: string; callerIdShown: true; businessName: string }): Promise<string> {
-    this.placed.push({ phoneHmac: req.phoneHmac, businessName: req.businessName });
+  readonly placed: { phoneHmac: string; mode: DialRequest['mode']; businessName: string }[] = [];
+  async dial(req: DialRequest): Promise<string> {
+    this.placed.push({ phoneHmac: req.phoneHmac, mode: req.mode, businessName: req.businessName });
     return `mock-${this.placed.length}`;
   }
 }
@@ -84,21 +90,47 @@ export function selectOutboundDialer(env: Env = process.env): OutboundDialer {
   return (env.OUTBOUND_DIAL_MODE ?? 'mock') === 'mock' ? new ClosedMockDialer() : closed();
 }
 
-export type OutboundDeps = { dnc: DncChecker; suppression: SuppressionStore; dialer: OutboundDialer };
-export type PlaceResult = { decision: Decision; callId: string | null; audit: OutboundAudit };
+export type OutboundDeps = { dnc: DncChecker; suppression: SuppressionStore; dialer: OutboundDialer; clock?: () => Date };
+export type PlaceResult = { decision: Decision; callId: string | null; audit: OutboundAudit; error: 'DIAL_FAILED' | null };
+export type BaseContext = Omit<CallContext, 'dnc' | 'suppression' | 'now'>;
+
+const INVALID: Decision = { allowed: false, basis: null, reasons: ['INVALID_INPUT'] };
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+/** 동기 throw까지 잡는 조회: Promise.resolve().then으로 감싸 어떤 오류도 fallback으로 바꾼다 */
+const safely = <T>(f: () => Promise<T> | T, fallback: T): Promise<T> => Promise.resolve().then(f).catch(() => fallback);
 
 /**
- * 유일한 발신 경로. 발신 직전 두낫콜·내부 수신거부를 새로 조회 → 판정 → 통과 시에만 dial.
- * base의 dnc·suppression 값은 무시하고 조회 결과로 덮어쓴다(호출자가 'clear'를 넣어 우회하지 못하게). 조회 예외는 error로 바꿔 차단.
+ * 유일한 발신 경로. 서버 Clock으로 발신 시각을 정하고, 그 시각에 두낫콜·내부 수신거부를 새로 조회 → 판정 → 통과 시에만 dial.
+ * base에 now·dnc·suppression이 들어 있어도 무시한다(위조 시각·위조 조회 결과로 우회 불가). 예외를 던지지 않는다.
  */
-export async function placeOutboundCall(deps: OutboundDeps, target: Target, base: Omit<CallContext, 'dnc' | 'suppression'>): Promise<PlaceResult> {
-  const now = base.now;
-  const dnc = await deps.dnc.check(target.phoneHmac, now).catch((): DncStatus => ({ result: 'error', checkedAt: null }));
-  const suppression = await deps.suppression.check(target.phoneHmac, now).catch((): SuppressionStatus => ({ result: 'error', checkedAt: null }));
-  const ctx: CallContext = { ...base, dnc, suppression };
-  const decision = decideOutbound(target, ctx);
-  const audit = auditRecord(target, ctx, decision);
-  if (!decision.allowed) return { decision, callId: null, audit };
-  const callId = await deps.dialer.dial({ phoneHmac: target.phoneHmac, callerIdShown: true, businessName: ctx.disclosure.businessName });
-  return { decision, callId, audit };
+export async function placeOutboundCall(deps: OutboundDeps, target: Target, base: BaseContext): Promise<PlaceResult> {
+  let now: Date;
+  try {
+    now = (isObj(deps) && typeof deps.clock === 'function' ? deps.clock : () => new Date())();
+  } catch {
+    now = new Date(NaN);
+  }
+  const blocked = (decision: Decision, ctx?: CallContext): PlaceResult =>
+    ({ decision, callId: null, audit: auditRecord(target, ctx ?? ({ now, mode: (base as BaseContext)?.mode, dialer: (base as BaseContext)?.dialer } as CallContext), decision), error: null });
+  try {
+    if (!isObj(deps) || !isObj(deps.dnc) || !isObj(deps.suppression) || !isObj(deps.dialer)
+      || typeof deps.dnc.check !== 'function' || typeof deps.suppression.check !== 'function' || typeof deps.dialer.dial !== 'function'
+      || !isObj(target) || typeof target.phoneHmac !== 'string' || !/^[0-9a-f]{64}$/.test(target.phoneHmac) || !isObj(base)
+      || !(now instanceof Date) || Number.isNaN(now.getTime())) {
+      return blocked(INVALID);
+    }
+    const h = target.phoneHmac;
+    const dnc = await safely<DncStatus>(() => deps.dnc.check(h, now), { result: 'error', checkedAt: null });
+    const suppression = await safely<SuppressionStatus>(() => deps.suppression.check(h, now), { result: 'error', checkedAt: null });
+    const { now: _ignoredNow, dnc: _ignoredDnc, suppression: _ignoredSup, ...rest } = base as BaseContext & Partial<Pick<CallContext, 'now' | 'dnc' | 'suppression'>>;
+    void _ignoredNow; void _ignoredDnc; void _ignoredSup;
+    const ctx: CallContext = { ...(rest as BaseContext), now, dnc, suppression };
+    const decision = decideOutbound(target, ctx);
+    if (!decision.allowed) return blocked(decision, ctx);
+    const audit = auditRecord(target, ctx, decision);
+    const callId = await safely<string | null>(() => deps.dialer.dial({ phoneHmac: h, mode: ctx.mode, callerIdShown: true, businessName: ctx.disclosure.businessName }), null);
+    return { decision, callId, audit, error: callId === null ? 'DIAL_FAILED' : null };
+  } catch {
+    return blocked(INVALID);
+  }
 }
