@@ -135,6 +135,31 @@ run db/tests/99_ad_precheck.sql >/dev/null   # 광고 사전검증 10: 예약 �
 run db/tests/99_lead_gclid.sql >/dev/null   # 광고 사전검증 8: gclid 접수 귀속·첫 값 보존·형식·변조·보존기간(0027)
 run db/tests/99_policy_pr16_verify.sql >/dev/null   # PR #16 추가 검증(PM 11/25): 비활성 상품 차단·정확성·캐시 구조·실패 롤백·Supabase 보안 구조(한 트랜잭션, 마지막에 되돌림)
 run db/tests/99_calls.sql >/dev/null   # 통화 녹취·STT·AI 요약·고객 이력(0064~0067, PM 11/25)
+run db/tests/99_outbound_persistence.sql >/dev/null   # 광고성 전화 수신거부·시도·판정 기록 영구화(0070, 코사장 11/27)
+# 0070 지속성·동시성: 새 연결에서도 blocked 유지, 20개 연결 동시 block → 1행, 동시 시도 20건 → 1건만 기록
+OPH=$(printf '5e%.0s' $(seq 1 32))
+pers=$("${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select result from api.outbound_suppression_check('bareun365', repeat('1a', 32))" -c "commit" | grep -v -E '^(BEGIN|SET|COMMIT)$')
+[ "$pers" = blocked ] || { echo "FAIL | OP39 새 연결에서 수신거부 유지 안 됨: $pers" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+pids=(); for i in $(seq 1 20); do "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select api.outbound_suppression_block('bareun365', '$OPH')" -c "commit" >/dev/null 2>&1 & pids+=($!); done
+for p in "${pids[@]}"; do wait "$p" || { echo "FAIL | OP40 동시 수신거부 기록 중 오류" | tee -a "$LOG_DIR/db-test.log"; exit 1; }; done
+c40=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.outbound_suppressions where phone_hmac = '$OPH'")
+[ "$c40" = 1 ] || { echo "FAIL | OP40 동시 20회 block → 행 $c40 (기대 1)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+OPA=$(printf '6f%.0s' $(seq 1 32)); pids=()
+for i in $(seq 1 20); do "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select api.outbound_attempt_begin('bareun365', '$OPA', 'ad-internet-tv', 'live_agent', 'manual')" -c "commit" >/dev/null 2>&1 & pids+=($!); done
+for p in "${pids[@]}"; do wait "$p" || true; done
+c41=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.outbound_attempts where phone_hmac = '$OPA'")
+[ "$c41" = 1 ] || { echo "FAIL | OP41 동시 20회 시도 시작 → 기록 $c41 (기대 1, 24시간 간격)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+# OP42 수신거부 기록과 시도 시작이 같은 잠금: 수신거부 트랜잭션이 끝나기 전 시작한 시도는 기다렸다가 OPTED_OUT
+OPL=$(printf '7b%.0s' $(seq 1 32))
+( "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select api.outbound_suppression_block('bareun365', '$OPL')" -c "select pg_sleep(2)" -c "commit" >/dev/null 2>&1 ) &
+LKPID=$!
+sleep 0.7
+r42=$( { "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select api.outbound_attempt_begin('bareun365', '$OPL', 'ad-internet-tv', 'live_agent', 'manual')" -c "commit" 2>&1 >/dev/null || true; } | grep -oE 'OPTED_OUT' | head -1 || true)
+wait "$LKPID"
+c42=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.outbound_attempts where phone_hmac = '$OPL'")
+[ "$r42" = OPTED_OUT ] && [ "$c42" = 0 ] || { echo "FAIL | OP42 수신거부·시도 잠금 경합 r=$r42 시도기록=$c42" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | OP42 수신거부 기록 중(커밋 전) 시작한 시도는 같은 잠금을 기다린 뒤 OPTED_OUT, 시도 기록 0건" >> "$LOG_DIR/db-test.log"
+echo "NOTICE:  PASS | OP39~41 새 연결 후 수신거부 유지, 동시 20회 block 1행(멱등), 동시 20회 시도 시작 1건만 기록(24시간 간격 직렬화)" >> "$LOG_DIR/db-test.log"
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
 # 게이트가 통과하려면 스위치 ON + 유효 정책이 필요하다. 정책 행은 지울 수 없어 고유 키(pg6-*)·짧은 유효기간(2분)으로 만들고, 스위치는 시작 값으로 되돌린다
@@ -881,6 +906,20 @@ D -f db/migrations/0063_purge_notes_retention.sql >/dev/null
 back63=$(D -At -c "select to_regprocedure('core.legal_hold(uuid)') is not null and position('lead_notes' in pg_get_functiondef('core.purge_customer_internal(uuid,uuid,text)'::regprocedure)) > 0")
 [ "$gone63" = t ] && [ "$back63" = t ] || { echo "FAIL | M63 0063 롤백 gone=$gone63 재적용=$back63" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M63 메모 파기·보존 분리 0063 롤백: 함수 제거·이전 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0070 광고성 전화 기록: 적용 → 기록 → 롤백(함수 6개만 제거, 표·기록·추가 전용 트리거 보존) → 재적용(기록 그대로)
+D -f db/migrations/0070_outbound_persistence.sql >/dev/null
+pub70=$(D -At -c "select count(*) from pg_proc p where p.pronamespace = 'api'::regnamespace and p.proname like 'outbound\_%' and (p.proacl is null or array_to_string(p.proacl::text[], ',') ~ '(^|,)=X' or has_function_privilege('app_public', p.oid, 'execute') or has_function_privilege('app_staff', p.oid, 'execute') or has_function_privilege('app_call', p.oid, 'execute'))")
+[ "$pub70" = 0 ] || { echo "FAIL | OP43 0070 단독 적용 직후 실행 권한 열림: $pub70" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | OP43 0070 단독 적용 직후(zz_grants 전) PUBLIC·공개·관리자·통화 역할 모두 실행 불가(함수 6개)" >> "$LOG_DIR/db-test.log"
+D -q -c "insert into core.outbound_suppressions (business_id, phone_hmac) values ('bareun365', repeat('7a', 32))" >/dev/null
+D -f db/rollback/0070_down.sql >/dev/null
+gone70=$(D -At -c "select to_regprocedure('api.outbound_suppression_block(text,text)') is null and to_regprocedure('api.outbound_attempt_begin(text,text,text,text,text)') is null and to_regprocedure('api.outbound_decision_record(text,text,boolean,text,text[])') is null")
+keep70=$(D -At -c "select (select count(*) from core.outbound_suppressions) || '/' || (select count(*) from pg_trigger where tgname like 'outbound_%_append_only')")
+del70=$( { D -q -c "delete from core.outbound_suppressions" 2>&1 >/dev/null || true; } | grep -c OUTBOUND_APPEND_ONLY || true)
+D -f db/migrations/0070_outbound_persistence.sql >/dev/null
+back70=$(D -At -c "select to_regprocedure('api.outbound_suppression_check(text,text)') is not null and (select count(*) from core.outbound_suppressions) = 1")
+[ "$gone70" = t ] && [ "$keep70" = "1/4" ] && [ "$del70" = 1 ] && [ "$back70" = t ] || { echo "FAIL | M70 0070 롤백 gone=$gone70 보존=$keep70 삭제차단=$del70 재적용=$back70" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M70 광고성 전화 기록 0070 롤백: 함수 6개만 제거, 수신거부 기록·추가 전용 트리거 4개 보존(롤백 뒤에도 삭제 차단), 재적용 시 기록 그대로" >> "$LOG_DIR/db-test.log"
 # 0069 설치·정산·환수(코사장 11/27 안전 보완): 적용 전 지문 → 적용·기록 1건씩 → 롤백(api 함수 4개만 제거, 기록·보호 트리거 보존, 0069 밖 지문 불변) → 재적용(기록 그대로)
 FP69="select md5(coalesce(string_agg(x, ';' order by x), '')) from (
   select n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || md5(p.prosrc) || coalesce(array_to_string(p.proacl::text[], ','), '') as x
