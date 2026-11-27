@@ -51,7 +51,10 @@
 - 🟡 내부 수신거부 지속 저장: 0070으로 DB 표·함수·어댑터 준비(병합·DB 적용 전). 메모리 Mock은 시험용으로만 남음.
 - 🔴 지속 저장이 생겨도 운영 전 **법률 자문·전화권유판매업 신고·두낫콜 실제 커넥터·발신번호 사전등록**은 여전히 필수(미완료).
 - 🟡 **남은 경쟁 위험**: 발신 직전 수신거부 재조회와 실제 통신망 연결 사이의 짧은 틈은 원자적으로 막을 수 없다(외부 통신망). live 발신기 금지 유지, live 구현 시 업체 측 차단 확인·통화 시작 직후 수신거부 처리 절차를 별도 검토.
-- 🟡 DB 어댑터는 아직 실제 선택 경로(`selectSuppressionStore` 등)에 연결되지 않음 — 완료 아님.
+- 🟢 서버 조립(PR feat/outbound-server-wiring): `src/server/outbound/service.ts`(server-only, app_call 트랜잭션·사업자 고정) → `assemble.ts`.
+  기본은 닫힌 Mock, `OUTBOUND_PERSISTENCE=db`일 때만 수신거부·원장이 DB. 트랜잭션·사업자 없음·0070 함수 실행 불가·조회 실패 → 닫힘(dial 0회).
+  공개 route·화면·스케줄러·번호 원문 입력 API는 없다(아직 어떤 경로에도 연결하지 않음, 시험 OSW-BUNDLE).
+- 🔴 **DB 어댑터가 연결돼도 live 발신은 금지**: 발신기·두낫콜은 Mock만(그 밖은 LIVE_OUTBOUND_NOT_APPROVED).
 - 🟡 `OutboundDialer.dial`은 인터페이스라 직접 부를 수 있다 → 시험 OB-ORCH가 src 전체에서 `.dial(` 호출을 `placeOutboundCall` 한 곳으로 제한. live 발신기도 이 경로만 사용.
 
 ## 남은 법률·업체 의존 (운영 전 필수)
