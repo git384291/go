@@ -44,26 +44,30 @@ test('OPA2 DB 수신거부 기록: blocked 응답만 성공, 그 밖은 LEDGER_F
 test('OPA3 DB 원장: 시도 거부 사유(3회·24시간·수신거부)는 코드 그대로, 그 밖 DB 오류는 LEDGER_FAILED(원문 없음)', async () => {
   const err = (m: string, code = '22023') => Object.assign(new Error(m), { code });
   const e = { businessId: 'bareun365', phoneHmac: H('a'), purposeId: 'ad-internet-tv', mode: 'live_agent' as const, dialer: 'manual' as const };
-  for (const m of ['RETRY_LIMIT', 'RETRY_TOO_SOON', 'OPTED_OUT']) await assert.rejects(new DbOutboundLedger(fakeTx(() => err(m)).tx).beginAttempt(e), (x: unknown) => x instanceof OutboundError && x.code === m);
-  await assert.rejects(new DbOutboundLedger(fakeTx(() => err('connection to db.internal failed', '08006')).tx).beginAttempt(e), (x: unknown) => x instanceof OutboundError && x.code === 'LEDGER_FAILED');
-  assert.equal(await new DbOutboundLedger(fakeTx(() => [{ id: '7' }]).tx).beginAttempt(e), 7);
-  await assert.rejects(new DbOutboundLedger(fakeTx(() => [{ id: 0 }]).tx).beginAttempt(e), /LEDGER_FAILED/);
+  for (const m of ['RETRY_LIMIT', 'RETRY_TOO_SOON', 'OPTED_OUT']) await assert.rejects(new DbOutboundLedger(fakeTx(() => err(m)).tx, 'bareun365').beginAttempt(e), (x: unknown) => x instanceof OutboundError && x.code === m);
+  await assert.rejects(new DbOutboundLedger(fakeTx(() => err('connection to db.internal failed', '08006')).tx, 'bareun365').beginAttempt(e), (x: unknown) => x instanceof OutboundError && x.code === 'LEDGER_FAILED');
+  assert.equal(await new DbOutboundLedger(fakeTx(() => [{ id: '7' }]).tx, 'bareun365').beginAttempt(e), 7);
+  await assert.rejects(new DbOutboundLedger(fakeTx(() => [{ id: 0 }]).tx, 'bareun365').beginAttempt(e), /LEDGER_FAILED/);
   const d = fakeTx(() => [{ id: 3 }]);
-  await new DbOutboundLedger(d.tx).recordDecision({ businessId: 'bareun365', phoneHmac: H('a'), allowed: false, basis: null, reasons: ['NIGHT_BLOCKED'] });
+  await new DbOutboundLedger(d.tx, 'bareun365').recordDecision({ businessId: 'bareun365', phoneHmac: H('a'), allowed: false, basis: null, reasons: ['NIGHT_BLOCKED'] });
   assert.equal(JSON.stringify(d.log).includes('바른365'), false, '고지문·상호 문구를 보내지 않음');
 });
 
 test('OPA4 판정 기록 실패 → 발신 0회(허용 판정이어도)', async () => {
   const dialer = new ClosedMockDialer();
-  const r = await placeOutboundCall(deps({ dialer, ledger: new ClosedMockLedger({ decision: true }) }), target(), base);
-  assert.equal(r.decision.allowed, true); assert.equal(r.callId, null); assert.equal(r.error, 'LEDGER_FAILED'); assert.equal(dialer.placed.length, 0);
+  const ledger = new ClosedMockLedger({ decision: true });
+  const r = await placeOutboundCall(deps({ dialer, ledger }), target(), base);
+  assert.equal(r.callId, null); assert.equal(r.error, 'LEDGER_FAILED'); assert.equal(dialer.placed.length, 0);
+  assert.equal(ledger.attempts[0].result, 'cancelled', '시작된 시도는 취소로 마감');
 });
 
 test('OPA5 시도 시작 거부(DB의 3회·24시간·수신거부)·실패 → 발신 0회', async () => {
   for (const [code, err] of [['RETRY_LIMIT', 'ATTEMPT_REJECTED'], ['RETRY_TOO_SOON', 'ATTEMPT_REJECTED'], ['OPTED_OUT', 'ATTEMPT_REJECTED'], ['LEDGER_FAILED', 'LEDGER_FAILED']] as const) {
     const dialer = new ClosedMockDialer();
-    const r = await placeOutboundCall(deps({ dialer, ledger: new ClosedMockLedger({ begin: code }) }), target({ attempts: 0 }), base);
+    const ledger = new ClosedMockLedger({ begin: code });
+    const r = await placeOutboundCall(deps({ dialer, ledger }), target({ attempts: 0 }), base);
     assert.equal(r.callId, null); assert.equal(r.error, err); assert.equal(dialer.placed.length, 0, code);
+    assert.deepEqual(ledger.decisions.map((d) => [d.allowed, d.reasons.join()]), [[false, code === 'LEDGER_FAILED' ? 'ATTEMPT_UNAVAILABLE' : code]], '최종 감사는 정확한 사유의 차단 1건만');
   }
 });
 
@@ -90,4 +94,42 @@ test('OPA7 DB 장애(조회 실패)면 발신 0회 — DB 수신거부 어댑터
 test('OPA8 선택 함수는 여전히 Mock만: db·live 선택은 LIVE_OUTBOUND_NOT_APPROVED(연결은 승인 뒤)', () => {
   for (const m of ['db', 'live']) assert.throws(() => selectSuppressionStore({ OUTBOUND_SUPPRESSION_MODE: m }), (e: unknown) => e instanceof OutboundError && e.code === 'LIVE_OUTBOUND_NOT_APPROVED');
   assert.equal(new DbSuppressionStore(fakeTx(() => []).tx, 'bareun365').persistent, true);
+});
+
+test('OPA9 DB 원장은 생성 때 고정한 사업자만: 다른 사업자 ID 기록·시도 거부, 결과 기록에 고정 사업자 전달', async () => {
+  const t = fakeTx(() => [{ id: 1 }]);
+  const l = new DbOutboundLedger(t.tx, 'bareun365');
+  await assert.rejects(l.beginAttempt({ businessId: 'other-dealer', phoneHmac: H('a'), purposeId: 'ad-internet-tv', mode: 'live_agent', dialer: 'manual' }), /INVALID_INPUT/);
+  await assert.rejects(l.recordDecision({ businessId: 'other-dealer', phoneHmac: H('a'), allowed: false, basis: null, reasons: ['X_Y'] }), /INVALID_INPUT/);
+  assert.equal(t.log.length, 0, '거부는 DB 호출 0회');
+  await l.finishAttempt(5, 'cancelled');
+  assert.deepEqual(t.log[0].v, ['bareun365', 5, 'cancelled']);
+  assert.throws(() => new DbOutboundLedger(t.tx, 'Bad Biz'), /INVALID_INPUT/);
+});
+
+test('OPA10 시도 시작 직후 수신거부가 끼어들면 발신 0회: 시도 취소·OPTED_OUT 차단 판정만 기록', async () => {
+  const sup = new ClosedMockSuppressionStore(); const dialer = new ClosedMockDialer();
+  const inner = new ClosedMockLedger();
+  const ledger = { name: 'race', recordDecision: inner.recordDecision.bind(inner), finishAttempt: inner.finishAttempt.bind(inner),
+    beginAttempt: async (e: Parameters<typeof inner.beginAttempt>[0]) => { const id = await inner.beginAttempt(e); await sup.block(e.phoneHmac, NOON); return id; } };
+  const r = await placeOutboundCall(deps({ suppression: sup, dialer, ledger }), target(), base);
+  assert.equal(r.callId, null); assert.equal(dialer.placed.length, 0);
+  assert.deepEqual(r.decision.reasons, ['OPTED_OUT']);
+  assert.deepEqual(inner.decisions.map((d) => [d.allowed, d.reasons.join()]), [[false, 'OPTED_OUT']], '허용 판정은 기록되지 않음');
+  assert.equal(inner.attempts[0].result, 'cancelled');
+  const errSup = { name: 'x', persistent: true, block: async () => {}, check: (() => { let n = 0; return async (_h: string, now: Date) => (++n === 1 ? { result: 'clear' as const, checkedAt: now } : { result: 'error' as const, checkedAt: null }); })() };
+  const r2 = await placeOutboundCall(deps({ suppression: errSup }), target(), base);
+  assert.deepEqual(r2.decision.reasons, ['SUPPRESSION_UNCONFIRMED']); assert.equal(r2.callId, null);
+});
+
+test('OPA11 순서: 허용 판정 기록은 시도 시작·재조회 뒤, 발신 전에만(성공 경로 1건)', async () => {
+  const order: string[] = [];
+  const inner = new ClosedMockLedger();
+  const ledger = { name: 'spy',
+    recordDecision: async (e: Parameters<typeof inner.recordDecision>[0]) => { order.push(`decision:${e.allowed}`); return inner.recordDecision(e); },
+    beginAttempt: async (e: Parameters<typeof inner.beginAttempt>[0]) => { order.push('begin'); return inner.beginAttempt(e); },
+    finishAttempt: async (id: number, r: 'placed' | 'dial_failed' | 'cancelled') => { order.push(`finish:${r}`); return inner.finishAttempt(id, r); } };
+  const dialer = { name: 'spy', dial: async () => { order.push('dial'); return 'c1'; } };
+  await placeOutboundCall(deps({ ledger, dialer }), target(), base);
+  assert.deepEqual(order, ['begin', 'decision:true', 'dial', 'finish:placed']);
 });

@@ -2,10 +2,10 @@
  * 광고성 전화 수신거부·판정·시도 기록의 DB 어댑터(0070). 실행 역할은 통화 작업자(app_call) — 연결은 호출자가 주는 트랜잭션 실행기로만.
  * - 조회 실패·형태 불량은 절대 clear로 보지 않는다(error로 돌려 판정에서 차단).
  * - 원문 번호·이름·고지문은 보내지 않는다(사업자 ID·HMAC·코드만). 값은 바인딩으로만 전달.
- * - 아직 어떤 경로에도 연결하지 않았다(선택 함수는 여전히 Mock만). 운영 연결은 법률 자문·신고·두낫콜 커넥터 뒤 별도 승인.
+ * - 🟡 아직 실제 선택 경로(selectSuppressionStore 등)에 연결하지 않았다 — 선택 함수는 여전히 Mock만. 운영 연결은 법률 자문·신고·두낫콜 커넥터 뒤 별도 승인.
  */
 import type { SuppressionStatus } from './compliance';
-import { OutboundError, type AttemptEntry, type DecisionEntry, type OutboundLedger, type SuppressionStore } from './providers';
+import { OutboundError, type AttemptEntry, type AttemptResult, type DecisionEntry, type OutboundLedger, type SuppressionStore } from './providers';
 
 export type OutboundSql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<readonly unknown[]>;
 export type OutboundTx = <T>(fn: (sql: OutboundSql) => Promise<T>) => Promise<T>;
@@ -53,10 +53,13 @@ export class DbSuppressionStore implements SuppressionStore {
 
 export class DbOutboundLedger implements OutboundLedger {
   readonly name = 'db_ledger';
-  constructor(private readonly tx: OutboundTx) {}
+  /** 사업자 ID를 생성 때 고정한다. 다른 사업자 ID로 온 기록·시도는 거부(INVALID_INPUT) */
+  constructor(private readonly tx: OutboundTx, private readonly businessId: string) {
+    if (!BUSINESS.test(businessId)) throw new OutboundError('INVALID_INPUT');
+  }
 
   async recordDecision(e: DecisionEntry): Promise<void> {
-    if (!isObj(e) || !BUSINESS.test(e.businessId) || !HMAC.test(e.phoneHmac) || typeof e.allowed !== 'boolean' || !Array.isArray(e.reasons)) throw new OutboundError('INVALID_INPUT');
+    if (!isObj(e) || e.businessId !== this.businessId || !HMAC.test(e.phoneHmac) || typeof e.allowed !== 'boolean' || !Array.isArray(e.reasons)) throw new OutboundError('INVALID_INPUT');
     let rows: readonly unknown[];
     try {
       rows = await this.tx((sql) => sql`select api.outbound_decision_record(${e.businessId}, ${e.phoneHmac}, ${e.allowed}, ${e.basis}, ${[...e.reasons]}::text[]) as id`);
@@ -67,7 +70,7 @@ export class DbOutboundLedger implements OutboundLedger {
   }
 
   async beginAttempt(e: AttemptEntry): Promise<number> {
-    if (!isObj(e) || !BUSINESS.test(e.businessId) || !HMAC.test(e.phoneHmac) || !BUSINESS.test(e.purposeId)) throw new OutboundError('INVALID_INPUT');
+    if (!isObj(e) || e.businessId !== this.businessId || !HMAC.test(e.phoneHmac) || !BUSINESS.test(e.purposeId)) throw new OutboundError('INVALID_INPUT');
     let rows: readonly unknown[];
     try {
       rows = await this.tx((sql) => sql`select api.outbound_attempt_begin(${e.businessId}, ${e.phoneHmac}, ${e.purposeId}, ${e.mode}, ${e.dialer}) as id`);
@@ -81,10 +84,10 @@ export class DbOutboundLedger implements OutboundLedger {
     return id;
   }
 
-  async finishAttempt(attemptId: number, result: 'placed' | 'dial_failed'): Promise<void> {
-    if (!Number.isSafeInteger(attemptId) || attemptId < 1 || (result !== 'placed' && result !== 'dial_failed')) throw new OutboundError('INVALID_INPUT');
+  async finishAttempt(attemptId: number, result: AttemptResult): Promise<void> {
+    if (!Number.isSafeInteger(attemptId) || attemptId < 1 || (result !== 'placed' && result !== 'dial_failed' && result !== 'cancelled')) throw new OutboundError('INVALID_INPUT');
     try {
-      await this.tx((sql) => sql`select api.outbound_attempt_finish(${attemptId}::bigint, ${result})`);
+      await this.tx((sql) => sql`select api.outbound_attempt_finish(${this.businessId}, ${attemptId}::bigint, ${result})`);
     } catch {
       throw new OutboundError('LEDGER_FAILED');
     }

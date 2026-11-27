@@ -198,7 +198,7 @@ grant execute on function
 grant execute on function core.outbound_key_ok(text, text) to fideon_api;
 grant execute on function
   api.outbound_suppression_block(text, text), api.outbound_suppression_check(text, text),
-  api.outbound_attempt_begin(text, text, text, text, text), api.outbound_attempt_finish(bigint, text),
+  api.outbound_attempt_begin(text, text, text, text, text), api.outbound_attempt_finish(text, bigint, text),
   api.outbound_attempt_status(text, text), api.outbound_decision_record(text, text, boolean, text, text[])
   to app_call;
 grant execute on function

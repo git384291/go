@@ -1,7 +1,8 @@
 -- 0070 광고성 전화 수신거부·시도·판정 기록 영구화 (코사장 11/27, PR #47 위). 실제 발신 기능은 이 파일에 없다.
 -- - 연락처 원문·이름·고지문·상담 내용·금액 없음. 사업자 ID + 연락처 HMAC(64자 소문자 hex)만.
--- - 세 표 모두 추가 전용: UPDATE·DELETE·TRUNCATE 금지(트리거). 수신거부 해제 경로 없음.
--- - 시도 상한(누적 3회)·간격(24시간)은 DB가 직접 센다(호출자 숫자 불신). 같은 대상 동시 요청은 advisory lock으로 직렬화.
+-- - 네 표(수신거부·시도·시도 결과·판정) 모두 추가 전용: UPDATE·DELETE·TRUNCATE 금지(트리거). 수신거부 해제 경로 없음.
+-- - 시도 상한(누적 3회)·간격(24시간)은 DB가 직접 센다(호출자 숫자 불신). 같은 대상의 수신거부 기록·시도 시작은 같은 advisory lock으로 직렬화.
+-- - 시도 결과는 해당 사업자의 시도에만 기록(타 사업자 시도 ID로 처리 불가).
 -- - 판정 기록: 허용·차단 모두. 기록 실패 시 발신하지 않는 계약은 서버 어댑터(src/server/outbound/db.ts)가 지킨다.
 -- - 권한: 표는 fideon_api만(RLS enable+force, zz_grants 일괄 정책). 함수 실행은 기존 통화 작업자 역할 app_call만(zz_grants).
 --   SECURITY DEFINER는 기존 api 스키마 규칙(소유자 fideon_api·search_path 고정·PUBLIC/anon/authenticated 회수·입력 검증)을 따른다.
@@ -29,7 +30,7 @@ create index if not exists outbound_attempts_target on core.outbound_attempts (b
 -- 시도 결과(시도당 1건, 추가 전용): 결과 코드만
 create table if not exists core.outbound_attempt_results (
   attempt_id  bigint primary key references core.outbound_attempts(id),
-  result      text not null check (result in ('placed', 'dial_failed')),
+  result      text not null check (result in ('placed', 'dial_failed', 'cancelled')),  -- cancelled: 시작 뒤 발신 전 취소(수신거부 재확인·기록 실패)
   recorded_at timestamptz not null default now()
 );
 
@@ -83,6 +84,7 @@ begin
   if not coalesce(core.outbound_key_ok(p_business, p_hmac), false) then
     raise exception 'INVALID_INPUT' using errcode = '22023';
   end if;
+  perform pg_advisory_xact_lock(hashtextextended('outbound:' || p_business || ':' || p_hmac, 0));  -- 시도 시작과 같은 잠금
   insert into core.outbound_suppressions (business_id, phone_hmac) values (p_business, p_hmac) on conflict do nothing;
   return 'blocked';
 end
@@ -130,14 +132,15 @@ begin
 end
 $$;
 
--- 시도 결과(시도당 1회)
-create or replace function api.outbound_attempt_finish(p_attempt bigint, p_result text)
+-- 시도 결과(시도당 1회). 해당 사업자의 시도만(다른 사업자 ID면 없음과 같은 NOT_FOUND)
+create or replace function api.outbound_attempt_finish(p_business text, p_attempt bigint, p_result text)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
-  if p_attempt is null or p_result is null or p_result not in ('placed', 'dial_failed') then
+  if p_business is null or p_business !~ '^[a-z0-9][a-z0-9_-]{1,39}$' or p_attempt is null
+     or p_result is null or p_result not in ('placed', 'dial_failed', 'cancelled') then
     raise exception 'INVALID_INPUT' using errcode = '22023';
   end if;
-  if not exists (select 1 from core.outbound_attempts a where a.id = p_attempt) then
+  if not exists (select 1 from core.outbound_attempts a where a.id = p_attempt and a.business_id = p_business) then
     raise exception 'NOT_FOUND' using errcode = '22023';
   end if;
   insert into core.outbound_attempt_results (attempt_id, result) values (p_attempt, p_result);
@@ -180,5 +183,23 @@ end
 $$;
 
 revoke all on function core.outbound_append_only(), core.outbound_key_ok(text, text) from public;
+-- 생성 직후 실행 권한을 모두 닫는다(PostgreSQL 기본 PUBLIC EXECUTE 제거). zz_grants.sql이 app_call에만 다시 연다
+do $$
+declare
+  f text;
+  r text;
+begin
+  foreach f in array array['api.outbound_suppression_block(text,text)', 'api.outbound_suppression_check(text,text)',
+                           'api.outbound_attempt_begin(text,text,text,text,text)', 'api.outbound_attempt_finish(text,bigint,text)',
+                           'api.outbound_attempt_status(text,text)', 'api.outbound_decision_record(text,text,boolean,text,text[])'] loop
+    execute format('revoke all on function %s from public', f);
+    foreach r in array array['anon', 'authenticated', 'app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'app_call', 'release_auditor'] loop
+      if exists (select 1 from pg_roles where rolname = r) then
+        execute format('revoke all on function %s from %I', f, r);
+      end if;
+    end loop;
+  end loop;
+end
+$$;
 
 commit;

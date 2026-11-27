@@ -148,6 +148,16 @@ for i in $(seq 1 20); do "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role
 for p in "${pids[@]}"; do wait "$p" || true; done
 c41=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.outbound_attempts where phone_hmac = '$OPA'")
 [ "$c41" = 1 ] || { echo "FAIL | OP41 동시 20회 시도 시작 → 기록 $c41 (기대 1, 24시간 간격)" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+# OP42 수신거부 기록과 시도 시작이 같은 잠금: 수신거부 트랜잭션이 끝나기 전 시작한 시도는 기다렸다가 OPTED_OUT
+OPL=$(printf '7b%.0s' $(seq 1 32))
+( "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select api.outbound_suppression_block('bareun365', '$OPL')" -c "select pg_sleep(2)" -c "commit" >/dev/null 2>&1 ) &
+LKPID=$!
+sleep 0.7
+r42=$( { "${PSQL[@]}" -d "$DB" -At -c "begin" -c "set local role app_call" -c "select api.outbound_attempt_begin('bareun365', '$OPL', 'ad-internet-tv', 'live_agent', 'manual')" -c "commit" 2>&1 >/dev/null || true; } | grep -oE 'OPTED_OUT' | head -1 || true)
+wait "$LKPID"
+c42=$("${PSQL[@]}" -d "$DB" -At -c "select count(*) from core.outbound_attempts where phone_hmac = '$OPL'")
+[ "$r42" = OPTED_OUT ] && [ "$c42" = 0 ] || { echo "FAIL | OP42 수신거부·시도 잠금 경합 r=$r42 시도기록=$c42" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | OP42 수신거부 기록 중(커밋 전) 시작한 시도는 같은 잠금을 기다린 뒤 OPTED_OUT, 시도 기록 0건" >> "$LOG_DIR/db-test.log"
 echo "NOTICE:  PASS | OP39~41 새 연결 후 수신거부 유지, 동시 20회 block 1행(멱등), 동시 20회 시도 시작 1건만 기록(24시간 간격 직렬화)" >> "$LOG_DIR/db-test.log"
 
 echo "== 정책 변경과 접수 동시 요청(0025·0026): 접수 트랜잭션(게이트 통과)이 끝날 때까지 정책 쓰기는 대기"
@@ -887,6 +897,9 @@ back63=$(D -At -c "select to_regprocedure('core.legal_hold(uuid)') is not null a
 echo "NOTICE:  PASS | M63 메모 파기·보존 분리 0063 롤백: 함수 제거·이전 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
 # 0070 광고성 전화 기록: 적용 → 기록 → 롤백(함수 6개만 제거, 표·기록·추가 전용 트리거 보존) → 재적용(기록 그대로)
 D -f db/migrations/0070_outbound_persistence.sql >/dev/null
+pub70=$(D -At -c "select count(*) from pg_proc p where p.pronamespace = 'api'::regnamespace and p.proname like 'outbound\_%' and (p.proacl is null or array_to_string(p.proacl::text[], ',') ~ '(^|,)=X' or has_function_privilege('app_public', p.oid, 'execute') or has_function_privilege('app_staff', p.oid, 'execute') or has_function_privilege('app_call', p.oid, 'execute'))")
+[ "$pub70" = 0 ] || { echo "FAIL | OP43 0070 단독 적용 직후 실행 권한 열림: $pub70" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | OP43 0070 단독 적용 직후(zz_grants 전) PUBLIC·공개·관리자·통화 역할 모두 실행 불가(함수 6개)" >> "$LOG_DIR/db-test.log"
 D -q -c "insert into core.outbound_suppressions (business_id, phone_hmac) values ('bareun365', repeat('7a', 32))" >/dev/null
 D -f db/rollback/0070_down.sql >/dev/null
 gone70=$(D -At -c "select to_regprocedure('api.outbound_suppression_block(text,text)') is null and to_regprocedure('api.outbound_attempt_begin(text,text,text,text,text)') is null and to_regprocedure('api.outbound_decision_record(text,text,boolean,text,text[])') is null")

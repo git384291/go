@@ -40,9 +40,10 @@ select test.expect_error_msg(format($$select api.outbound_attempt_begin('bareun3
 reset role;
 select a.id::text as att from core.outbound_attempts a where a.business_id = 'bareun365' and a.phone_hmac = repeat('2b', 32) \gset
 set role app_call;
-select test.expect_ok(format($$select api.outbound_attempt_finish(%s, 'placed')$$, :'att'), 'OP18 결과 기록');
-select test.expect_error_msg(format($$select api.outbound_attempt_finish(%s, 'dial_failed')$$, :'att'), '22023', 'ALREADY_RECORDED', 'OP19 결과 2번 기록 거부');
-select test.expect_error_msg($$select api.outbound_attempt_finish(999999999, 'placed')$$, '22023', 'NOT_FOUND', 'OP20 없는 시도 거부');
+select test.expect_error_msg(format($$select api.outbound_attempt_finish('other-dealer', %s, 'placed')$$, :'att'), '22023', 'NOT_FOUND', 'OP18a 타 사업자 시도 ID로 결과 기록 거부');
+select test.expect_ok(format($$select api.outbound_attempt_finish('bareun365', %s, 'placed')$$, :'att'), 'OP18 결과 기록');
+select test.expect_error_msg(format($$select api.outbound_attempt_finish('bareun365', %s, 'dial_failed')$$, :'att'), '22023', 'ALREADY_RECORDED', 'OP19 결과 2번 기록 거부');
+select test.expect_error_msg($$select api.outbound_attempt_finish('bareun365', 999999999, 'placed')$$, '22023', 'NOT_FOUND', 'OP20 없는 시도 거부');
 -- 판정 기록
 select test.expect_ok(format($$select api.outbound_decision_record('bareun365', %L, true, 'live_exception', '{}')$$, current_setting('t.h2')), 'OP21 허용 판정 기록');
 select test.expect_ok(format($$select api.outbound_decision_record('bareun365', %L, false, null, array['NIGHT_BLOCKED','DNC_UNCONFIRMED'])$$, current_setting('t.h2')), 'OP22 차단 판정 기록');

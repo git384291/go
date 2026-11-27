@@ -8,12 +8,16 @@
  * - placeOutboundCall은 발신 직전에 두낫콜·내부 수신거부를 새로 조회해 판정(decideOutbound)에 넣고, 통과했을 때만 dial을 부른다.
  * - 시각은 서버 신뢰 Clock만 쓴다(호출자가 now를 넘길 수 없음). 발신 직전 clock 값 하나를 판정·조회·감사에 똑같이 쓴다.
  * - placeOutboundCall은 예외를 던지지 않는다: 형태 불량·의존성 오류(동기/비동기 throw 포함)는 차단 결과로 돌려준다.
- * - 원장(ledger) 계약: 판정 기록 실패 → 발신 안 함, 시도 시작 거부·실패 → 발신 안 함, 발신 뒤 결과 기록 실패 → LEDGER_FINISH_FAILED로 알림.
+ * - 원장(ledger) 순서: 앱 판정 차단 → 차단 판정 기록 후 끝. 앱 판정 허용 → ① 시도 시작(DB가 3회·24시간·수신거부 확인) → 거부면 정확한 사유의
+ *   차단 판정 기록 후 끝 → ② 수신거부 재조회(blocked·error·unknown이면 시도 취소·차단 판정 기록) → ③ 허용 판정 기록 성공 시에만 dial.
+ *   어느 기록이든 실패하면 발신 0회. 발신 뒤 결과 기록 실패는 LEDGER_FINISH_FAILED로 알린다.
+ * - ⚠ 남은 경쟁 위험: ②와 실제 통신망 연결 사이의 짧은 틈은 원자적으로 막을 수 없다(외부 통신망). 그래서 live 발신기는 계속 금지하고,
+ *   live 구현 시 업체 쪽 발신 직전 차단 목록 확인(가능한 경우)과 통화 시작 직후 수신거부 처리 절차를 별도 검토한다.
  * - dial 계약: mode='live_agent'면 자동 음성 재생 금지, 수신자가 받으면 배정된 사람 상담원에게만 연결하고 상담원이 없으면 아무 말 없이 즉시 종료.
  *   mode='ars_ad'는 판정에서 목적·사업자 일치 명시 동의가 확인된 경우에만 온다. live 발신기는 여전히 금지(LIVE_OUTBOUND_NOT_APPROVED).
  * - 내부 수신거부 저장소는 지금 프로세스 메모리 Mock이다 — 재시작하면 사라지므로 '영구'가 아니다. 지속 DB 저장은 별도 마이그레이션 PR 필요(미완료).
  */
-import { auditRecord, decideOutbound, type CallContext, type Decision, type DncStatus, type OutboundAudit, type SuppressionStatus, type Target } from './compliance';
+import { auditRecord, decideOutbound, type CallContext, type Decision, type DncStatus, type OutboundAudit, type Reason, type SuppressionStatus, type Target } from './compliance';
 
 export class OutboundError extends Error { constructor(readonly code: string) { super(code); } }
 
@@ -44,11 +48,12 @@ export interface OutboundDialer {
  */
 export type DecisionEntry = { businessId: string; phoneHmac: string; allowed: boolean; basis: Decision['basis']; reasons: readonly string[] };
 export type AttemptEntry = { businessId: string; phoneHmac: string; purposeId: string; mode: 'live_agent' | 'ars_ad'; dialer: 'manual' | 'pds' };
+export type AttemptResult = 'placed' | 'dial_failed' | 'cancelled';
 export interface OutboundLedger {
   readonly name: string;
   recordDecision(e: DecisionEntry): Promise<void>;
   beginAttempt(e: AttemptEntry): Promise<number>;
-  finishAttempt(attemptId: number, result: 'placed' | 'dial_failed'): Promise<void>;
+  finishAttempt(attemptId: number, result: AttemptResult): Promise<void>;
 }
 
 /** 시험용 원장: 메모리(지속 아님). fail로 단계별 실패 주입 */
@@ -67,7 +72,7 @@ export class ClosedMockLedger implements OutboundLedger {
     this.attempts.push({ ...e, id, result: null });
     return id;
   }
-  async finishAttempt(attemptId: number, result: 'placed' | 'dial_failed'): Promise<void> {
+  async finishAttempt(attemptId: number, result: AttemptResult): Promise<void> {
     if (this.fail.finish) throw new OutboundError('LEDGER_FAILED');
     const a = this.attempts.find((x) => x.id === attemptId);
     if (!a || a.result !== null) throw new OutboundError('ALREADY_RECORDED');
@@ -166,21 +171,41 @@ export async function placeOutboundCall(deps: OutboundDeps, target: Target, base
     void _ignoredNow; void _ignoredDnc; void _ignoredSup;
     const ctx: CallContext = { ...(rest as BaseContext), now, dnc, suppression };
     const decision = decideOutbound(target, ctx);
-    const audit = auditRecord(target, ctx, decision);
-    // 판정 기록(허용·차단 모두). 기록 실패 → 발신하지 않음
-    const recorded = await safely(async () => { await deps.ledger.recordDecision({ businessId: ctx.businessId, phoneHmac: h, allowed: decision.allowed, basis: decision.basis, reasons: decision.reasons }); return true; }, false);
-    if (!recorded) return { decision, callId: null, audit, error: 'LEDGER_FAILED' };
-    if (!decision.allowed) return { decision, callId: null, audit, error: null };
-    // 시도 시작: 저장소가 3회·24시간·수신거부를 다시 확인(호출자 숫자 불신). 거부·실패 → 발신하지 않음
+    const record = (d: Decision) => safely(async () => {
+      await deps.ledger.recordDecision({ businessId: ctx.businessId, phoneHmac: h, allowed: d.allowed, basis: d.basis, reasons: d.reasons });
+      return true;
+    }, false);
+    const deny = async (reason: Reason, error: PlaceError | null, attemptToCancel: number | null): Promise<PlaceResult> => {
+      const d: Decision = { allowed: false, basis: null, reasons: [reason] };
+      if (attemptToCancel !== null) await safely(() => deps.ledger.finishAttempt(attemptToCancel, 'cancelled'), undefined);
+      const ok = await record(d);
+      return { decision: d, callId: null, audit: auditRecord(target, ctx, d), error: ok ? error : 'LEDGER_FAILED' };
+    };
+    // 앱 판정 차단: 차단 판정만 기록하고 끝(기록 실패도 발신 0회)
+    if (!decision.allowed) {
+      const ok = await record(decision);
+      return { decision, callId: null, audit: auditRecord(target, ctx, decision), error: ok ? null : 'LEDGER_FAILED' };
+    }
+    // ① 시도 시작: 저장소가 3회·24시간·수신거부를 다시 확인(호출자 숫자 불신)
     let attemptId: number | null = null;
     let rejectCode: string | null = null;
     await Promise.resolve().then(() => deps.ledger.beginAttempt({ businessId: ctx.businessId, phoneHmac: h, purposeId: ctx.purposeId, mode: ctx.mode, dialer: ctx.dialer }))
       .then((id) => { attemptId = Number.isSafeInteger(id) && id > 0 ? id : null; }, (e: unknown) => { rejectCode = e instanceof OutboundError ? e.code : 'LEDGER_FAILED'; });
     if (attemptId === null) {
-      const known = rejectCode === 'RETRY_LIMIT' || rejectCode === 'RETRY_TOO_SOON' || rejectCode === 'OPTED_OUT';
-      return { decision, callId: null, audit, error: known ? 'ATTEMPT_REJECTED' : 'LEDGER_FAILED' };
+      const code = rejectCode as string | null;
+      if (code === 'RETRY_LIMIT' || code === 'RETRY_TOO_SOON' || code === 'OPTED_OUT') return deny(code, 'ATTEMPT_REJECTED', null);
+      return deny('ATTEMPT_UNAVAILABLE', 'LEDGER_FAILED', null);
     }
     const id: number = attemptId;
+    // ② 발신 직전 수신거부 재조회(시도 시작 뒤 끼어든 수신거부 차단)
+    const again = await safely<SuppressionStatus>(() => deps.suppression.check(h, now), { result: 'error', checkedAt: null });
+    if (!isObj(again) || again.result !== 'clear') return deny(isObj(again) && again.result === 'blocked' ? 'OPTED_OUT' : 'SUPPRESSION_UNCONFIRMED', null, id);
+    // ③ 허용 판정 기록 성공 시에만 발신
+    if (!(await record(decision))) {
+      await safely(() => deps.ledger.finishAttempt(id, 'cancelled'), undefined);
+      return { decision, callId: null, audit: auditRecord(target, ctx, decision), error: 'LEDGER_FAILED' };
+    }
+    const audit = auditRecord(target, ctx, decision);
     const callId = await safely<string | null>(() => deps.dialer.dial({ phoneHmac: h, mode: ctx.mode, callerIdShown: true, businessName: ctx.disclosure.businessName }), null);
     const finished = await safely(async () => { await deps.ledger.finishAttempt(id, callId === null ? 'dial_failed' : 'placed'); return true; }, false);
     return { decision, callId, audit, error: callId === null ? 'DIAL_FAILED' : finished ? null : 'LEDGER_FINISH_FAILED' };

@@ -6,7 +6,7 @@ begin;
 drop function if exists api.outbound_suppression_block(text, text);
 drop function if exists api.outbound_suppression_check(text, text);
 drop function if exists api.outbound_attempt_begin(text, text, text, text, text);
-drop function if exists api.outbound_attempt_finish(bigint, text);
+drop function if exists api.outbound_attempt_finish(text, bigint, text);
 drop function if exists api.outbound_attempt_status(text, text);
 drop function if exists api.outbound_decision_record(text, text, boolean, text, text[]);
 commit;
