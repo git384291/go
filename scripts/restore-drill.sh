@@ -115,9 +115,13 @@ AUD=$("${PSQL[@]}" -d "$DST" -At -c "
 # 운영 배포 전에 쓰는 것과 같은 점검을 같은 읽기 전용 계정으로 실행
 bash scripts/db-audit.sh "postgresql:///$DST?host=/tmp&port=$PORT&user=release_auditor" > "$OUT/audit-after-restore.log"
 
-# 잘못된 키로는 복호화되지 않아야 한다
-if openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "pass:wrong" -in "$OUT/drill.dump.enc" -out /dev/null 2>/dev/null; then
-  echo "FAIL | 잘못된 키로 복호화됨"; exit 1
+# 잘못된 키로는 덤프를 되살릴 수 없어야 한다.
+# AES-CBC는 틀린 키로도 약 1/256 확률로 패딩 검사를 우연히 통과해 openssl이 '성공'을 돌려준다(우연 실패 원인).
+# 그래서 종료 코드 대신 결과물을 본다: 맞는 키 결과는 pg_dump 머리글(PGDMP)로 시작하고, 틀린 키 결과는 절대 그렇지 않아야 한다.
+dump_magic() { { openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "pass:$1" -in "$OUT/drill.dump.enc" 2>/dev/null || true; } | head -c 5 | od -An -c | tr -d ' \n'; }
+[ "$(dump_magic "$DRILL_PASS")" = "PGDMP" ] || { echo "FAIL | 맞는 키 복호화 결과가 pg_dump 형식이 아님(대조 실패)"; exit 1; }
+if [ "$(dump_magic wrong)" = "PGDMP" ]; then
+  echo "FAIL | 잘못된 키로 덤프가 복원 가능한 형태로 복호화됨"; exit 1
 fi
 
 if diff -u "$OUT/before.tsv" "$OUT/after.tsv"; then
