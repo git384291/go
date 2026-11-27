@@ -86,3 +86,17 @@ test('OSW-BUNDLE 서버 전용 경계: 화면·공개 경로가 outbound 모듈�
   const clientFiles = outside.filter((f) => /['"]use client['"]/.test(readFileSync(f, 'utf8')));
   for (const f of clientFiles) assert.equal(/server\/(outbound|db)/.test(readFileSync(f, 'utf8')), false, f);
 });
+
+test('OSW-ISO 교체 가능·격리: outbound 모듈은 자기 폴더·DB 배선(service.ts)만 import, 외부 연동은 인터페이스 뒤 기본 닫힘', async () => {
+  const files = readdirSync('src/server/outbound').map((f) => `src/server/outbound/${f}`);
+  for (const f of files) {
+    const imports = [...readFileSync(f, 'utf8').matchAll(/^import[^'"]*['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+    const allowed = (p: string) => p.startsWith('./') || p === 'server-only' || (f.endsWith('service.ts') && p === '@/server/db/client');
+    assert.deepEqual(imports.filter((p) => !allowed(p)), [], f);
+  }
+  const p = await import('../../src/server/outbound/providers');
+  for (const sel of [p.selectDncChecker, p.selectOutboundDialer, p.selectSuppressionStore]) {
+    assert.ok(sel({}) && typeof sel({}) === 'object', '기본 Mock');
+    assert.throws(() => sel({ OUTBOUND_DNC_MODE: 'x', OUTBOUND_DIAL_MODE: 'x', OUTBOUND_SUPPRESSION_MODE: 'x' }), /LIVE_OUTBOUND_NOT_APPROVED/);
+  }
+});

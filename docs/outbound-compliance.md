@@ -51,11 +51,18 @@
 - 🟡 내부 수신거부 지속 저장: 0070으로 DB 표·함수·어댑터 준비(병합·DB 적용 전). 메모리 Mock은 시험용으로만 남음.
 - 🔴 지속 저장이 생겨도 운영 전 **법률 자문·전화권유판매업 신고·두낫콜 실제 커넥터·발신번호 사전등록**은 여전히 필수(미완료).
 - 🟡 **남은 경쟁 위험**: 발신 직전 수신거부 재조회와 실제 통신망 연결 사이의 짧은 틈은 원자적으로 막을 수 없다(외부 통신망). live 발신기 금지 유지, live 구현 시 업체 측 차단 확인·통화 시작 직후 수신거부 처리 절차를 별도 검토.
-- 🟢 서버 조립(PR feat/outbound-server-wiring): `src/server/outbound/service.ts`(server-only, app_call 트랜잭션·사업자 고정) → `assemble.ts`.
-  기본은 닫힌 Mock, `OUTBOUND_PERSISTENCE=db`일 때만 수신거부·원장이 DB. 트랜잭션·사업자 없음·0070 함수 실행 불가·조회 실패 → 닫힘(dial 0회).
-  공개 route·화면·스케줄러·번호 원문 입력 API는 없다(아직 어떤 경로에도 연결하지 않음, 시험 OSW-BUNDLE).
+- 🟢 **서버 조립 팩토리 준비·시험**(PR feat/outbound-server-wiring): `src/server/outbound/service.ts`(server-only, app_call 트랜잭션·사업자 고정) → `assemble.ts`.
+  기본은 닫힌 Mock, `OUTBOUND_PERSISTENCE=db`일 때만 수신거부·원장이 DB. 트랜잭션·사업자 없음·0070 함수 실행 불가·조회 실패 → 닫힘(dial 0회). 실제 PostgreSQL 통합 시험 OBI1~5(고정 서버 Clock: 낮 허용·밤 차단 모두 항상 실행).
+- 🟡 **실제 업무 호출 경로 미연결(의도적)**: route·worker·스케줄러·번호 원문 입력 API가 0개. 팩토리를 부르는 업무 코드가 없으므로 운영 상태는 'DB 어댑터 연결 완료'가 아니다.
+- 수신거부 DB 조회의 신선도 시각은 조회를 실행한 서버 Clock 값(판정·감사와 같은 시계). DB의 checked_at은 형태만 검사.
 - 🔴 **DB 어댑터가 연결돼도 live 발신은 금지**: 발신기·두낫콜은 Mock만(그 밖은 LIVE_OUTBOUND_NOT_APPROVED).
 - 🟡 `OutboundDialer.dial`은 인터페이스라 직접 부를 수 있다 → 시험 OB-ORCH가 src 전체에서 `.dial(` 호출을 `placeOutboundCall` 한 곳으로 제한. live 발신기도 이 경로만 사용.
+
+## 교체 가능성·격리 (언제든 교체)
+- 외부 연동은 모두 인터페이스 뒤: `DncChecker`(두낫콜) · `OutboundDialer`(통신사) · `SuppressionStore`(수신거부 저장소) · `OutboundLedger`(판정·시도 원장). 구현을 바꿔도 판정(`decideOutbound`)·발신 경로(`placeOutboundCall`)는 그대로.
+- 기본값은 모두 닫힌 Mock, 그 밖 선택은 `LIVE_OUTBOUND_NOT_APPROVED`(시험 OB13·OSW-ISO). 설정 오류는 서비스 전체가 닫힘(OSW2).
+- import 경계: outbound 모듈은 자기 폴더와 DB 배선(service.ts의 `@/server/db/client`)만 가져오고, 다른 기능(광고·상담·CRM·화면·공개 route)은 outbound를 가져오지 않는다(OSW-ISO·OSW-BUNDLE). 그래서 이 모듈을 바꾸거나 빼도 다른 기능이 깨지지 않는다.
+- 회귀: CI verify가 매 커밋마다 전체(타입·린트·단위·경로·DB 1300+·통합·E2E)를 실행한다.
 
 ## 남은 법률·업체 의존 (운영 전 필수)
 - 전화권유판매업 신고(방문판매법 제5조) 여부·신고번호 — 사용자 확인

@@ -26,15 +26,19 @@ export class DbSuppressionStore implements SuppressionStore {
   constructor(private readonly tx: OutboundTx, private readonly businessId: string) {
     if (!BUSINESS.test(businessId)) throw new OutboundError('INVALID_INPUT');
   }
-  async check(phoneHmac: string): Promise<SuppressionStatus> {
-    if (typeof phoneHmac !== 'string' || !HMAC.test(phoneHmac)) return { result: 'unknown', checkedAt: null };
+  /**
+   * 조회는 매번 DB에서 실시간으로 한다. DB가 돌려준 checked_at은 형태만 검사하고, 신선도 판정용 시각은 이 조회를 실행한
+   * 서버 신뢰 Clock 값(now)을 쓴다(판정·감사와 같은 시계 — DB 시계와 앱 시계 차이로 판정이 흔들리지 않게).
+   */
+  async check(phoneHmac: string, now: Date): Promise<SuppressionStatus> {
+    if (typeof phoneHmac !== 'string' || !HMAC.test(phoneHmac) || !(now instanceof Date) || Number.isNaN(now.getTime())) return { result: 'unknown', checkedAt: null };
     try {
       const rows = await this.tx((sql) => sql`select result, checked_at from api.outbound_suppression_check(${this.businessId}, ${phoneHmac})`);
       if (!Array.isArray(rows) || rows.length !== 1 || !isObj(rows[0])) return ERR;
       const r = rows[0];
       const at = asDate(r.checked_at);
       if ((r.result !== 'clear' && r.result !== 'blocked') || !at) return ERR;
-      return { result: r.result, checkedAt: at };
+      return { result: r.result, checkedAt: now };
     } catch {
       return ERR;
     }
