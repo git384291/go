@@ -48,16 +48,16 @@ export class ClosedMockDnc implements DncChecker {
 export class ClosedMockSuppressionStore implements SuppressionStore {
   readonly name = 'mock_suppression';
   readonly persistent = false;
-  private readonly s = new Set<string>();
+  private readonly s = new Map<string, Date>();
   constructor(private readonly failing = false) {}
   async check(phoneHmac: string, now: Date): Promise<SuppressionStatus> {
     if (this.failing) return { result: 'error', checkedAt: null };
     if (!/^[0-9a-f]{64}$/.test(phoneHmac)) return { result: 'unknown', checkedAt: null };
     return { result: this.s.has(phoneHmac) ? 'blocked' : 'clear', checkedAt: now };
   }
-  async block(phoneHmac: string): Promise<void> {
+  async block(phoneHmac: string, now: Date): Promise<void> {
     if (!/^[0-9a-f]{64}$/.test(phoneHmac)) throw new OutboundError('INVALID_INPUT');
-    this.s.add(phoneHmac);
+    if (!this.s.has(phoneHmac)) this.s.set(phoneHmac, now);
   }
 }
 
