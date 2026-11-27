@@ -194,6 +194,13 @@ grant execute on function
   api.call_summary_claim(bigint), api.call_summary_complete(bigint, uuid, text, text, bigint, text, jsonb),
   api.call_object_deletion_next(int), api.call_object_deletion_done(text)
   to app_call;
+-- 0070 광고성 전화 수신거부·시도·판정 기록: 통화 작업자 역할 app_call만(표 직접 권한 없음, 해제·수정 함수 없음)
+grant execute on function core.outbound_key_ok(text, text) to fideon_api;
+grant execute on function
+  api.outbound_suppression_block(text, text), api.outbound_suppression_check(text, text),
+  api.outbound_attempt_begin(text, text, text, text, text), api.outbound_attempt_finish(bigint, text),
+  api.outbound_attempt_status(text, text), api.outbound_decision_record(text, text, boolean, text, text[])
+  to app_call;
 grant execute on function
   api.call_settings_get(uuid, uuid, text), api.call_settings_set(uuid, uuid, text, jsonb, text),
   api.call_recording_access(uuid, uuid, text, uuid, text), api.call_link(uuid, uuid, text, uuid, uuid, text),
