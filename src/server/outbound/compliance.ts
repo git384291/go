@@ -8,6 +8,7 @@
  * - 번호를 만들지 않는다: 이 모듈에는 번호 생성·순차 생성·외부 목록 자동 등록 기능이 없다. 대상은 적법하게 확보된 목록(출처 기록 포함)뿐이고,
  *   '무작위'는 그 목록 안에서 순서만 섞는다(planDialOrder).
  * - ARS(자동 음성) 광고: 명시적 사전동의 증거가 있는 번호만.
+ * - 전화권유판매업 신고: 예외 해당 여부를 법률 자문으로 확정하기 전까지 모든 발신 모드에서 신고·신고번호를 필수로 한다.
  * - 육성 전화권유 예외(상담원이 직접 통화): 신고 확인 + 적법 수집출처 + 통화 시작 고지(상호·목적·수집출처) + 두낫콜 최신 조회 '등록 안 됨'
  *   + 내부 수신거부 없음 + 사람 상담원 배정·대기(humanAgentReady)가 모두 확인될 때만. 예측발신(PDS)은 상담원 예약(agentReserved)도 필수.
  *   발신 뒤 실제 연결은 dial 계약(providers.ts): live_agent는 자동음성 금지, 응답 시 배정된 사람 상담원에게만 연결.
@@ -141,6 +142,8 @@ function decide(t: Target, ctx: CallContext): Decision {
   if (ctx.dnc.result === 'listed') r.add('DNC_LISTED');
   else if (ctx.dnc.result !== 'clear' || !fresh(ctx.dnc.checkedAt, ctx.now, OUTBOUND_RULES.dncMaxAgeMs)) r.add('DNC_UNCONFIRMED');
   if (ctx.dialer === 'pds' && (ctx.mode !== 'live_agent' || ctx.agentReserved !== true)) r.add('PDS_REQUIRES_AGENT');
+  // 방문판매법 제5조: 전화권유판매업 신고가 원칙이다. 소규모 예외 등은 법률 자문으로 확정되기 전까지 열지 않는다.
+  if (ctx.seller.telemarketingRegistered !== true || !nonEmpty(ctx.seller.registrationNo)) r.add('NOT_REGISTERED');
 
   const cs = consentState(t, ctx);
   if (cs === 'withdrawn') r.add('CONSENT_WITHDRAWN');
@@ -154,7 +157,6 @@ function decide(t: Target, ctx: CallContext): Decision {
     if (ctx.humanAgentReady !== true) r.add('AGENT_NOT_READY');
   } else {
     // 육성 전화권유 예외(정보통신망법 제50조 제1항 단서 + 방문판매법 제5조): 모두 확인돼야 함
-    if (ctx.seller.telemarketingRegistered !== true || !nonEmpty(ctx.seller.registrationNo)) r.add('NOT_REGISTERED');
     if (!nonEmpty(ctx.disclosure.purpose) || ctx.disclosure.announcesSource !== true || !nonEmpty(ctx.disclosure.businessName)) r.add('DISCLOSURE_MISSING');
     if (ctx.humanAgentReady !== true) r.add('AGENT_NOT_READY');
     basis = 'live_exception';
