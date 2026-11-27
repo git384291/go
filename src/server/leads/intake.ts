@@ -7,6 +7,7 @@ import { isActiveInterest } from '../../content/catalog';
 import { rateLimitIpKey } from '../http/clientIp';
 import { noticeReadiness, REQUIRED_NOTICES, sameNoticeKeys, type NoticeConfig } from '../../content/requiredNotices';
 import { cleanGclid } from '../../content/attribution';
+import { isHostedDeploy, isLiveProduction } from '../env/deployEnv';
 
 export const INTERESTS = ['internet_tv', 'internet_phone', 'internet_only', 'cctv_security', 'other'] as const;
 
@@ -224,7 +225,7 @@ export function leadSignedFields(a: Omit<CreateLeadArgs, 'token'>): string[] {
 export function leadIntakeGate(env: Record<string, string | undefined>, notices: NoticeConfig = REQUIRED_NOTICES): { enabled: boolean; reason: string } {
   if (env.LEAD_INTAKE_MODE === 'live') return liveIntakeGate(env, notices);
   if (env.LEAD_INTAKE_MODE !== 'local') return { enabled: false, reason: 'LEAD_INTAKE_DISABLED' };
-  if (env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview') {
+  if (isHostedDeploy(env)) { // 사유 코드는 화면 매핑 호환을 위해 그대로 둔다(Cloud Run 등 모든 호스팅 배포 포함)
     return { enabled: false, reason: 'LOCAL_MODE_NOT_ALLOWED_ON_VERCEL' };
   }
   let host = '';
@@ -239,7 +240,7 @@ export function leadIntakeGate(env: Record<string, string | undefined>, notices:
 
 function liveIntakeGate(env: Record<string, string | undefined>, notices: NoticeConfig): { enabled: boolean; reason: string } {
   const off = (reason: string) => ({ enabled: false, reason });
-  if (env.VERCEL_ENV !== 'production') return off('LIVE_REQUIRES_PRODUCTION');
+  if (!isLiveProduction(env)) return off('LIVE_REQUIRES_PRODUCTION'); // 운영 표식 + 검수/개발 배포 표식 없음
   const nr = noticeReadiness(notices, (env.PRIVACY_POLICY_VERSION ?? '').trim());
   if (!nr.ready) return off(nr.reason);
   let url: URL;
