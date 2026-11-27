@@ -59,6 +59,18 @@ test('OB4 ARS 광고: 명시적 사전동의 증거만 허용, 육성 예외 적
   assert.ok(reasons(target({ adConsent: { ...consent, withdrawnAt: NOON } }), ctx({ mode: 'ars_ad' })).includes('CONSENT_WITHDRAWN'));
 });
 
+test('OB4-1 전화권유판매업 신고는 동의·ARS 여부와 무관하게 운영 전 필수(예외는 법률 자문 전 미개방)', () => {
+  for (const mode of ['live_agent', 'ars_ad'] as const) {
+    const d = decideOutbound(target({ adConsent: consent }), ctx({
+      mode,
+      seller: { telemarketingRegistered: false, registrationNo: null },
+      humanAgentReady: mode === 'live_agent' ? true : null,
+    }));
+    assert.equal(d.allowed, false, mode);
+    assert.ok(d.reasons.includes('NOT_REGISTERED'), mode);
+  }
+});
+
 test('OB5 PDS(예측발신): 상담원 예약 확인 + 육성 모드일 때만, ARS와 결합 불가', () => {
   assert.ok(reasons(target(), ctx({ dialer: 'pds', agentReserved: null })).includes('PDS_REQUIRES_AGENT'));
   assert.ok(reasons(target({ adConsent: consent }), ctx({ dialer: 'pds', mode: 'ars_ad', agentReserved: true })).includes('PDS_REQUIRES_AGENT'));

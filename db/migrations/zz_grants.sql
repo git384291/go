@@ -164,7 +164,11 @@ grant execute on function
   api.recontact_close(uuid, uuid, text, bigint, text),
   api.recontact_sweep(uuid, uuid, text),
   api.crm_unhandled(uuid, uuid, text),   -- 0061: 미처리 자동 분류
-  api.purge_lead(uuid, uuid, text, uuid, text)   -- 0062: 신청 1건 파기(대표만)
+  api.purge_lead(uuid, uuid, text, uuid, text),   -- 0062: 신청 1건 파기(대표만)
+  api.contract_schedule(uuid, uuid, text, uuid, text, date, int, int),   -- 0069: 설치 일정(대표만)
+  api.contract_status(uuid, uuid, text, uuid, text, date),   -- 0069: 설치 완료·취소·해지 → 환수 위험 판정
+  api.settlement_record(uuid, uuid, text, uuid, text, int, date),   -- 0069: 정산 원장(추가 전용)
+  api.contract_list(uuid, uuid, text, text)   -- 0069: 설치·정산·환수 목록(대표만)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
