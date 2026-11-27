@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { auditRecord, decideOutbound, planDialOrder, withinCallingHours, OUTBOUND_RULES, type CallContext, type Target } from '../../src/server/outbound/compliance';
-import { ClosedMockDialer, ClosedMockDnc, ClosedMockSuppressionStore, OutboundError, placeOutboundCall, selectDncChecker, selectOutboundDialer, selectSuppressionStore } from '../../src/server/outbound/providers';
+import { ClosedMockDialer, ClosedMockDnc, ClosedMockLedger, ClosedMockSuppressionStore, OutboundError, placeOutboundCall, selectDncChecker, selectOutboundDialer, selectSuppressionStore } from '../../src/server/outbound/providers';
 
 const H = (c: string) => c.repeat(64);
 const NOON = new Date('2026-11-27T03:00:00Z'); // KST 12:00
@@ -182,16 +182,16 @@ test('OB17 오케스트레이터: 발신 직전 두낫콜·수신거부를 새�
   const { dnc: _d, suppression: _s, now: _n, ...base } = ctx();
   void _d; void _s; void _n;
   const clock = () => NOON;
-  const ok = await placeOutboundCall({ dnc, suppression: sup, dialer, clock }, target({ phoneHmac: H('a') }), base);
+  const ok = await placeOutboundCall({ dnc, suppression: sup, dialer, clock, ledger: new ClosedMockLedger() }, target({ phoneHmac: H('a') }), base);
   assert.equal(ok.decision.allowed, true); assert.equal(ok.callId, 'mock-1');
-  const listed = await placeOutboundCall({ dnc, suppression: sup, dialer, clock }, target({ phoneHmac: H('b') }), { ...base, dnc: { result: 'clear', checkedAt: NOON } } as never);
+  const listed = await placeOutboundCall({ dnc, suppression: sup, dialer, clock, ledger: new ClosedMockLedger() }, target({ phoneHmac: H('b') }), { ...base, dnc: { result: 'clear', checkedAt: NOON } } as never);
   assert.equal(listed.callId, null); assert.ok(listed.decision.reasons.includes('DNC_LISTED'), '호출자가 넣은 clear를 무시');
   await sup.block(H('c'), NOON);
-  const blocked = await placeOutboundCall({ dnc, suppression: sup, dialer, clock }, target({ phoneHmac: H('c') }), base);
+  const blocked = await placeOutboundCall({ dnc, suppression: sup, dialer, clock, ledger: new ClosedMockLedger() }, target({ phoneHmac: H('c') }), base);
   assert.ok(blocked.decision.reasons.includes('OPTED_OUT')); assert.equal(blocked.callId, null);
-  const failing = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(true), dialer, clock }, target({ phoneHmac: H('a') }), base);
+  const failing = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(true), dialer, clock, ledger: new ClosedMockLedger() }, target({ phoneHmac: H('a') }), base);
   assert.ok(failing.decision.reasons.includes('SUPPRESSION_UNCONFIRMED'));
-  const throwing = await placeOutboundCall({ dnc: { name: 'x', check: async () => { throw new Error('down'); } }, suppression: sup, dialer, clock }, target({ phoneHmac: H('a') }), base);
+  const throwing = await placeOutboundCall({ dnc: { name: 'x', check: async () => { throw new Error('down'); } }, suppression: sup, dialer, clock, ledger: new ClosedMockLedger() }, target({ phoneHmac: H('a') }), base);
   assert.ok(throwing.decision.reasons.includes('DNC_UNCONFIRMED'));
   assert.equal(dialer.placed.length, 1, '실제 발신 기록은 통과 1건뿐(비용 0 Mock)');
   assert.equal(sup.persistent, false, '지속 저장 아님(미완료)');
@@ -213,7 +213,7 @@ test('OB18 시각 위조 불가: base.now(낮)를 넣어도 서버 Clock(밤 22�
   const seen: Date[] = [];
   const dnc = { name: 'spy', check: async (_h: string, now: Date) => { seen.push(now); return { result: 'clear' as const, checkedAt: now }; } };
   const { dnc: _d, suppression: _s, ...withNow } = ctx({ now: NOON }); void _d; void _s;
-  const r = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(), dialer, clock: () => night }, target(), withNow as never);
+  const r = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(), dialer, clock: () => night, ledger: new ClosedMockLedger() }, target(), withNow as never);
   assert.equal(r.decision.allowed, false); assert.ok(r.decision.reasons.includes('NIGHT_BLOCKED'));
   assert.equal(r.audit.at, night.toISOString()); assert.deepEqual(seen, [night]); assert.equal(dialer.placed.length, 0);
 });
@@ -221,7 +221,7 @@ test('OB18 시각 위조 불가: base.now(낮)를 넣어도 서버 Clock(밤 22�
 test('OB19 placeOutboundCall은 예외 없음: null·형태 불량·동기 throw 조회·발신 실패를 차단 결과로 반환', async () => {
   const { dnc: _d, suppression: _s, now: _n, ...base } = ctx(); void _d; void _s; void _n;
   const clock = () => NOON;
-  const good = { dnc: new ClosedMockDnc({ [H('a')]: 'clear' }), suppression: new ClosedMockSuppressionStore(), dialer: new ClosedMockDialer(), clock };
+  const good = { dnc: new ClosedMockDnc({ [H('a')]: 'clear' }), suppression: new ClosedMockSuppressionStore(), dialer: new ClosedMockDialer(), clock, ledger: new ClosedMockLedger() };
   for (const [deps, t] of [[null, target()], [{ ...good, dnc: null }, target()], [good, null], [good, { phoneHmac: 'x' }], [{ ...good, clock: () => { throw new Error('clock'); } }, target()]] as const) {
     const r = await placeOutboundCall(deps as never, t as never, base);
     assert.deepEqual(r.decision.reasons, ['INVALID_INPUT']); assert.equal(r.callId, null);
@@ -239,7 +239,7 @@ test('OB19 placeOutboundCall은 예외 없음: null·형태 불량·동기 throw
 test('OB20 dial 계약: live_agent 요청에 mode 전달(자동음성 금지·사람 상담원만), 사람 상담원 미배정이면 발신 안 함', async () => {
   const { dnc: _d, suppression: _s, now: _n, ...base } = ctx(); void _d; void _s; void _n;
   const dialer = new ClosedMockDialer(); const clock = () => NOON;
-  const deps = { dnc: new ClosedMockDnc({ [H('a')]: 'clear' }), suppression: new ClosedMockSuppressionStore(), dialer, clock };
+  const deps = { dnc: new ClosedMockDnc({ [H('a')]: 'clear' }), suppression: new ClosedMockSuppressionStore(), dialer, clock, ledger: new ClosedMockLedger() };
   await placeOutboundCall(deps, target(), base);
   assert.deepEqual(dialer.placed.map((p) => p.mode), ['live_agent']);
   const r = await placeOutboundCall(deps, target(), { ...base, humanAgentReady: false });

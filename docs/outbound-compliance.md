@@ -36,8 +36,23 @@
 발신이 허용된 통화의 기록은 기존 경로만 쓴다: 수신 기록 `src/server/calls/ingest.ts`(api.call_ingest, 연락처 HMAC) → 녹취 암호화 `recording.ts` → 변환 `stt.ts`(현재 Mock, live 거부) → 요약 `summary.ts`.
 이 모듈은 '걸어도 되는가'만 판정하고, 통화 데이터 저장은 하지 않는다. 발신 판정 감사(`auditRecord`)를 DB에 남기는 표는 아직 없다(필요 시 별도 마이그레이션·승인).
 
+## DB 영구화 (0070, PR feat/outbound-persistence)
+| 표(core, 추가 전용·RLS enable+force·fideon_api만) | 내용 |
+|---|---|
+| `outbound_suppressions` | (사업자 ID, 연락처 HMAC) 1행. 동시 기록 멱등, 해제·수정·삭제 없음 |
+| `outbound_attempts` · `outbound_attempt_results` | 목적·모드·발신기·시각 / 결과 코드(placed·dial_failed)만 |
+| `outbound_decisions` | 허용·근거·사유 코드·시각만(원문 번호·이름·고지문·금액 없음) |
+함수 6개(api, SECURITY DEFINER·search_path 고정·입력 검증)는 기존 통화 작업자 역할 `app_call`만 실행. 누적 3회·24시간·수신거부는 `api.outbound_attempt_begin`이 DB 시각으로 직접 확인(advisory lock).
+서버 어댑터 `src/server/outbound/db.ts`(DbSuppressionStore·DbOutboundLedger, 사업자 ID 생성 때 고정): 조회 실패·형태 불량 → error(clear로 보지 않음).
+오케스트레이터 순서: 앱 차단 → 차단 판정 기록 / 앱 허용 → 시도 시작(DB 재확인) → 거부 시 정확한 사유의 차단 판정 기록 → 수신거부 재조회 → 허용 판정 기록 성공 시에만 dial. 어느 기록이든 실패하면 발신 0회.
+수신거부 기록과 시도 시작은 같은 advisory lock(OP42). 함수는 생성 직후 모든 역할 실행 권한 회수 → zz_grants가 app_call에만 부여(OP43).
+롤백 `db/rollback/0070_down.sql`: 함수만 제거, 기록·추가 전용 트리거 보존. 선택 함수(`selectSuppressionStore`)는 아직 Mock만 — DB 연결은 승인 뒤.
+
 ## ⚠ 위험·미완료
-- 🔴 **내부 수신거부 지속 저장 없음**: `ClosedMockSuppressionStore`는 프로세스 메모리(persistent=false). 운영 전 DB 표(추가 전용·삭제 금지·RLS)와 마이그레이션·롤백·시험을 별도 PR로 만들어야 한다.
+- 🟡 내부 수신거부 지속 저장: 0070으로 DB 표·함수·어댑터 준비(병합·DB 적용 전). 메모리 Mock은 시험용으로만 남음.
+- 🔴 지속 저장이 생겨도 운영 전 **법률 자문·전화권유판매업 신고·두낫콜 실제 커넥터·발신번호 사전등록**은 여전히 필수(미완료).
+- 🟡 **남은 경쟁 위험**: 발신 직전 수신거부 재조회와 실제 통신망 연결 사이의 짧은 틈은 원자적으로 막을 수 없다(외부 통신망). live 발신기 금지 유지, live 구현 시 업체 측 차단 확인·통화 시작 직후 수신거부 처리 절차를 별도 검토.
+- 🟡 DB 어댑터는 아직 실제 선택 경로(`selectSuppressionStore` 등)에 연결되지 않음 — 완료 아님.
 - 🟡 `OutboundDialer.dial`은 인터페이스라 직접 부를 수 있다 → 시험 OB-ORCH가 src 전체에서 `.dial(` 호출을 `placeOutboundCall` 한 곳으로 제한. live 발신기도 이 경로만 사용.
 
 ## 남은 법률·업체 의존 (운영 전 필수)

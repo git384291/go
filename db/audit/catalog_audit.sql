@@ -46,7 +46,7 @@ exec_allow(rolname, proname) as (
     -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
     ('release_auditor', 'release_probe_product_scope'),
     -- 0064~0067 통화 녹취·STT·요약·고객 이력: 작업자 전용 역할(app_call) 8개, 관리자 11개
-    ('app_call', 'call_ingest'), ('app_call', 'call_stt_claim'), ('app_call', 'call_stt_complete'), ('app_call', 'call_job_fail'),
+    ('app_call', 'call_ingest'), ('app_call', 'outbound_suppression_block'), ('app_call', 'outbound_suppression_check'), ('app_call', 'outbound_attempt_begin'), ('app_call', 'outbound_attempt_finish'), ('app_call', 'outbound_attempt_status'), ('app_call', 'outbound_decision_record'), ('app_call', 'call_stt_claim'), ('app_call', 'call_stt_complete'), ('app_call', 'call_job_fail'),
     ('app_call', 'call_summary_claim'), ('app_call', 'call_summary_complete'), ('app_call', 'call_object_deletion_next'), ('app_call', 'call_object_deletion_done'),
     ('app_staff', 'call_settings_get'), ('app_staff', 'call_settings_set'), ('app_staff', 'call_recording_access'), ('app_staff', 'call_link'),
     ('app_staff', 'call_recording_delete'), ('app_staff', 'call_job_requeue'), ('app_staff', 'call_stt_status'), ('app_staff', 'call_summary_edit'),
