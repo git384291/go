@@ -28,6 +28,10 @@ test('CR-ENV2 충돌 시 운영 우선(닫힘), 여는 판정은 검수 표식�
   assert.equal(isLiveProduction({ VERCEL_ENV: 'preview', APP_ENV: 'production' }), false);
   assert.equal(isLiveProduction({ VERCEL_ENV: 'development', K_SERVICE: 'x' }), false);
   assert.equal(isLiveProduction(CR), true);
+  for (const v of ['staging', 'Production', 'prod', 'preview ', 'test']) assert.equal(isLiveProduction({ APP_ENV: 'production', VERCEL_ENV: v }), false, `미지 값 ${v}`);
+  assert.equal(isLiveProduction({ APP_ENV: 'production', VERCEL_ENV: '' }), true);
+  assert.equal(isLiveProduction({ VERCEL_ENV: 'production' }), true);
+  assert.equal(isLiveProduction({ K_SERVICE: 'x', VERCEL_ENV: 'staging' }), false);
   assert.equal(isHostedDeploy(CR), true);
   assert.equal(isHostedDeploy({ NODE_ENV: 'development' }), false);
   assert.equal(onCloudRun(CR), true);
@@ -114,7 +118,13 @@ test('CR-ENV12 Dockerfile·.dockerignore: 비루트·8080·0.0.0.0·standalone, 
   assert.match(d, /HOSTNAME=0\.0\.0\.0/);
   assert.match(d, /NEXT_OUTPUT=standalone/);
   assert.match(d, /CMD \["node", "server\.js"\]/);
-  assert.equal(/^(ENV|ARG)\b.*(KEY|SECRET|TOKEN|PASSWORD|DATABASE_URL)/im.test(d), false);
+  // 빌드 ARG는 공개 값 허용 목록만(사이트 키·Supabase 공개 키는 공개 값 예외). 비밀 이름은 ARG·ENV 어디에도 없음
+  const PUBLIC_ARGS = ['NEXT_PUBLIC_LEAD_FORM_ENABLED', 'NEXT_PUBLIC_PRIVACY_POLICY_VERSION', 'NEXT_PUBLIC_TURNSTILE_SITE_KEY', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'NEXT_PUBLIC_KAKAO_CHANNEL_URL'];
+  const args = [...d.matchAll(/^ARG\s+([A-Z0-9_]+)/gm)].map((m) => m[1]);
+  assert.deepEqual([...args].sort(), [...PUBLIC_ARGS].sort());
+  assert.equal(/(SECRET|TOKEN|PASSWORD|DATABASE_URL|SIGNING|PII_|HMAC|SERVICE_ROLE)/.test(d.replace(/^#.*$/gm, '')), false);
+  const keyNames = [...d.replace(/^#.*$/gm, '').matchAll(/[A-Z0-9_]*KEY[A-Z0-9_]*/g)].map((m) => m[0]);
+  assert.ok(keyNames.every((k) => k === 'NEXT_PUBLIC_TURNSTILE_SITE_KEY' || k === 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'), keyNames.join(','));
   const lastUser = [...d.matchAll(/^USER (\S+)/gm)].map((m) => m[1]).at(-1);
   assert.equal(lastUser, 'app');
   const ig = readFileSync('.dockerignore', 'utf8').split('\n').map((s) => s.trim());

@@ -34,8 +34,10 @@ export function onCloudRun(env: Env = process.env): boolean {
 
 /**
  * 실제 운영을 '여는' 판정(실접수·검색 노출 등). 닫는 판정(isProduction)보다 좁다:
- * 운영 표식이 있어도 Vercel 검수·개발 배포 표식이 함께 있으면 열지 않는다(설정 실수로 검수 배포가 실고객을 받지 않게).
+ * 운영 표식이 있어도 VERCEL_ENV가 production이 아닌 값(preview·development·미지 값)이면 열지 않는다(설정 실수로 검수 배포가 실고객을 받지 않게).
  */
 export function isLiveProduction(env: Env = process.env): boolean {
-  return isProduction(env) && env.VERCEL_ENV !== 'preview' && env.VERCEL_ENV !== 'development';
+  const v = env.VERCEL_ENV;
+  // VERCEL_ENV는 비었거나(Vercel 밖) 정확히 production일 때만 연다. preview·development·그 밖 미지 값(staging 등)은 모두 닫힘
+  return isProduction(env) && (v === undefined || v.trim() === '' || v === 'production');
 }

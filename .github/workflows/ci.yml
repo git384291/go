@@ -69,3 +69,24 @@ jobs:
           name: test-results
           path: test-results/
           retention-days: 7   # 11/26 저장 공간 초과(701개·4.9GB) 재발 방지
+
+  # Cloud Run 이미지 빌드만 실검증(코사장 11/27). 이미지를 올리거나 배포하지 않는다(push·login·registry 없음). 공개 값·비밀 없이 빌드.
+  docker-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: docker build (no push)
+        run: docker build --pull --no-cache -t bareun365-web:ci .
+      - name: image runs as non-root, healthz answers
+        run: |
+          test "$(docker image inspect bareun365-web:ci --format '{{.Config.User}}')" = app
+          cid=$(docker run -d -p 18080:8080 bareun365-web:ci)
+          ok=0
+          for i in $(seq 1 30); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz)" = 200 ]; then ok=1; break; fi
+            sleep 1
+          done
+          docker rm -f "$cid" >/dev/null
+          [ "$ok" = 1 ]
+
