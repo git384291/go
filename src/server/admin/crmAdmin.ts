@@ -33,7 +33,8 @@ export function crmAdminReady(env: Env): boolean {
   return dbReadReady({ ...env, ADMIN_LEADS_SOURCE: 'db' });
 }
 
-async function gate(deps: CrmAdminDeps): Promise<StaffIdentity | Response> {
+/** 기본 닫힘·인증·대표 확인(설치·정산 API도 같은 관문을 쓴다) */
+export async function gate(deps: CrmAdminDeps): Promise<StaffIdentity | Response> {
   let ready = false;
   try { ready = crmAdminReady(deps.env()); } catch { ready = false; }
   if (!ready) return fail('CRM_DISABLED', 503);
