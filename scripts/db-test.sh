@@ -881,6 +881,41 @@ D -f db/migrations/0063_purge_notes_retention.sql >/dev/null
 back63=$(D -At -c "select to_regprocedure('core.legal_hold(uuid)') is not null and position('lead_notes' in pg_get_functiondef('core.purge_customer_internal(uuid,uuid,text)'::regprocedure)) > 0")
 [ "$gone63" = t ] && [ "$back63" = t ] || { echo "FAIL | M63 0063 롤백 gone=$gone63 재적용=$back63" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
 echo "NOTICE:  PASS | M63 메모 파기·보존 분리 0063 롤백: 함수 제거·이전 복원, 재적용 일치" >> "$LOG_DIR/db-test.log"
+# 0069 설치·정산·환수(코사장 11/27 안전 보완): 적용 전 지문 → 적용·기록 1건씩 → 롤백(api 함수 4개만 제거, 기록·보호 트리거 보존, 0069 밖 지문 불변) → 재적용(기록 그대로)
+FP69="select md5(coalesce(string_agg(x, ';' order by x), '')) from (
+  select n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || md5(p.prosrc) || coalesce(array_to_string(p.proacl::text[], ','), '') as x
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname in ('api', 'core', 'security', 'pii')
+     and p.proname not in ('contract_schedule', 'contract_status', 'settlement_record', 'contract_list', 'lead_contracts_guard', 'settlements_guard')
+  union all
+  select 'T:' || n.nspname || '.' || c.relname || c.relrowsecurity::text || c.relforcerowsecurity::text || coalesce(array_to_string(c.relacl::text[], ','), '')
+         || (select string_agg(a.attname || format_type(a.atttypid, a.atttypmod), ',' order by a.attnum) from pg_attribute a where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped)
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where c.relkind in ('r', 'p') and n.nspname in ('core', 'security', 'pii') and c.relname not in ('lead_contracts', 'settlements')
+  union all
+  select 'G:' || tgrelid::regclass::text || '.' || tgname from pg_trigger where not tgisinternal
+     and tgrelid not in (select oid from pg_class where relname in ('lead_contracts', 'settlements'))
+) q"
+DATA69="select (select count(*) from core.leads) || '/' || (select count(*) from pii.customers) || '/' || (select count(*) from core.audit_logs)"
+D -q -c "drop function if exists api.contract_schedule(uuid,uuid,text,uuid,text,date,int,int), api.contract_status(uuid,uuid,text,uuid,text,date), api.settlement_record(uuid,uuid,text,uuid,text,int,date), api.contract_list(uuid,uuid,text,text)" >/dev/null
+f69a=$(D -At -c "$FP69"); d69a=$(D -At -c "$DATA69")
+D -f db/migrations/0069_install_settlement.sql >/dev/null
+lead69=$(D -At -c "select id from core.leads order by created_at limit 1"); staff69=$(D -At -c "select user_id from core.staff order by user_id limit 1")
+[ -n "$lead69" ] && [ -n "$staff69" ] || { echo "FAIL | M69 시험용 가상 리드·직원 없음" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+D -q -c "insert into core.lead_contracts (lead_id, carrier, status, install_scheduled_on, installed_on, contract_months, clawback_months, created_by) values ('$lead69', 'KT', 'installed', current_date - 5, current_date - 1, 36, 12, '$staff69')" \
+     -c "insert into core.settlements (lead_id, kind, amount_krw, occurred_on, created_by) values ('$lead69', 'received', 1000, current_date, '$staff69')" >/dev/null
+d69b=$(D -At -c "$DATA69")
+D -f db/rollback/0069_down.sql >/dev/null
+gone69=$(D -At -c "select to_regprocedure('api.contract_schedule(uuid,uuid,text,uuid,text,date,int,int)') is null and to_regprocedure('api.contract_status(uuid,uuid,text,uuid,text,date)') is null and to_regprocedure('api.settlement_record(uuid,uuid,text,uuid,text,int,date)') is null and to_regprocedure('api.contract_list(uuid,uuid,text,text)') is null")
+keep69=$(D -At -c "select (select count(*) from core.lead_contracts) || '/' || (select count(*) from core.settlements) || '/' || (select count(*) from pg_trigger where tgname in ('lead_contracts_guard', 'settlements_guard', 'lead_contracts_no_truncate', 'settlements_no_truncate'))")
+f69b=$(D -At -c "$FP69"); d69c=$(D -At -c "$DATA69")
+del69=$( { D -q -c "delete from core.settlements" 2>&1 >/dev/null || true; } | grep -c SETTLEMENT_APPEND_ONLY || true)
+D -f db/migrations/0069_install_settlement.sql >/dev/null
+back69=$(D -At -c "select to_regprocedure('api.contract_list(uuid,uuid,text,text)') is not null and to_regprocedure('api.settlement_record(uuid,uuid,text,uuid,text,int,date)') is not null and (select count(*) from core.lead_contracts) = 1 and (select count(*) from core.settlements) = 1")
+f69c=$(D -At -c "$FP69")
+[ "$gone69" = t ] && [ "$keep69" = "1/1/4" ] && [ "$f69a" = "$f69b" ] && [ "$f69a" = "$f69c" ] && [ "$d69a" = "$d69b" ] && [ "$d69b" = "$d69c" ] && [ "$del69" = 1 ] && [ "$back69" = t ] \
+  || { echo "FAIL | M69 0069 롤백 gone=$gone69 보존=$keep69 지문(전/롤백/재적용)=${f69a:0:8}/${f69b:0:8}/${f69c:0:8} 데이터=$d69a/$d69b/$d69c 삭제차단=$del69 재적용=$back69" | tee -a "$LOG_DIR/db-test.log"; exit 1; }
+echo "NOTICE:  PASS | M69 설치·정산·환수 0069 롤백: api 함수 4개만 제거, 계약·정산 기록 1/1·보호 트리거 4개 보존(롤백 뒤에도 삭제 차단), 0069 밖 함수·표·트리거 지문 불변(적용 전=롤백 뒤=재적용 뒤), 기존 리드·고객·감사 건수 불변, 재적용 시 기록 그대로" >> "$LOG_DIR/db-test.log"
 # 0024 상담 공용 횟수 제한: 적용 → 롤백(함수 제거, 집계 보존) → 재적용
 D -f db/migrations/0024_consult_rate.sql >/dev/null
 D -f db/rollback/0024_down.sql >/dev/null
