@@ -24,13 +24,14 @@ const deps = (o: Record<string, unknown> = {}) => ({ dnc: new ClosedMockDnc({ [H
 
 test('OPA1 DB 수신거부 조회: clear/blocked만 그대로, 오류·형태 불량·빈 결과는 error(clear로 보지 않음)', async () => {
   const ok = fakeTx(() => [{ result: 'blocked', checked_at: NOON }]);
-  assert.deepEqual(await new DbSuppressionStore(ok.tx, 'bareun365').check(H('a')), { result: 'blocked', checkedAt: NOON });
+  assert.deepEqual(await new DbSuppressionStore(ok.tx, 'bareun365').check(H('a'), NOON), { result: 'blocked', checkedAt: NOON }, '신선도 시각은 서버 Clock');
+  assert.equal((await new DbSuppressionStore(ok.tx, 'bareun365').check(H('a'), new Date('x'))).result, 'unknown');
   assert.deepEqual(ok.log[0].v, ['bareun365', H('a')], '값은 바인딩만');
   for (const r of [new Error('db down'), [], [{ result: 'maybe', checked_at: NOON }], [{ result: 'clear', checked_at: 'x' }], [{ result: 'clear' }, { result: 'clear' }], null]) {
-    const s = await new DbSuppressionStore(fakeTx(() => r).tx, 'bareun365').check(H('a'));
+    const s = await new DbSuppressionStore(fakeTx(() => r).tx, 'bareun365').check(H('a'), NOON);
     assert.equal(s.result, 'error', JSON.stringify(r));
   }
-  assert.equal((await new DbSuppressionStore(fakeTx(() => []).tx, 'bareun365').check('01012345678')).result, 'unknown');
+  assert.equal((await new DbSuppressionStore(fakeTx(() => []).tx, 'bareun365').check('01012345678', NOON)).result, 'unknown');
   assert.throws(() => new DbSuppressionStore(fakeTx(() => []).tx, 'Bad Biz'), /INVALID_INPUT/);
 });
 
