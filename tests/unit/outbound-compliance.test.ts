@@ -2,8 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { auditRecord, decideOutbound, planDialOrder, SuppressionList, withinCallingHours, OUTBOUND_RULES, type CallContext, type Target } from '../../src/server/outbound/compliance';
-import { ClosedMockDialer, ClosedMockDnc, OutboundError, selectDncChecker, selectOutboundDialer } from '../../src/server/outbound/providers';
+import { readdirSync, statSync } from 'node:fs';
+import { auditRecord, decideOutbound, planDialOrder, withinCallingHours, OUTBOUND_RULES, type CallContext, type Target } from '../../src/server/outbound/compliance';
+import { ClosedMockDialer, ClosedMockDnc, ClosedMockSuppressionStore, OutboundError, placeOutboundCall, selectDncChecker, selectOutboundDialer, selectSuppressionStore } from '../../src/server/outbound/providers';
 
 const H = (c: string) => c.repeat(64);
 const NOON = new Date('2026-11-27T03:00:00Z'); // KST 12:00
@@ -12,13 +13,13 @@ const target = (o: Partial<Target> = {}): Target => ({
   phoneHmac: H('a'), source: { kind: 'customer_inquiry', recordId: 'lead-1', lawfulVerified: true, label: '홈페이지 상담 신청' },
   adConsent: null, attempts: 0, lastAttemptAt: null, ...o,
 });
-const consent = { explicit: true as const, channel: 'phone' as const, evidenceId: 'consent-1', at: new Date('2026-11-01T00:00:00Z'), withdrawnAt: null };
+const consent = { explicit: true as const, channel: 'phone' as const, evidenceId: 'consent-1', purposeId: 'ad-internet-tv', granteeBusinessId: 'bareun365', at: new Date('2026-11-01T00:00:00Z'), withdrawnAt: null };
 const ctx = (o: Partial<CallContext> = {}): CallContext => ({
-  now: NOON, mode: 'live_agent', dialer: 'manual',
+  now: NOON, mode: 'live_agent', dialer: 'manual', purposeId: 'ad-internet-tv', businessId: 'bareun365',
   seller: { telemarketingRegistered: true, registrationNo: '제2026-인천-0001호' },
   disclosure: { businessName: '바른365', purpose: '인터넷·TV 가입 안내', announcesSource: true },
   callerIdShown: true, businessNameShown: true, agentConnected: true, agentReserved: null,
-  dnc: { result: 'clear', checkedAt: NOON }, internalOptOut: false, ...o,
+  dnc: { result: 'clear', checkedAt: NOON }, suppression: { result: 'clear', checkedAt: NOON }, ...o,
 });
 const reasons = (t: Target, c: CallContext) => decideOutbound(t, c).reasons;
 
@@ -65,7 +66,7 @@ test('OB5 PDS(예측발신): 상담원 예약 확인 + 육성 모드일 때만, 
 });
 
 test('OB6 번호 자동 생성·순차 생성·외부 목록 자동 등록·출처 불명은 항상 차단', () => {
-  for (const kind of ['generated', 'sequential', 'external_auto_import', 'unknown'] as const) {
+  for (const kind of ['generated', 'sequential', 'external_auto_import', 'unknown', 'scraped', 'purchased_list', ''] as never[]) {
     const d = decideOutbound(target({ source: { kind, recordId: 'r', lawfulVerified: true, label: 'x' }, adConsent: consent }), ctx());
     assert.equal(d.allowed, false); assert.ok(d.reasons.includes('FORBIDDEN_SOURCE'), kind);
   }
@@ -76,7 +77,7 @@ test('OB7 발신 시간: KST 08:00~20:59만, 21:00·07:59 차단(야간 별도 �
   assert.equal(withinCallingHours(kst(20, 59)), true);
   assert.equal(withinCallingHours(kst(21, 0)), false);
   assert.equal(withinCallingHours(kst(7, 59)), false);
-  assert.ok(reasons(target({ adConsent: consent }), ctx({ now: kst(22), dnc: { result: 'clear', checkedAt: kst(22) } })).includes('NIGHT_BLOCKED'));
+  assert.ok(reasons(target({ adConsent: consent }), ctx({ now: kst(22), dnc: { result: 'clear', checkedAt: kst(22) }, suppression: { result: 'clear', checkedAt: kst(22) } })).includes('NIGHT_BLOCKED'));
 });
 
 test('OB8 발신번호·상호 표시 필수', () => {
@@ -84,12 +85,13 @@ test('OB8 발신번호·상호 표시 필수', () => {
   assert.ok(reasons(target(), ctx({ businessNameShown: false })).includes('CALLER_ID_REQUIRED'));
 });
 
-test('OB9 수신거부: 즉시·영구 차단(동의가 있어도), 해제 함수 없음', () => {
-  const s = new SuppressionList();
-  s.add(H('a'));
-  assert.ok(reasons(target({ adConsent: consent }), ctx({ internalOptOut: s.has(H('a')) })).includes('OPTED_OUT'));
-  assert.equal('remove' in s || 'delete' in s || 'clear' in s, false);
-  assert.throws(() => s.add('01012345678'), /INVALID_INPUT/);
+test('OB9 내부 수신거부: 저장소 조회 결과만 믿음 — 차단·미확인·오류·5분 지난 조회는 모두 차단(동의가 있어도)', () => {
+  const old = new Date(NOON.getTime() - OUTBOUND_RULES.suppressionMaxAgeMs - 1);
+  for (const [sup, why] of [[{ result: 'blocked', checkedAt: NOON }, 'OPTED_OUT'], [{ result: 'unknown', checkedAt: null }, 'SUPPRESSION_UNCONFIRMED'],
+    [{ result: 'error', checkedAt: NOON }, 'SUPPRESSION_UNCONFIRMED'], [{ result: 'clear', checkedAt: old }, 'SUPPRESSION_UNCONFIRMED'], [{ result: 'clear', checkedAt: null }, 'SUPPRESSION_UNCONFIRMED']] as const) {
+    const d = decideOutbound(target({ adConsent: consent }), ctx({ suppression: sup }));
+    assert.equal(d.allowed, false); assert.ok(d.reasons.includes(why), why);
+  }
 });
 
 test('OB10 재시도 상한 3회·24시간 간격', () => {
@@ -131,4 +133,62 @@ test('OB14 코드 금지 점검: 모듈에 번호 생성·외부 호출·실제 
     const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     assert.equal(/\bfetch\(|https?:\/\/|node:(http|https|net|tls)|child_process|padStart|010\d|randomInt/.test(src), false, f);
   }
+});
+
+test('OB15 런타임 형태 검사: 누락·잘못된 객체·Invalid Date·잘못된 lastAttemptAt은 예외 없이 INVALID_INPUT', () => {
+  const bad: [unknown, unknown][] = [
+    [null, ctx()], [target(), null], [target(), { ...ctx(), dnc: undefined }], [target(), { ...ctx(), seller: undefined }],
+    [target(), { ...ctx(), disclosure: null }], [target(), { ...ctx(), suppression: undefined }], [target(), { ...ctx(), now: new Date('x') }],
+    [target(), { ...ctx(), dnc: { result: 'clear', checkedAt: new Date('x') } }], [target(), { ...ctx(), dnc: { result: 'maybe', checkedAt: NOON } }],
+    [target(), { ...ctx(), mode: 'robocall' }], [target(), { ...ctx(), purposeId: undefined }], [target(), { ...ctx(), callerIdShown: 'yes' }],
+    [target({ lastAttemptAt: new Date('x') }), ctx()], [target({ lastAttemptAt: '2026-11-01' as never }), ctx()],
+    [target({ attempts: 1.5 }), ctx()], [target({ attempts: -1 }), ctx()], [target({ source: undefined as never }), ctx()],
+    [target({ adConsent: { ...consent, at: new Date('x') } }), ctx()], [target({ adConsent: 'yes' as never }), ctx()], [{ ...target(), phoneHmac: '01012345678' }, ctx()],
+  ];
+  for (const [t, c] of bad) {
+    let d; assert.doesNotThrow(() => { d = decideOutbound(t as Target, c as CallContext); });
+    assert.deepEqual(d, { allowed: false, basis: null, reasons: ['INVALID_INPUT'] }, JSON.stringify(c && (c as CallContext).mode));
+  }
+  assert.doesNotThrow(() => auditRecord(null as never, { now: new Date('x') } as never, { allowed: false, basis: null, reasons: ['INVALID_INPUT'] }));
+});
+
+test('OB16 사전동의: 미래 시각·목적 불일치·사업자 불일치는 근거가 되지 않음(ARS·consent 모두)', () => {
+  const future = { ...consent, at: new Date(NOON.getTime() + 60_000) };
+  assert.ok(reasons(target({ adConsent: future }), ctx({ mode: 'ars_ad' })).includes('NO_PRIOR_CONSENT'));
+  for (const c of [{ ...consent, purposeId: 'ad-mobile' }, { ...consent, granteeBusinessId: 'other-dealer' }, { ...consent, purposeId: '' }]) {
+    const d = decideOutbound(target({ adConsent: c }), ctx({ mode: 'ars_ad' }));
+    assert.equal(d.allowed, false); assert.ok(d.reasons.includes('CONSENT_SCOPE_MISMATCH') && d.reasons.includes('NO_PRIOR_CONSENT'));
+  }
+  const live = decideOutbound(target({ adConsent: { ...consent, granteeBusinessId: 'other' } }), ctx());
+  assert.equal(live.allowed, false, '범위 불일치 동의는 육성 예외로 넘어가도 차단 사유가 남음');
+  assert.ok(live.reasons.includes('CONSENT_SCOPE_MISMATCH'));
+});
+
+test('OB17 오케스트레이터: 발신 직전 두낫콜·수신거부를 새로 조회해 판정, 통과 시에만 dial(호출자 값 무시)', async () => {
+  const dialer = new ClosedMockDialer(); const sup = new ClosedMockSuppressionStore();
+  const dnc = new ClosedMockDnc({ [H('a')]: 'clear', [H('b')]: 'listed', [H('c')]: 'clear' });
+  const { dnc: _d, suppression: _s, ...base } = ctx();
+  const ok = await placeOutboundCall({ dnc, suppression: sup, dialer }, target({ phoneHmac: H('a') }), base);
+  assert.equal(ok.decision.allowed, true); assert.equal(ok.callId, 'mock-1');
+  const listed = await placeOutboundCall({ dnc, suppression: sup, dialer }, target({ phoneHmac: H('b') }), { ...base, dnc: { result: 'clear', checkedAt: NOON } } as never);
+  assert.equal(listed.callId, null); assert.ok(listed.decision.reasons.includes('DNC_LISTED'), '호출자가 넣은 clear를 무시');
+  await sup.block(H('c'), NOON);
+  const blocked = await placeOutboundCall({ dnc, suppression: sup, dialer }, target({ phoneHmac: H('c') }), base);
+  assert.ok(blocked.decision.reasons.includes('OPTED_OUT')); assert.equal(blocked.callId, null);
+  const failing = await placeOutboundCall({ dnc, suppression: new ClosedMockSuppressionStore(true), dialer }, target({ phoneHmac: H('a') }), base);
+  assert.ok(failing.decision.reasons.includes('SUPPRESSION_UNCONFIRMED'));
+  const throwing = await placeOutboundCall({ dnc: { name: 'x', check: async () => { throw new Error('down'); } }, suppression: sup, dialer }, target({ phoneHmac: H('a') }), base);
+  assert.ok(throwing.decision.reasons.includes('DNC_UNCONFIRMED'));
+  assert.equal(dialer.placed.length, 1, '실제 발신 기록은 통과 1건뿐(비용 0 Mock)');
+  assert.equal(sup.persistent, false, '지속 저장 아님(미완료)');
+  assert.throws(() => selectSuppressionStore({ OUTBOUND_SUPPRESSION_MODE: 'db' }), (e: unknown) => e instanceof OutboundError && e.code === 'LIVE_OUTBOUND_NOT_APPROVED');
+});
+
+test('OB-ORCH 발신 경계: src 전체에서 .dial( 호출은 placeOutboundCall(providers.ts) 한 곳뿐', () => {
+  const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const f = `${d}/${n}`; return statSync(f).isDirectory() ? walk(f) : [f]; });
+  const hits = walk('src').filter((f) => /\.(ts|tsx)$/.test(f)).flatMap((f) => {
+    const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+    return [...src.matchAll(/\.dial\(/g)].map(() => f);
+  });
+  assert.deepEqual(hits, ['src/server/outbound/providers.ts']);
 });

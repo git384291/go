@@ -20,16 +20,23 @@
 | PDS(예측발신) | 육성 모드 + 발신 전 상담원 예약 확인만(무응답 끊김·자동음성 방지) | OB5 |
 | 시간 | KST 08:00~20:59만. 야간 별도 동의 기능은 열지 않음 | OB7 |
 | 표시 | 발신번호·상호 표시 필수 | OB8 |
-| 수신거부 | 즉시·영구 차단(`SuppressionList`, 해제 함수 없음) | OB9 |
+| 수신거부 | 저장소 조회 결과(5분 이내 clear)만 통과, blocked·unknown·error·오래된 조회 차단. **지금 저장소는 메모리 Mock(재시작 시 사라짐) — 영구 아님** | OB9·OB17 |
 | 재시도 | 대상당 3회, 24시간 간격, 중복 1건 | OB10·OB11 |
 | 감사 | HMAC·사유·근거만(전화번호 원문·이름 없음) | OB12 |
-| 연동 | `selectDncChecker`·`selectOutboundDialer`: 기본 닫힌 Mock, 그 밖 선택은 `LIVE_OUTBOUND_NOT_APPROVED` | OB13 |
+| 연동 | `selectDncChecker`·`selectSuppressionStore`·`selectOutboundDialer`: 기본 닫힌 Mock, 그 밖 선택은 `LIVE_OUTBOUND_NOT_APPROVED` | OB13·OB17 |
+| 동의 범위 | 동의 시각 ≤ 지금, 광고 목적(purposeId)·동의받은 사업자(granteeBusinessId)가 이번 발신과 일치해야 근거 | OB16 |
+| 런타임 검사 | 출처는 허용 목록(customer_inquiry·consent_form·existing_customer)만, 형태 이상·Invalid Date는 예외 없이 INVALID_INPUT | OB6·OB15 |
+| 발신 경로 | `placeOutboundCall`만: 발신 직전 두낫콜·수신거부 새로 조회(호출자 값 무시) → 판정 → 통과 시 dial | OB17·OB-ORCH |
 
 두낫콜 24시간 기준은 법정 주기가 아니라 **내부 운영 기준(더 엄격)**이다.
 
 ## 녹취·문자변환 연결 경계 (중복 개발 금지)
 발신이 허용된 통화의 기록은 기존 경로만 쓴다: 수신 기록 `src/server/calls/ingest.ts`(api.call_ingest, 연락처 HMAC) → 녹취 암호화 `recording.ts` → 변환 `stt.ts`(현재 Mock, live 거부) → 요약 `summary.ts`.
 이 모듈은 '걸어도 되는가'만 판정하고, 통화 데이터 저장은 하지 않는다. 발신 판정 감사(`auditRecord`)를 DB에 남기는 표는 아직 없다(필요 시 별도 마이그레이션·승인).
+
+## ⚠ 위험·미완료
+- 🔴 **내부 수신거부 지속 저장 없음**: `ClosedMockSuppressionStore`는 프로세스 메모리(persistent=false). 운영 전 DB 표(추가 전용·삭제 금지·RLS)와 마이그레이션·롤백·시험을 별도 PR로 만들어야 한다.
+- 🟡 `OutboundDialer.dial`은 인터페이스라 직접 부를 수 있다 → 시험 OB-ORCH가 src 전체에서 `.dial(` 호출을 `placeOutboundCall` 한 곳으로 제한. live 발신기도 이 경로만 사용.
 
 ## 남은 법률·업체 의존 (운영 전 필수)
 - 전화권유판매업 신고(방문판매법 제5조) 여부·신고번호 — 사용자 확인
