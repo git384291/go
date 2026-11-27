@@ -18,7 +18,7 @@ const admin = conn('postgres');
 after(async () => { await app.end(); await app2.end(); await admin.end(); });
 
 const txOn = (sql: postgres.Sql): OutboundTx => (fn) => withRoleOn(sql, 'call', (t) => fn(t as unknown as OutboundSql));
-const H = (c: string) => c.repeat(64);
+const H = (c: string) => c.repeat(64 / c.length); // 64자 hex
 const ENV = { OUTBOUND_PERSISTENCE: 'db' };
 const base: Omit<CallContext, 'dnc' | 'suppression' | 'now'> = {
   mode: 'live_agent', dialer: 'manual', purposeId: 'ad-internet-tv', businessId: 'bareun365',
