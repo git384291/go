@@ -9,7 +9,7 @@
 with
 app_roles(rolname) as (
   select r.rolname from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'app_server', 'anon', 'authenticated', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_server', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'anon', 'authenticated', 'release_auditor', 'app_call')
 ),
 guarded_tables as (
   select c.oid, n.nspname || '.' || c.relname as name, c.relrowsecurity, c.relforcerowsecurity
@@ -23,11 +23,58 @@ guarded_funcs as (
 ),
 exec_allow(rolname, proname) as (
   values
-    ('app_public', 'create_lead'),
+    ('app_public', 'create_lead'), ('app_public', 'policy_published'),
     ('app_staff', 'staff_session_open'), ('app_staff', 'staff_session_revoke'), ('app_staff', 'whoami'),
     ('app_staff', 'list_leads'), ('app_staff', 'reveal_contact'), ('app_staff', 'update_lead'),
     ('app_staff', 'assign_lead'), ('app_staff', 'export_leads_masked'), ('app_staff', 'set_feature_flag'),
-    ('app_staff', 'purge_customer')
+    ('app_staff', 'purge_customer'),
+    -- 0008 정책 저장소(PM 11/21): 쓰기 함수 4개는 직원 서명·역할로, 게시 조회는 고객 견적 필드만 돌려준다
+    ('app_staff', 'policy_create_draft'), ('app_staff', 'policy_submit'), ('app_staff', 'policy_approve'), ('app_staff', 'policy_reject'), ('app_staff', 'policy_list'),
+    -- 0010 광고 예산 통제(PM 11/21)
+    ('app_staff', 'ad_budget_approve'), ('app_staff', 'ad_budget_revoke'), ('app_staff', 'ad_spend_request'), ('app_staff', 'ad_budget_overview'),
+    -- 0011 광고 성과 수집·분석, AI 사용료 예약(전용 역할)
+    ('app_staff', 'ad_performance_record'), ('app_staff', 'ad_funnel'),
+    -- 0012 상담 시작 집계·전환 분석·AI 정산
+    ('app_public', 'consult_event_record'), ('app_staff', 'ad_funnel_full'), ('app_staff', 'ad_alert_open'), ('app_staff', 'ad_alert_resolve'), ('app_staff', 'ad_alert_list'), ('app_staff', 'ai_budget_limit_get'), ('app_staff', 'ai_budget_limit_set'), ('app_staff', 'policy_publish_get'), ('app_staff', 'policy_publish_set'), ('app_staff', 'notice_text_list'), ('app_staff', 'notice_text_add'), ('app_public', 'notice_intake_gate'), ('app_public', 'application_save'), ('app_staff', 'dealer_packet_get'), ('app_staff', 'dealer_packet_status'), ('app_staff', 'handoff_record'), ('app_staff', 'handoff_list'), ('app_staff', 'notice_review_add'), ('app_staff', 'notice_review_list'),
+    -- 0018 광고 launch 상태
+    ('app_staff', 'ad_launch_begin'), ('app_staff', 'ad_launch_finish'), ('app_staff', 'ad_launch_active'), ('app_staff', 'ad_launch_paused'), ('app_staff', 'ad_launch_resolve'), ('app_public', 'application_amend'), ('app_staff', 'application_amendments'),
+    ('app_ai', 'ai_budget_hold'), ('app_ai', 'ai_budget_confirm'), ('app_ai', 'ai_budget_release'), ('app_ai', 'ai_budget_uncertain'),
+    -- 0028 AI 하드 한도: 일·사용자 한도·긴급 차단·조정(대표)
+    ('app_staff', 'ai_budget_limits_set'), ('app_staff', 'ai_budget_pause_set'), ('app_staff', 'ai_budget_adjust'),
+    -- 0021 광고 집행 기간 판정(직원)·정기 감시(전용 역할 3개)
+    ('app_staff', 'ad_spend_request_window'), ('app_staff', 'ad_monthly_budget_set'), ('app_staff', 'ad_monthly_budget_get'), ('app_staff', 'ad_cpc_policy_set'), ('app_staff', 'ad_keyword_approve'), ('app_staff', 'ad_keyword_revoke'), ('app_staff', 'ad_enable_schedule'), ('app_staff', 'ad_enable_cancel'), ('app_ad_scheduler', 'ad_sched_claim'), ('app_ad_scheduler', 'ad_sched_gate'), ('app_ad_scheduler', 'ad_sched_finish'), ('app_ad_scheduler', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_targets'), ('app_ad_monitor', 'ad_monitor_stop'), ('app_ad_monitor', 'ad_monitor_record'), ('app_ad_monitor', 'ad_monitor_begin'), ('app_public', 'followup_request'), ('app_public', 'lead_gclid_attach'), ('app_public', 'consult_rate_hit'), ('app_public', 'policy_intake_gate'), ('app_staff', 'followup_list'), ('app_staff', 'followup_done'), ('app_public', 'marketing_opt_out'), ('app_staff', 'recontact_schedule'), ('app_staff', 'recontact_due'), ('app_staff', 'recontact_close'), ('app_staff', 'recontact_sweep'), ('app_staff', 'crm_unhandled'), ('app_staff', 'purge_lead'),
+    -- PHASE 1 최종 보완: 점검 계정은 읽기 전용 점검 함수 1개만 실행한다(테이블 권한은 계속 0, V2)
+    ('release_auditor', 'release_probe_product_scope'),
+    -- 0064~0067 통화 녹취·STT·요약·고객 이력: 작업자 전용 역할(app_call) 8개, 관리자 11개
+    ('app_call', 'call_ingest'), ('app_call', 'call_stt_claim'), ('app_call', 'call_stt_complete'), ('app_call', 'call_job_fail'),
+    ('app_call', 'call_summary_claim'), ('app_call', 'call_summary_complete'), ('app_call', 'call_object_deletion_next'), ('app_call', 'call_object_deletion_done'),
+    ('app_staff', 'call_settings_get'), ('app_staff', 'call_settings_set'), ('app_staff', 'call_recording_access'), ('app_staff', 'call_link'),
+    ('app_staff', 'call_recording_delete'), ('app_staff', 'call_job_requeue'), ('app_staff', 'call_stt_status'), ('app_staff', 'call_summary_edit'),
+    ('app_staff', 'call_summary_versions'), ('app_staff', 'customer_history'), ('app_staff', 'timeline_by_date')
+),
+-- PHASE 1 보완(검수 지적 3항): 상품 비활성화 구조의 보호 장치가 실제로 켜져 있는지
+required_triggers(tbl, tgname) as (
+  values
+    ('core.product_catalog', 'product_catalog_guard'),
+    ('core.product_catalog', 'product_catalog_no_truncate'),
+    ('core.product_activation_approvals', 'product_approval_guard'),
+    ('core.product_activation_approvals', 'product_approvals_no_truncate')
+),
+-- PHASE 1 최종 보완: 상품 차단에 관여하는 함수 본문은 검수된 마이그레이션과 '완전히 같아야' 한다(V11의 문자열 포함 검사 보강).
+-- 값 = md5(마이그레이션 파일에서 각 함수의 마지막 정의 본문). tests/unit/release-probe.test.ts가 파일에서 다시 계산해 대조한다.
+-- 함수를 고치면 이 값도 같은 커밋에서 바꿔야 하며, 바꾸지 않으면 배포 전 점검이 막는다.
+-- 점검 계정은 core 스키마 USAGE가 없으므로 이름 해석(to_regprocedure) 대신 시스템 카탈로그를 직접 조인한다(인자는 타입 목록으로 비교).
+pinned_funcs(nsp, fname, args, body_md5) as (
+  values
+    ('api', 'create_lead', 'text, text, text, text, text, text, text, text, text, text, text, text, text, boolean, boolean, text', '060aee71de42fe0a776634b70791c227'),  -- 0007 필수 고지 반영본(롤백 시 이전 a99eddfc2884a4e7e588925a5664c811로 되돌린다)
+    ('core', 'notice_texts_guard', '', '1f63bb70b44a56550fec3c6a2c6cd866'),
+    ('core', 'product_catalog_guard', '', '197931d02b9aa30e9fe7406aba652784'),
+    ('core', 'product_approval_guard', '', '9ef087dbd466ef5e1c2f57836a2fff7e'),
+    ('core', 'block_truncate', '', '21175b027aefee1a01758c8feb061da8'),
+    ('api', 'release_probe_product_scope', '', '6727db2084fb25adc4cbed5503c08f38')
+),
+required_unique_indexes(idx) as (
+  values ('product_approvals_proof_once'), ('product_approvals_one_open')
 ),
 violations(v) as (
   -- V1 모든 보호 테이블은 RLS + FORCE
@@ -50,7 +97,7 @@ violations(v) as (
   from app_roles r cross join pg_namespace s
   where s.nspname in ('core', 'pii', 'security', 'api', 'extensions')
     and has_schema_privilege(r.rolname, s.oid, 'USAGE')
-    and not (r.rolname in ('app_public', 'app_staff') and s.nspname = 'api')
+    and not (r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'release_auditor', 'app_call') and s.nspname = 'api')
   union all
   -- V4 SECURITY DEFINER 함수는 search_path 고정
   select 'V4 search_path not fixed: ' || f.name
@@ -86,8 +133,51 @@ violations(v) as (
   -- V9 로그인 가능한 앱 역할은 app_server와 release_auditor뿐, 둘 다 슈퍼유저·RLS 우회 아님
   select 'V9 role attribute: ' || r.rolname
   from pg_roles r
-  where r.rolname in ('app_public', 'app_staff', 'fideon_api', 'app_server', 'release_auditor')
+  where r.rolname in ('app_public', 'app_staff', 'app_ai', 'app_ad_monitor', 'app_ad_scheduler', 'fideon_api', 'app_server', 'release_auditor', 'app_call')
     and (r.rolsuper or r.rolbypassrls
          or (r.rolcanlogin and r.rolname not in ('app_server', 'release_auditor')))
+  union all
+  -- V10 상품 상태·승인 보호 트리거가 존재하고 켜져 있음(O = 일반 활성, A = 항상 활성). 꺼짐(D)·복제 전용(R)·없음은 위반
+  select 'V10 protection trigger missing or disabled: ' || r.tbl || ' ' || r.tgname
+  from required_triggers r
+  where not exists (
+    select 1 from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname || '.' || c.relname = r.tbl and t.tgname = r.tgname and t.tgenabled in ('O', 'A'))
+  union all
+  -- V11 상담 신청 함수가 DB 기준 상품 상태를 확인함(0004 이전 본문으로 되돌아가면 위반)
+  select 'V11 api.create_lead without product check'
+  where not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'api' and p.proname = 'create_lead'
+      and p.prosrc like '%core.product_catalog%' and p.prosrc like '%PRODUCT_NOT_ACTIVE%')
+  union all
+  -- V12 승인 서명 1회용·미소진 승인 1건 고유 인덱스가 존재하고 유효함
+  select 'V12 approval unique index missing or invalid: ' || r.idx
+  from required_unique_indexes r
+  where not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_index i on i.indexrelid = c.oid
+    where n.nspname = 'core' and c.relname = r.idx and i.indisunique and i.indisvalid)
+  union all
+  -- V13 상품 차단 함수 본문이 검수본과 다르거나 없음(주석 한 글자 변경도 감지)
+  select 'V13 function body differs from reviewed migration: ' || p.nsp || '.' || p.fname || '(' || p.args || ')'
+  from pinned_funcs p
+  where not exists (
+    select 1 from pg_proc f join pg_namespace n on n.oid = f.pronamespace
+    where n.nspname = p.nsp and f.proname = p.fname
+      and oidvectortypes(f.proargtypes) = p.args and md5(f.prosrc) = p.body_md5)
+  union all
+  -- V14 점검 함수 자체가 읽기 전용(STABLE)·SECURITY DEFINER·집합 반환 형태를 유지
+  select 'V14 release probe must be STABLE SECURITY DEFINER returning setof text'
+  where not exists (
+    select 1 from pg_proc f join pg_namespace n on n.oid = f.pronamespace
+    where n.nspname = 'api' and f.proname = 'release_probe_product_scope'
+      and oidvectortypes(f.proargtypes) = ''
+      and f.provolatile = 's' and f.prosecdef and f.proretset and f.prorettype = 'text'::regtype)
+  union all
+  -- V15 실제 차단 동작: 운영 데이터에 상담 신청 함수와 같은 조건식을 적용한 결과(읽기 전용)
+  --     예약 상품이 접수 가능, 인터넷+TV가 차단, 상품 목록 변경, 진행 중인 활성화 승인 → 위반
+  select 'V15 ' || probe.v
+  from api.release_probe_product_scope() as probe(v)
 )
 select v from violations order by v;

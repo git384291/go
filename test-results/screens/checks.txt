@@ -1,7 +1,48 @@
-01-home	가로 넘침=false	금액 표기=0
-02-internet-tv	가로 넘침=false	금액 표기=0
-03-internet-phone	가로 넘침=false	금액 표기=0
-04-cctv-security	가로 넘침=false	금액 표기=0
-05-consult	가로 넘침=false	금액 표기=0
-06-admin-login	가로 넘침=false	금액 표기=0
-07-admin-leads	가로 넘침=false	금액 표기=0
+01-home@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	준비 중 안내=true	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+02-internet-tv@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	준비 중 안내=true	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+05-consult@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	준비 중 안내=true	상담 대상 고정=true	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+06-admin-login@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+07-admin-leads@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+08-admin-progress@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+09-admin-read@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+10-admin-read-locked@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+16-admin-policies-owner@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+17-admin-policies-editor@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+18-admin-policies-locked@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+19-admin-ads-owner@320	가로 넘침=false	금액 표기=10	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+20-admin-ads-reviewer@320	가로 넘침=false	금액 표기=8	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+21-admin-ads-locked@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+25-admin-ads-funnel-owner@320	가로 넘침=false	금액 표기=6	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+26-admin-ads-funnel-reviewer@320	가로 넘침=false	금액 표기=6	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+27-admin-ads-funnel-locked@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+30-consult-ai-with-form@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+11-official-intake-fake@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 가상 링크=true	공식접수 입력·외부요소=0	카톡문의 표식 없음=true	상품안내 표식 없음=true
+12-product-guide-intake-off@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 9주제=true	상품안내 처음 닫힘=true	상품안내 펼침·닫기 반복=true	상품안내 키보드·초점=true	상품안내 신청 안내=true	상품안내 보장·AI 표현 없음=true	상품안내 주소 변화 없음=true	상품안내 입력·외부요소=0	상품안내 요청=0
+13-product-guide-intake-fake-on@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	카톡문의 표식 없음=true	상품안내 9주제=true	상품안내 처음 닫힘=true	상품안내 펼침·닫기 반복=true	상품안내 키보드·초점=true	상품안내 신청 안내=true	상품안내 보장·AI 표현 없음=true	상품안내 주소 변화 없음=true	상품안내 입력·외부요소=0	상품안내 요청=0
+14-kakao-inquiry-consult-fake-on@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 가상 링크=true	카톡문의 안내=true	카톡문의 입력칸 추가 없음=true	카톡문의 외부요소=0	카톡문의 요청=0	상품안내 표식 없음=true
+15-kakao-inquiry-internet-tv-fake-on@320	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 가상 링크=true	카톡문의 안내=true	카톡문의 입력칸 추가 없음=true	카톡문의 외부요소=0	카톡문의 요청=0	상품안내 표식 없음=true
+01-home@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	준비 중 안내=true	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+02-internet-tv@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	준비 중 안내=true	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+05-consult@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	준비 중 안내=true	상담 대상 고정=true	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+06-admin-login@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+07-admin-leads@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+08-admin-progress@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+09-admin-read@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+10-admin-read-locked@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+16-admin-policies-owner@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+17-admin-policies-editor@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+18-admin-policies-locked@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+19-admin-ads-owner@390	가로 넘침=false	금액 표기=10	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+20-admin-ads-reviewer@390	가로 넘침=false	금액 표기=8	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+21-admin-ads-locked@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+25-admin-ads-funnel-owner@390	가로 넘침=false	금액 표기=6	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+26-admin-ads-funnel-reviewer@390	가로 넘침=false	금액 표기=6	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+27-admin-ads-funnel-locked@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+30-consult-ai-with-form@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 표식 없음=true
+11-official-intake-fake@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 가상 링크=true	공식접수 입력·외부요소=0	카톡문의 표식 없음=true	상품안내 표식 없음=true
+12-product-guide-intake-off@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 표식 없음=true	상품안내 9주제=true	상품안내 처음 닫힘=true	상품안내 펼침·닫기 반복=true	상품안내 키보드·초점=true	상품안내 신청 안내=true	상품안내 보장·AI 표현 없음=true	상품안내 주소 변화 없음=true	상품안내 입력·외부요소=0	상품안내 요청=0
+13-product-guide-intake-fake-on@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	카톡문의 표식 없음=true	상품안내 9주제=true	상품안내 처음 닫힘=true	상품안내 펼침·닫기 반복=true	상품안내 키보드·초점=true	상품안내 신청 안내=true	상품안내 보장·AI 표현 없음=true	상품안내 주소 변화 없음=true	상품안내 입력·외부요소=0	상품안내 요청=0
+14-kakao-inquiry-consult-fake-on@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 가상 링크=true	카톡문의 안내=true	카톡문의 입력칸 추가 없음=true	카톡문의 외부요소=0	카톡문의 요청=0	상품안내 표식 없음=true
+15-kakao-inquiry-internet-tv-fake-on@390	가로 넘침=false	금액 표기=0	예약 상품 노출=없음	외부 상담 연결=없음	접수 오해 문구=없음	공식접수 표식 없음=true	카톡문의 가상 링크=true	카톡문의 안내=true	카톡문의 입력칸 추가 없음=true	카톡문의 외부요소=0	카톡문의 요청=0	상품안내 표식 없음=true
+03-internet-phone	404=true
+04-cctv-security	404=true

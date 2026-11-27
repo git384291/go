@@ -1,0 +1,501 @@
+import 'server-only';
+// 30초 설명형 **무음 화면 시안** renderer (PM 6983216833). 생성·음성·업로드·외부 접속 없음.
+//
+// - 입력은 정확히 { variant: 'general_internet_v1' }. 계획은 explainerStoryboard의 고정 상수를 검증한 스냅샷만 쓴다.
+// - 실행 규칙은 18초 renderer(ffmpegRenderer)와 같다: 같은 boundedProcess, 같은 격리 접두(unshare -n + prlimit, 주소 공간만 2GiB — EX_LIMITS),
+//   같은 고정 실행 파일, 같은 폰트 파일 크기·SHA-256 확인, 같은 실측 폭 판정, 같은 정리 규칙. 18초 renderer 동작은 바꾸지 않았다.
+// - 그래픽: 각 그림(sprite)은 고정 도형 목록을 geq 한 번으로 1프레임 그린 뒤 loop로 반복한다. 외부 이미지·폰트·음원 입력 0.
+// - 문구는 자기 임시 디렉터리의 e<i>.txt로만 넘긴다(drawtext textfile·expansion=none·reload=0). 인자·필터에 문구 0.
+// - 결과는 '내부 검토용 무음 화면 시안'이다. 음성·음성 동기·판매용 완성 판정이 아니다.
+import { lstat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { ProcessOwner, type ProcessDeps } from './boundedProcess';
+import {
+  CleanupStop, FONT_BYTES, FONT_FILE, FONT_SHA256, LIMITS, MAX_FRAME_BYTES, MAX_TOTAL_MS, MIN_TOTAL_MS, SAFE_DIR, Stop, TMP_PREFIX, TOOLS,
+  need, onlyLoopback, parseBbox, readOwnFile, realFs, writeOwnFile,
+  type FrameImage, type RenderCode, type RendererFs,
+} from './ffmpegRenderer';
+import { buildExplainerStoryboard, EX_DURATION_SEC, EX_FPS, EX_FRAMES, EX_HEIGHT, EX_WIDTH, PAL, type ExplainerPlan, type Prim, type Sprite, type TextItem } from './explainerStoryboard';
+import { isFastStart, MAX_VIDEO_BYTES, probeExplainerVideo, type ProbeReject, type ProbeReport } from './videoProbe';
+
+/**
+ * 30초 시안 전용 자원 제한. 18초 renderer의 WRAP_ARGS·LIMITS는 그대로 두고, 주소 공간만 2GiB로 둔다.
+ * 근거(Claude 세션 실측): 문구 33개를 그리는 drawtext가 각자 폰트를 열어 가상 메모리 최대 약 1.5GiB(filter_complex_threads 1)를
+ * 쓴다. 1GiB에서는 측정 단계부터 메모리 할당 실패. 실제 상주 메모리는 약 0.6GiB. CPU 60초·파일 16MiB·프로세스 64는 같다.
+ */
+export const EX_LIMITS = Object.freeze({ ...LIMITS, addressSpace: 2 * 1024 * 1024 * 1024 });
+export const EX_WRAP_ARGS: readonly string[] = Object.freeze([
+  '-n', '--', TOOLS.prlimit,
+  `--as=${EX_LIMITS.addressSpace}`, `--cpu=${EX_LIMITS.cpuSeconds}`, `--fsize=${EX_LIMITS.fileSize}`, `--nproc=${EX_LIMITS.nproc}`, '--',
+]);
+/** /proc/self/limits에 EX_LIMITS가 soft·hard 모두 적용됐는지 */
+export function exLimitsApplied(text: string): boolean {
+  const want: [string, number][] = [
+    ['Max cpu time', EX_LIMITS.cpuSeconds], ['Max file size', EX_LIMITS.fileSize], ['Max processes', EX_LIMITS.nproc], ['Max address space', EX_LIMITS.addressSpace],
+  ];
+  return want.every(([name, v]) => new RegExp(`^${name}\\s+${v}\\s+${v}\\s`, 'm').test(text));
+}
+
+const FADE_IN = 0.4;
+const FADE_OUT = 0.35;
+const SLIDE = 0.6;
+/** 대표 프레임: 장면마다 1장(모션이 끝난 뒤) */
+export const EX_FRAME_TIMES = Object.freeze([3.2, 9.6, 16.4, 23.6, 28.6]);
+const EX_FRAME_WIDTHS = Object.freeze([720, 390, 320]);
+
+export type TextMeasure = { readonly id: string; readonly width: number; readonly height: number; readonly maxW: number };
+
+export type ExplainerResult =
+  | {
+      readonly ok: true;
+      readonly code: 'RENDERED';
+      readonly kind: 'silent_visual_draft';
+      readonly video: Uint8Array;
+      readonly probe: ProbeReport;
+      readonly faststart: true;
+      readonly texts: readonly TextMeasure[];
+      readonly frames: readonly FrameImage[];
+      readonly cleanup: 'OK';
+      readonly spawned: number;
+    }
+  | {
+      readonly ok: false;
+      readonly code: Exclude<RenderCode, 'RENDERED'> | 'INVALID_PLAN';
+      readonly reason?: ProbeReject;
+      readonly primary?: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'>;
+      readonly cleanup: 'OK' | 'FAILED' | 'NOT_NEEDED';
+      readonly spawned: number;
+    };
+
+export type ExplainerDeps = ProcessDeps & {
+  readonly fs?: Partial<RendererFs>;
+  readonly totalTimeoutMs: number;
+  readonly frames?: boolean;
+};
+
+// ── 필터 조립(순수) ──
+const int = (n: number) => {
+  if (!Number.isSafeInteger(n) || Math.abs(n) > 100_000) throw new Error('layout');
+  return String(n);
+};
+/** 시간(초) 문자열: 소수 둘째 자리까지 */
+const sec = (n: number) => {
+  if (!Number.isFinite(n) || n < 0 || n > 31) throw new Error('time');
+  return String(Math.round(n * 100) / 100);
+};
+const COLOR_RE = /^0x[0-9a-f]{6}$/;
+const rgb = (c: string): [number, number, number] => {
+  if (!COLOR_RE.test(c)) throw new Error('color');
+  const v = Number.parseInt(c.slice(2), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+};
+/** 필터 값 인용: 작은따옴표로 묶고 쉼표는 \, (18초 renderer의 enable 표기와 같은 규칙) */
+const q = (expr: string) => {
+  if (/['\\:[\]]/.test(expr)) throw new Error('expr');
+  return `'${expr.replace(/,/g, '\\,')}'`;
+};
+
+const PX = '(X+0.5)';
+const PY = '(Y+0.5)';
+/** 부호 거리(음수=안쪽) */
+function sdf(p: Prim): string {
+  switch (p.k) {
+    case 'rect':
+    case 'outline': {
+      const hw = p.w / 2 - p.r;
+      const hh = p.h / 2 - p.r;
+      const qx = `(abs(${PX}-${p.x + p.w / 2})-${hw})`;
+      const qy = `(abs(${PY}-${p.y + p.h / 2})-${hh})`;
+      const d = `(hypot(max(${qx},0),max(${qy},0))+min(max(${qx},${qy}),0)-${p.r})`;
+      return p.k === 'rect' ? d : `(abs(${d}+${p.t / 2})-${p.t / 2})`;
+    }
+    case 'circle':
+      return `(hypot(${PX}-${p.cx},${PY}-${p.cy})-${p.r})`;
+    case 'ring':
+    case 'arc':
+      return `(abs(hypot(${PX}-${p.cx},${PY}-${p.cy})-${p.r})-${p.t / 2})`;
+    case 'line': {
+      const vx = p.x2 - p.x1;
+      const vy = p.y2 - p.y1;
+      const l2 = vx * vx + vy * vy || 1;
+      const h = `clip(((${PX}-${p.x1})*${vx}+(${PY}-${p.y1})*${vy})/${l2},0,1)`;
+      return `(hypot(${PX}-${p.x1}-${h}*${vx},${PY}-${p.y1}-${h}*${vy})-${p.t / 2})`;
+    }
+  }
+}
+/** 덮임 비율 0~1(가장자리 1px 부드럽게) × 불투명도 */
+function coverage(p: Prim): string {
+  let c = `clip(0.5-${sdf(p)},0,1)`;
+  if (p.k === 'arc') c += `*clip(${p.cy}-${PY}-abs(${PX}-${p.cx})+0.5,0,1)`; // 위쪽 90° 부채꼴만
+  const o = p.o ?? 100;
+  return o === 100 ? c : `${c}*${o / 100}`;
+}
+/** 한 sprite의 geq 4면 식: 도형을 순서대로 겹쳐 칠한다(premultiplied over) */
+export function spriteGeq(sp: Sprite): { r: string; g: string; b: string; a: string } {
+  const covs = sp.prims.map(coverage);
+  const plane = (ch: 0 | 1 | 2 | 3) => {
+    const parts = ['st(0,0)', 'st(1,0)'];
+    sp.prims.forEach((p, i) => {
+      parts.push(`st(2,${covs[i]})`);
+      if (ch !== 3) parts.push(`st(0,${rgb(p.c)[ch]}*ld(2)+ld(0)*(1-ld(2)))`);
+      parts.push('st(1,ld(2)+ld(1)*(1-ld(2)))');
+    });
+    parts.push(ch < 3 ? 'if(gt(ld(1),0),ld(0)/ld(1),0)' : 'ld(1)*255');
+    return parts.join(';');
+  };
+  return { r: plane(0), g: plane(1), b: plane(2), a: plane(3) };
+}
+
+const ease = (tin: number) => `pow(1-clip((t-${sec(tin)})/${SLIDE},0,1),3)`;
+const visible = (tin: number, tout: number) => `between(t,${sec(tin)},${sec(Math.min(EX_DURATION_SEC, tout + FADE_OUT))})`;
+
+/** 렌더 filter_complex. 입력 [0:v]=고정 lavfi 배경. 문구는 e<i>.txt */
+export function buildExplainerFilter(plan: ExplainerPlan): { graph: string; files: { name: string; text: string }[] } {
+  const chains: string[] = [];
+  let last = '0:v';
+  plan.sprites.forEach((sp, i) => {
+    const g = spriteGeq(sp);
+    const fades = [`fade=t=in:st=${sec(sp.tin)}:d=${FADE_IN}:alpha=1`];
+    if (sp.tout < EX_DURATION_SEC) fades.push(`fade=t=out:st=${sec(sp.tout)}:d=${FADE_OUT}:alpha=1`);
+    chains.push(
+      `color=c=black@0:s=${int(sp.w)}x${int(sp.h)}:r=${EX_FPS},trim=end_frame=1,format=rgba,` +
+        `geq=r=${q(g.r)}:g=${q(g.g)}:b=${q(g.b)}:a=${q(g.a)},` +
+        `loop=loop=${EX_FRAMES - 1}:size=1,setpts=N/${EX_FPS}/TB,${fades.join(',')}[s${i}]`,
+    );
+    const x = sp.dx ? `${sp.x}+${sp.dx}*${ease(sp.tin)}` : String(int(sp.x));
+    let y = sp.dy ? `${sp.y}+${sp.dy}*${ease(sp.tin)}` : String(int(sp.y));
+    if (sp.bob) y += `+${sp.bob}*sin(2*PI*(t-${sec(sp.tin)})/2.4)`;
+    const out = `v${i}`;
+    chains.push(`[${last}][s${i}]overlay=x=${q(x)}:y=${q(y)}:enable=${q(visible(sp.tin, sp.tout))}:eval=frame[${out}]`);
+    last = out;
+  });
+  const files: { name: string; text: string }[] = [];
+  const dt = plan.texts.map((tx, i) => {
+    const name = `e${i}.txt`;
+    files.push({ name, text: tx.text });
+    const x = tx.x === -1 ? '(w-text_w)/2' : String(int(tx.x));
+    const y = tx.dy ? `${tx.y}+${tx.dy}*${ease(tx.tin)}` : String(int(tx.y));
+    const fadeOut = tx.tout < EX_DURATION_SEC ? `*clip((${sec(tx.tout + FADE_OUT)}-t)/${FADE_OUT},0,1)` : '';
+    const alpha = `clip((t-${sec(tx.tin)})/${FADE_IN},0,1)${fadeOut}`;
+    rgb(tx.c);
+    return `drawtext=fontfile=${FONT_FILE}:textfile=${name}:expansion=none:reload=0:fontsize=${int(tx.size)}:fontcolor=${tx.c}` +
+      `:x=${q(x)}:y=${q(y)}:alpha=${q(alpha)}:enable=${q(visible(tx.tin, tx.tout))}`;
+  });
+  chains.push(`[${last}]${dt.join(',')},format=yuv420p[vout]`);
+  return { graph: chains.join(';'), files };
+}
+
+/** 측정 필터: 프레임 i에 문구 i만 그리고 bbox로 실제 폭·높이를 기록 */
+export function buildExplainerMeasure(plan: ExplainerPlan): { filter: string; files: { name: string; text: string }[] } {
+  const files: { name: string; text: string }[] = [];
+  const parts = plan.texts.map((tx, i) => {
+    const name = `x${i}.txt`;
+    files.push({ name, text: tx.text });
+    return `drawtext=fontfile=${FONT_FILE}:textfile=${name}:expansion=none:reload=0:fontsize=${int(tx.size)}:fontcolor=white:x=100:y=40:enable='eq(n\\,${int(i)})'`;
+  });
+  parts.push('bbox=min_val=128');
+  return { filter: parts.join(','), files };
+}
+
+type Fail = Extract<ExplainerResult, { ok: false }>;
+const fail = (code: Fail['code'], spawned: number, cleanup: Fail['cleanup'], reason?: ProbeReject): ExplainerResult =>
+  Object.freeze(reason ? { ok: false, code, reason, cleanup, spawned } : { ok: false, code, cleanup, spawned });
+
+type Race<T> = { readonly k: 'ok'; readonly v: T } | { readonly k: 'err' } | { readonly k: 'timeout' };
+
+/**
+ * 파일시스템 작업 보호(PM 6984125979 1·2절).
+ * - 모든 FS 작업은 절대 시각(limitAt) 안에서만 결과를 받는다. 시각을 넘기면 TIMEOUT으로 닫고 결과를 버린다.
+ * - 동기 throw·reject는 원문 없이 고정 코드로 바꾼다.
+ * - Node 비동기 FS는 취소할 수 없다. 그래서 늦게 끝나는 작업을 pending에 남겨 두고, 정리 단계에서 별도 한도(killWaitMs) 안에
+ *   끝나는지 기다린다. 끝나지 않으면 정리 완료로 주장하지 않는다(CLEANUP_FAILED, 디렉터리 삭제 보류).
+ * - mkdtemp가 마감 뒤에 늦게 끝나 디렉터리를 만들면 그 경로를 기록해 두고 정리 단계에서 같은 규칙으로 지운다.
+ */
+class FsGuard {
+  private readonly pending = new Set<Promise<void>>();
+  constructor(private readonly d: ProcessDeps) {}
+
+  get pendingCount(): number {
+    return this.pending.size;
+  }
+
+  private race<T>(p: Promise<T>, limitAt: number): Promise<Race<T>> {
+    return new Promise((resolve) => {
+      let done = false;
+      const h = this.d.setTimer(() => {
+        if (done) return;
+        done = true;
+        resolve({ k: 'timeout' });
+      }, Math.max(0, limitAt - this.d.now()));
+      p.then(
+        (v) => {
+          if (done) return;
+          done = true;
+          this.d.clearTimer(h);
+          resolve({ k: 'ok', v });
+        },
+        () => {
+          if (done) return;
+          done = true;
+          this.d.clearTimer(h);
+          resolve({ k: 'err' });
+        },
+      );
+    });
+  }
+
+  /** limitAt 안의 FS 작업 1건. 실패는 onErr 고정 코드, 마감은 TIMEOUT. onLate는 마감 뒤 늦은 성공 값을 받는다 */
+  async op<T>(f: () => Promise<T>, limitAt: number, onErr: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'>, onLate?: (v: T) => void): Promise<T> {
+    if (!(this.d.now() < limitAt)) throw new Stop('TIMEOUT');
+    let p: Promise<T>;
+    try {
+      p = Promise.resolve(f());
+    } catch {
+      throw new Stop(onErr);
+    }
+    let settled = false;
+    let timedOut = false;
+    const tracked: Promise<void> = p.then(
+      (v) => {
+        settled = true;
+        if (timedOut && onLate) onLate(v);
+      },
+      () => {
+        settled = true;
+      },
+    ).finally(() => this.pending.delete(tracked));
+    if (!settled) this.pending.add(tracked);
+    const r = await this.race(p, limitAt);
+    if (r.k === 'timeout') {
+      timedOut = true;
+      throw new Stop('TIMEOUT');
+    }
+    if (r.k === 'err') throw new Stop(onErr);
+    // 끝났지만 마감 뒤 → 결과는 버리되(TIMEOUT), 이미 받은 값은 timer 승패와 무관하게 onLate로 소유권을 넘긴다.
+    // race()가 'ok'로 끝난 이 경로는 timedOut이 한 번도 true가 되지 않으므로, 여기서 직접 호출하지 않으면
+    // 자원(mkdtemp가 만든 디렉터리 등)의 경로가 dir·lateDir 어디에도 기록되지 않고 유실된다.
+    if (!(this.d.now() < limitAt)) {
+      if (onLate) onLate(r.v);
+      throw new Stop('TIMEOUT');
+    }
+    return r.v;
+  }
+
+  /** 남은 FS 작업이 limitAt 안에 모두 끝나면 true */
+  async settle(limitAt: number): Promise<boolean> {
+    while (this.pending.size > 0) {
+      const r = await this.race(Promise.all([...this.pending]), limitAt);
+      if (r.k === 'timeout') return false;
+    }
+    return true;
+  }
+}
+
+const validDir = (base: string, d: unknown): d is string =>
+  typeof d === 'string' && SAFE_DIR.test(d) && !d.includes('..') && path.dirname(d) === base && path.basename(d).startsWith(TMP_PREFIX);
+
+/** 공개 진입점. 어떤 불신 입력·deps·FS 예외도 원문 없이 고정 결과로 닫는다 */
+export async function renderExplainerVideo(input: unknown, deps: ExplainerDeps): Promise<ExplainerResult> {
+  try {
+    return await renderInner(input, deps);
+  } catch {
+    // 여기까지 오는 경우는 spawn 전 단계뿐이다(spawn 뒤 단계는 renderInner 안에서 정리까지 마친다)
+    return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+  }
+}
+
+async function renderInner(input: unknown, deps: ExplainerDeps): Promise<ExplainerResult> {
+  let total: number;
+  let wantFrames: boolean;
+  let fs: RendererFs;
+  let pdeps: ProcessDeps;
+  let deadlineAt: number;
+  try {
+    total = deps.totalTimeoutMs;
+    wantFrames = deps.frames === true;
+    const over = deps.fs ?? {};
+    fs = { ...realFs, ...over };
+    pdeps = { spawn: deps.spawn, killGroup: deps.killGroup, now: deps.now, setTimer: deps.setTimer, clearTimer: deps.clearTimer, killWaitMs: deps.killWaitMs };
+    if (typeof total !== 'number' || !Number.isFinite(total) || total < MIN_TOTAL_MS || total > MAX_TOTAL_MS) return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    for (const f of [pdeps.spawn, pdeps.killGroup, pdeps.now, pdeps.setTimer, pdeps.clearTimer, fs.mkdtemp, fs.checkExecutable, fs.removeDir, fs.exists, fs.fontDigest]) {
+      if (typeof f !== 'function') return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    }
+    if (typeof pdeps.killWaitMs !== 'number' || !(pdeps.killWaitMs > 0 && pdeps.killWaitMs <= 10_000)) return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    const t0 = pdeps.now();
+    if (typeof t0 !== 'number' || !Number.isFinite(t0)) return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+    deadlineAt = t0 + total;
+  } catch {
+    return fail('INVALID_INPUT', 0, 'NOT_NEEDED');
+  }
+
+  const sb = buildExplainerStoryboard(input);
+  if (!sb.ok) return fail(sb.error, 0, 'NOT_NEEDED');
+  const plan = sb.plan;
+  let graph: { graph: string; files: { name: string; text: string }[] };
+  let measure: { filter: string; files: { name: string; text: string }[] };
+  try {
+    graph = buildExplainerFilter(plan);
+    measure = buildExplainerMeasure(plan);
+  } catch {
+    return fail('INVALID_PLAN', 0, 'NOT_NEEDED');
+  }
+
+  const owner = new ProcessOwner(pdeps);
+  const guard = new FsGuard(pdeps);
+  const base = tmpdir();
+  let dir: string | null = null;
+  let lateDir: string | null = null;
+  let primary: Exclude<RenderCode, 'RENDERED' | 'CLEANUP_FAILED'> | null = null;
+  let reason: ProbeReject | undefined;
+  let success: Omit<Extract<ExplainerResult, { ok: true }>, 'cleanup' | 'spawned'> | null = null;
+  let cleanupStopped = false;
+  const live = () => {
+    if (!(pdeps.now() < deadlineAt)) throw new Stop('TIMEOUT');
+  };
+
+  try {
+    // 실행 파일 확인(마감 안, reject는 NOT_AVAILABLE)
+    for (const t of Object.values(TOOLS)) {
+      const okExec = await guard.op(() => fs.checkExecutable(t), deadlineAt, 'NOT_AVAILABLE');
+      if (okExec !== true) throw new Stop('NOT_AVAILABLE');
+    }
+    if (!SAFE_DIR.test(base)) throw new Stop('RENDER_FAILED');
+    const created = await guard.op(() => fs.mkdtemp(path.join(base, TMP_PREFIX)), deadlineAt, 'RENDER_FAILED', (late) => {
+      lateDir = validDir(base, late) ? late : null;
+    });
+    if (!validDir(base, created)) throw new Stop('RENDER_FAILED');
+    dir = created;
+    const cwd = created;
+    const run = (tool: string, args: readonly string[], maxStdout: number, maxStderr: number) =>
+      owner.run({ file: TOOLS.unshare, args: [...EX_WRAP_ARGS, tool, ...args], cwd, deadlineAt, maxStdout, maxStderr });
+    const write = (name: string, text: string) => guard.op(() => writeOwnFile(cwd, name, text), deadlineAt, 'RENDER_FAILED');
+    const statFile = (p: string) => guard.op(() => lstat(p), deadlineAt, 'RENDER_FAILED');
+    const readFile = (p: string, size: number, max: number) => guard.op(() => readOwnFile(p, size, max), deadlineAt, 'RENDER_FAILED');
+
+    // 준비 확인(18초 renderer와 같은 순서·기준)
+    const iso = await run(TOOLS.cat, ['/proc/self/limits', '/proc/net/dev'], 16 * 1024, 2048);
+    if (iso.kind === 'exit' && iso.code !== 0) throw new Stop('NETWORK_ISOLATION_UNAVAILABLE');
+    const isoOut = new TextDecoder().decode(need(iso, 'NETWORK_ISOLATION_UNAVAILABLE').stdout);
+    if (!onlyLoopback(isoOut)) throw new Stop('NETWORK_ISOLATION_UNAVAILABLE');
+    if (!exLimitsApplied(isoOut)) throw new Stop('LIMITS_UNAVAILABLE');
+    if ((await guard.op(() => fs.fontDigest(FONT_FILE, FONT_BYTES), deadlineAt, 'FONT_UNAVAILABLE')) !== FONT_SHA256) throw new Stop('FONT_UNAVAILABLE');
+    const filt = need(await run(TOOLS.ffmpeg, ['-hide_banner', '-nostdin', '-filters'], 256 * 1024, 4096), 'UNSUPPORTED');
+    const enc = need(await run(TOOLS.ffmpeg, ['-hide_banner', '-nostdin', '-encoders'], 256 * 1024, 4096), 'UNSUPPORTED');
+    const ft = new TextDecoder().decode(filt.stdout);
+    const et = new TextDecoder().decode(enc.stdout);
+    const needFilters = ['drawtext', 'bbox', 'geq', 'overlay', 'loop', 'fade', 'trim', 'color', 'setpts', 'format'];
+    if (filt.code !== 0 || enc.code !== 0 || !needFilters.every((f) => new RegExp(`^\\s*\\S+\\s+${f}\\s`, 'm').test(ft)) || !/^\s*V\S*\s+libx264\s/m.test(et)) {
+      throw new Stop('UNSUPPORTED');
+    }
+
+    // 실제 폰트 측정: 각 문구 폭 ≤ maxW, 높이 ≤ 글자 크기 × 1.4
+    for (const f of measure.files) await write(f.name, f.text);
+    const n = plan.texts.length;
+    const mr = need(
+      await run(TOOLS.ffmpeg, [
+        '-hide_banner', '-nostdin', '-nostats', '-loglevel', 'info', '-threads', '2', '-filter_threads', '1',
+        '-protocol_whitelist', 'file', '-f', 'lavfi', '-i', `color=c=black:s=1600x240:r=1:d=${int(n)}`,
+        '-vf', measure.filter, '-frames:v', int(n), '-f', 'null', '-',
+      ], 4096, 128 * 1024),
+      'RENDER_FAILED',
+    );
+    if (mr.code !== 0) throw new Stop('RENDER_FAILED');
+    const sizes = parseBbox(mr.stderr, n);
+    if (!sizes) throw new Stop('RENDER_FAILED');
+    const texts: TextMeasure[] = sizes.map((s, i) => Object.freeze({ id: plan.texts[i]!.id, width: s.w, height: s.h, maxW: plan.texts[i]!.maxW }));
+    if (texts.some((m, i) => m.width > m.maxW || m.height > Math.round(plan.texts[i]!.size * 1.4))) throw new Stop('LAYOUT_OVERFLOW');
+
+    // 렌더
+    for (const f of graph.files) await write(f.name, f.text);
+    const rr = need(
+      await run(TOOLS.ffmpeg, [
+        '-hide_banner', '-nostdin', '-nostats', '-loglevel', 'error', '-threads', '2', '-filter_threads', '1', '-filter_complex_threads', '1',
+        '-protocol_whitelist', 'file',
+        '-f', 'lavfi', '-i', `color=c=${PAL.bg}:s=${int(EX_WIDTH)}x${int(EX_HEIGHT)}:r=${int(EX_FPS)}:d=${int(EX_DURATION_SEC)}`,
+        '-filter_complex', graph.graph, '-map', '[vout]',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-r', int(EX_FPS),
+        '-t', int(EX_DURATION_SEC), '-an', '-movflags', '+faststart', '-protocol_whitelist', 'file', '-f', 'mp4', 'file:out.mp4',
+      ], 4096, 2048),
+      'RENDER_FAILED',
+    );
+    if (rr.code !== 0) throw new Stop('RENDER_FAILED');
+
+    // 실제 파일 검사
+    const outPath = path.join(cwd, 'out.mp4');
+    const st = await statFile(outPath);
+    if (!st.isFile()) throw new Stop('RENDER_FAILED');
+    if (st.size > MAX_VIDEO_BYTES) throw new Stop('TOO_LARGE');
+    const dec = need(await run(TOOLS.ffmpeg, ['-hide_banner', '-nostdin', '-nostats', '-v', 'error', '-protocol_whitelist', 'file', '-i', 'file:out.mp4', '-map', '0', '-f', 'null', '-'], 4096, 2048), 'DECODE_FAILED');
+    if (dec.code !== 0 || dec.stderr.length > 0) throw new Stop('DECODE_FAILED');
+    const pr = await probeExplainerVideo(owner, { wrapFile: TOOLS.unshare, wrapArgs: [...EX_WRAP_ARGS, TOOLS.ffprobe], cwd, deadlineAt, actualBytes: st.size });
+    if (!pr.ok) {
+      if (pr.code === 'CLEANUP_FAILED') throw new CleanupStop();
+      throw new Stop(pr.code, pr.reason);
+    }
+    const video = await readFile(outPath, st.size, MAX_VIDEO_BYTES);
+    if (!video) throw new Stop('RENDER_FAILED');
+    if (!isFastStart(video)) throw new Stop('PROBE_REJECTED', 'FORMAT');
+
+    // 대표 프레임(선택)
+    const frames: FrameImage[] = [];
+    if (wantFrames) {
+      for (const [ti, at] of EX_FRAME_TIMES.entries()) {
+        const outs = EX_FRAME_WIDTHS.map((w) => ({ w, name: `f${ti}_${w}.png` }));
+        const fc = `[0:v]split=${outs.length}${outs.map((_, i) => `[s${i}]`).join('')};` + outs.map((o, i) => `[s${i}]scale=${int(o.w)}:-2[o${i}]`).join(';');
+        const args = ['-hide_banner', '-nostdin', '-nostats', '-v', 'error', '-protocol_whitelist', 'file', '-ss', String(at), '-i', 'file:out.mp4', '-filter_complex', fc];
+        outs.forEach((o, i) => args.push('-map', `[o${i}]`, '-frames:v', '1', '-update', '1', '-protocol_whitelist', 'file', `file:${o.name}`));
+        const fr = need(await run(TOOLS.ffmpeg, args, 4096, 2048), 'RENDER_FAILED');
+        if (fr.code !== 0 || fr.stderr.length > 0) throw new Stop('RENDER_FAILED');
+        for (const o of outs) {
+          const p = path.join(cwd, o.name);
+          const fst = await statFile(p);
+          if (!fst.isFile()) throw new Stop('RENDER_FAILED');
+          const png = await readFile(p, fst.size, MAX_FRAME_BYTES);
+          if (!png) throw new Stop('RENDER_FAILED');
+          frames.push(Object.freeze({ atSec: at, width: o.w, png }));
+        }
+      }
+    }
+    live(); // 마지막 요청·파일 읽기 뒤 마감 대조: 지난 결과를 성공으로 받지 않는다
+    success = { ok: true, code: 'RENDERED', kind: 'silent_visual_draft', video, probe: pr.report, faststart: true, texts: Object.freeze(texts), frames: Object.freeze(frames) };
+  } catch (e) {
+    if (e instanceof Stop) {
+      primary = e.code;
+      reason = e.reason;
+    } else if (e instanceof CleanupStop) {
+      cleanupStopped = true;
+    } else {
+      primary = 'RENDER_FAILED';
+    }
+  }
+
+  // 정리(멱등): 자식 종료 확인 → 남은 FS 작업 완료 확인(별도 한도) → 자기 디렉터리만 삭제 → 삭제 확인
+  let cleanOk = false;
+  try {
+    cleanOk = await owner.settleAll();
+    if (cleanupStopped) cleanOk = false;
+    const cleanupAt = pdeps.now() + pdeps.killWaitMs;
+    if (!(await guard.settle(cleanupAt))) cleanOk = false;
+    const target = dir ?? lateDir;
+    if (target !== null && owner.liveCount === 0 && guard.pendingCount === 0) {
+      try {
+        await guard.op(() => fs.removeDir(target), cleanupAt, 'RENDER_FAILED');
+        if ((await guard.op(() => fs.exists(target), cleanupAt, 'RENDER_FAILED')) !== false) cleanOk = false;
+      } catch {
+        cleanOk = false;
+      }
+    } else if (target !== null) {
+      cleanOk = false;
+    }
+  } catch {
+    cleanOk = false;
+  }
+  const spawned = owner.spawnCount;
+  if (!cleanOk) {
+    return Object.freeze(primary ? { ok: false, code: 'CLEANUP_FAILED', primary, cleanup: 'FAILED', spawned } : { ok: false, code: 'CLEANUP_FAILED', cleanup: 'FAILED', spawned });
+  }
+  if (primary) return fail(primary, spawned, dir === null && lateDir === null && spawned === 0 ? 'NOT_NEEDED' : 'OK', reason);
+  if (!success) return fail('RENDER_FAILED', spawned, 'OK');
+  return Object.freeze({ ...success, cleanup: 'OK', spawned });
+}

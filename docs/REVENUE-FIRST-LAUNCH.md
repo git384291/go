@@ -1,0 +1,487 @@
+# 매출 우선 출시 실행표 (PM 6920265190 / 6920404685 / 6924799021 / 6928989118 / 6935500157)
+
+> 광고 실행 직전 검수 자료(네이버 검색광고 공개 규칙 대조, 최초 1안, 직접 경로 증거, 강제 상한, 빈 결과표)는 `docs/AD-LAUNCH-PACK.md`에 있다.
+
+- **목표:** 2026-11-18(KST)부터 매출 발생 시작, 11월 말까지 두 총판 합산 **접수 100건**.
+  - 이것은 목표다. 매출 발생, 100건 달성, 완료 시각은 보장하지 않는다.
+  - 가상 값, 개발 시험, CI 통과는 실적으로 세지 않는다.
+- **우선순위:** ① AI를 활용한 광고 운영 → ② 자동 상품 상담과 공식 접수 연결 → ③ AI 고객관리(웹 → Android·iPhone).
+- **경로 원칙:**
+  - 광고 유입은 **검증된 총판 공식 접수 경로**로 먼저 보낸다.
+  - FIDEON 자체 고객정보 수집(경로 2)은 계속 끈다.
+  - 자체 DB·Auth 완성을 광고의 선행조건으로 두지 않는다.
+- 이 문서는 정리와 준비만 담는다. 실제 광고 게시·예약·지출, 링크 개방, 고객정보 수집, 계정 생성, 실env 변경, 배포는 하지 않았다.
+
+**기존 문서와의 관계:**
+- `docs/LAUNCH-READINESS.md` 0~3절의 상태 표는 이 문서가 대체한다. 그 문서의 0-4~0-8절(관리자 목록 어댑터 등)은 자체 접수 경로용 기록으로 남긴다.
+- 광고 지표 정의(4절)와 총판 확인 요청 템플릿(5절)은 그 문서에서 그대로 참조한다.
+
+## 1. 11/18 최소 실행표
+
+**구분:**
+- **승인됨** — 사용자·PM이 이미 승인
+- **코드** — 개발로 해결했거나 해결 가능
+- **외부** — 외부 증거·본인 확인이 필요
+- **미실행** — 아직 하지 않음
+
+| # | 항목 | 구분 | 현재 상태 (근거) | 열기 전 필요한 것 | 해결 주체 |
+|---|---|---|---|---|---|
+| 1 | 광고 예산 상한 | 승인됨 | 일 상한과 최초 3일 총액 상한을 승인했다(PM 관리, 금액은 repo에 싣지 않음). 증액·평균 일예산 초과·충전·추가 구독·도메인 구매는 승인되지 않았다. | **네이버 공식 확인(PM, 11-17): 하루예산과 충전 잔액 모두 반영 지연으로 초과 과금될 수 있다(AD-LAUNCH-PACK N7·N8).** 그래서 현재 후보 구성으로는 엄격 상한을 보장할 수 없고, 현재 승인 조건으로 집행 불가다. 별도 강제 수단은 공개자료로 조사한다. 세금·수수료(N9)는 부분 확인이다: 충전 자체는 과세 대상이 아니다(S7). 환불 절차는 일부 확인됐다(S10: 유상·무상 잔액 구분, 카드 일부 소진 시 차액 결제 가능, 환불은 초과 과금 방지 수단이 아님). 개인으로 가입한 광고주도 당월 유상 소진액 기준 세금계산서 교부 대상이다(S12). 파워링크 입찰가·하루예산·성과보고 비용의 VAT 포함 여부와 실제 세율·세액·실계정, 결제 수수료·공제액은 미확인이다. 자동충전 한도(S11)는 충전 금액 한도일 뿐 광고비 청구 상한이 아니다. | 공개자료 조사(PM·Claude). 그 뒤 예산 결정은 사용자만 한다(자동 요청 없음) |
+| 2 | 광고 계정 | 외부 | **본인인증 요청 전달됨, 완료 미확인.** 연결된 광고 도구가 없다(PM ALL_TOOLS에도 없음). | 공개 규칙: 실명 인증된 19세 이상 개인 계정 생성 경로가 있다. 타인 상품·사이트 광고에는 위탁 권한이 필요하다(N1 부분 확인). 통신 딜러 업종 요건(N2)과 사용자 실계정 상태는 미확인이다. 개인 계정이 있다는 것을 업종 집행 허용으로 넓히지 않는다. | 사용자(기존 요청 결과 대기, 중복 발송 없음) |
+| 3 | 광고 심사·표시 의무 | 외부 | 부분 확인(PM 11-17): 검토 영업일 1~2일, 충전 잔액이 있어야 검토 진행. 개인 운영 사이트는 성명·연락처 표시, 사이트·광고주 정보 원칙적 일치. 위탁 담당자 사이트는 업체명 단독 금지·본인 이름/상호 병기·본사/직영 오인 표현 제한(S8). 표시URL과 연결URL 도메인이 다르면 노출이 제한될 수 있다(S9). 통신사 상표·"공식" 지위·업종 자격·총판 직접 경로 개별 허용은 미확인이다(AD-LAUNCH-PACK N3·N4·N5, 2-1). | 업종 심사 결과, 총판 서면 허용 범위(통신사 명칭·"공식" 표현), 사이트 개인정보 공개 여부(승인 없음)를 확인한다. 충전·심사 신청은 승인 범위 밖이다. | 사용자 + PM |
+| 4 | **공식 목적지(총판 접수 경로)** | 외부 | **미확보.** 등록부는 비어 있다. | 총판 공식 접수 주소, 그 주소를 광고 목적지로 써도 된다는 허용, 고객이 직접 입력하는 보안 화면인지 확인한다. | 사용자(총판 확인) |
+| 5 | 딜러 유입 귀속 | 외부 | 미확인 | 그 경로로 들어온 신청이 딜러 실적으로 잡히는 방식(전용 주소, 딜러 코드 등)을 확인한다. 파라미터가 필요하면 2-3절 절차를 따른다. | 사용자 + PM |
+| 6 | 개인정보 처리 주체 | 외부 | 미확정. FIDEON은 수집하지 않는다. | 공식 경로에서 고객정보를 처리하는 주체가 총판(또는 통신사)인지 확인한다. FIDEON 화면에 그 사실을 안내한다. | 사용자 + PM |
+| 7 | 홈·인터넷TV 공식 접수 연결 표시 | 코드 | **준비 완료, 기본 꺼짐**(2절). 빈 등록부, `OFFICIAL_INTAKE_ENABLED=false`. | 4~6번 확인 → 등록 항목과 활성 변경을 별도 커밋으로 PM 검수 → 개방 | Claude(코드) + PM(검수) |
+| 8 | 광고 문안 | 코드 | 3안 초안(3-1절)과 최초 1안(이사)의 글자 수 맞춤 대안 A/B가 있다(제목 ≤15자, 설명 20~45자, AD-LAUNCH-PACK 2절). 미게시. | 목적지 확정 후 3번 허용 범위로 표현을 검수한다. 매체 입력 화면의 실제 글자 집계는 미확인이다. | Claude + PM |
+| 9 | 자동 상담 응대 | 코드 | 흐름 제안만 있다(3-2절). 실행 중인 자동 상담은 없다. | 검증된 FAQ·규칙부터 준비한다. 생성형 AI 연결은 별도 구체안으로 검수한다. | Claude + PM |
+| 10 | 실적 집계 | 코드 | 지표 계산 모듈만 있다(`adMetrics.ts`). 수집하지 않는다. | 접수·가입·개통·정산 확인 경로를 정한다(4절). | 사용자(총판 보고) + Claude |
+| 11 | 검색 노출·도메인 | 미실행 | noindex, robots 차단, 도메인 미확정 | 실제 목적지와 검수 결과가 마련된 뒤 PM이 결정한다. 광고 집행에는 필수가 아니다. | PM |
+| 12 | 추적·픽셀 | 미실행 | 없음 | 계획하지 않는다. 필요하면 별도 구체안으로 다룬다(개인정보·동의). | PM |
+| 13 | 실제 광고 게시·예약·지출 | 미실행 | 하지 않았다 | 1~6번 충족 → (가) 직접 경로는 바로 사용자 집행, (나) FIDEON 경유는 7번 개방·배포 검수 후 집행(1-1절) | 사용자 |
+
+**11/18 매출 시작의 실제 차단 요소는 1, 2, 3, 4, 5, 6번이다(PM 6924799021 정정).**
+- 1번: 예산 승인은 됐다. 하지만 공식 근거상 하루예산·잔액 모두 초과 과금될 수 있어, 현재 후보로는 엄격 상한을 보장할 수 없다(집행 불가). 세금·수수료 포함 총비용 대조도 남았다.
+- 3번: 매체 심사·표시 의무와 총판 서면 허용 범위가 확인되지 않았다.
+- 2, 4, 5, 6번: 계정, 공식 목적지, 실적 귀속, 개인정보 처리 주체를 외부에서 확인해야 한다.
+- 개발로 해결할 수 있는 7번은 끝났다(기본 꺼짐). 같은 본인인증·공식 경로 질문을 사용자나 총판에 자동으로 다시 보내지 않는다.
+
+### 1-1. 경로별 개방 조건 (경로를 섞지 않는다)
+| 조건 | (가) 광고 → 총판 공식 목적지 **직접** | (나) 광고 → FIDEON 홈·인터넷TV → 공식 목적지 |
+|---|---|---|
+| 1 강제 예산·세금 포함 총비용 | 필요 | 필요 |
+| 2 광고 계정·권한 | 필요 | 필요 |
+| 3 심사·표시 의무·총판 허용 범위 | 필요 | 필요 |
+| 4 공식 목적지 확인·광고 목적지 허용 | 필요 | 필요 |
+| 5 딜러 실적 귀속 | 필요 | 필요(FIDEON을 거쳐도 귀속이 유지되는지 따로 확인) |
+| 6 개인정보 처리 주체 | 필요 | 필요 |
+| 7 FIDEON 등록 1줄·`ENABLED=true` 검수 | **불필요** | 필요(2-5절) |
+| FIDEON 배포·공식 도메인·검색 노출 결정 | **불필요** | 필요(별도 PM 결정) |
+| FIDEON 자체 Auth·DB 완성 | 불필요 | 불필요(고객정보를 받지 않으므로) |
+
+- (가)는 FIDEON 코드·배포를 기다리지 않는다. 다만 1~6번은 똑같이 충족해야 하고, 광고 게시는 사용자가 집행한다.
+- (나)는 FIDEON 화면을 거치므로 (가)의 조건에 더해 등록·활성·배포 검수가 필요하다.
+- 어느 경로든 고객정보는 공식 목적지에서 고객이 직접 입력하고, FIDEON은 받지 않는다.
+
+## 2. 공식 접수 연결 준비 코드 (기본 꺼짐)
+
+### 2-1. 구성
+| 파일 | 역할 |
+|---|---|
+| `src/content/officialIntake.ts` | 순수 검증·판정. 주소 검증(`validateOfficialIntakeUrl`)과 설정 판정(`resolveOfficialIntake`)을 맡는다. 실제 목적지·스위치는 없다. |
+| `src/server/intake/officialIntakeConfig.ts` | `server-only`. `OFFICIAL_INTAKE_ENABLED=false`, `OFFICIAL_INTAKE_REGISTRY=[]`(동결). `officialIntakeFor(slug)` |
+| `src/components/OfficialIntakeCta.tsx` | `state:'on'`일 때만 링크를 그린다. 그 밖에는 `null`을 돌려준다. |
+| `src/app/page.tsx`, `src/app/products/internet-tv/page.tsx`, `src/components/ProductPage.tsx` | 페이지(서버)가 판정하고 결과를 넘겨 표시하는 최소 변경. 화면 컴포넌트는 서버 모듈을 import하지 않는다(lint 규칙). 기존 "온라인 상담 서비스 준비 중" 안내는 그대로다. |
+
+### 2-2. 동작 규칙
+- **목적지 출처:** 서버 코드 상수 등록부만 쓴다.
+  - 환경변수, URL query, 쿠키, 헤더, 고객 입력은 판정 함수의 입력이 아니다.
+  - 추가 필드를 넣어도 무시한다(시험 OI7).
+- **꺼짐 조건:** 다음 중 하나라도 해당하면 아무것도 그리지 않는다. 링크, 버튼, 가짜 목적지, 외부 스크립트, iframe, 요청 모두 없다.
+  - `enabled !== true`(문자열 `'true'`, `1` 포함)
+  - 등록부가 비었다
+  - 항목 하나라도 무효이거나 중복이다(fail closed)
+  - 그 상품에 연결된 항목이 없다
+- **주소 검증:**
+  - **허용:** `https://` 고정 주소만. 정규화 결과가 원문과 같아야 한다.
+  - **거부:** IP(v4·v6·숫자 호스트), `localhost`, 내부·예약 도메인(`.local` `.internal` `.lan` `.test` `.invalid` `.example` `.onion` `.arpa` 등), 자격증명(`@`), 비표준·명시 포트, query(`?`), fragment(`#`), 퍼센트 인코딩, 백슬래시, 비ASCII, IDN(`xn--`), `//`·`.`·`..` 경로 조각, 끝 점 호스트.
+- **등록 항목 형식:** `{id, label, url, products, reviewRef}`만 허용한다.
+  - `products`는 현재 `internet-tv`만 된다.
+  - `reviewRef`(`PM-<번호>`)가 없으면 거부한다.
+  - 표시 이름에는 주소·연락처처럼 보이는 문자(`. : / @ -`)를 쓸 수 없다.
+- **링크 속성:** `rel="noopener noreferrer nofollow"`, `referrerPolicy="no-referrer"`. 현재 페이지 주소(광고 파라미터 포함)를 목적지에 넘기지 않는다.
+- **화면 안내:** 고객이 공식 접수처에서 직접 입력한다는 점과 FIDEON은 이름·연락처·주소를 받지 않는다는 점을 표시한다.
+- **형식 검사의 한계:** 형식 검사는 공식성이나 안전성의 증명이 아니다. 공식성·처리 주체는 사람이 확인하고 PM이 검수한다.
+
+### 2-3. 실적 귀속 파라미터
+- 지금은 query를 전부 거부한다.
+- 총판이 딜러 귀속용 파라미터를 요구하면 이 검증을 넓히기 전에 다음 구체안을 먼저 PM에게 낸다.
+  - 파라미터 이름과 값의 정확한 허용 목록
+  - 딜러 단위 비식별 코드만 허용(고객·개인별 값 금지)
+  - 로그·UTM에 남기지 않음
+- 이름, 연락처, 주소 같은 개인정보는 URL과 UTM에 절대 넣지 않는다.
+
+### 2-4. 시험
+- `tests/unit/official-intake.test.ts`(OI1~OI9)
+  - 정상, 차단, placeholder(`#…`, `TBD`, 빈 값, `https://`)
+  - fail closed, 고정 링크, 입력 주입 무시
+  - 실제 설정의 꺼짐·빈 등록부·환경변수 미사용 정적 확인, 화면 배선 정적 확인
+- `tests/route/official-intake-config.test.ts`(OC1~OC2)
+  - react-server 조건에서 실제 설정 판정이 모든 상품에서 `DISABLED`인지
+  - 환경변수를 넣어도 켜지지 않는지
+- `npm run test:preview`
+  - 기존 공개·관리 화면 전부(320/390)에 공식 접수 표식이 없는지 확인한다.
+  - 가상 등록부 화면 `11-official-intake-fake`(example.com, 공개 화면 아님)에서 확인하는 것:
+    - 고정 href, query·fragment 없음
+    - noopener·noreferrer·no-referrer 속성
+    - 입력칸·폼·iframe·script·img 0개
+    - 가로 넘침 없음
+  - 미리보기에서만 `server-only`를 빈 모듈로 바꾼다(`scripts/preview/css-stub.cjs`). 실제 빌드·route 시험·server smoke는 원래 동작이다.
+
+### 2-5. 개방 절차 (이 준비 코드는 개방 승인이 아니다)
+1. 1절 4~6번 외부 확인 결과를 PM에 보고한다. 원문 정책·수수료·연락처는 repo·PR에 복사하지 않는다.
+2. 등록 항목 1줄(`reviewRef` 포함)과 `OFFICIAL_INTAKE_ENABLED=true`를 **별도 커밋**으로 낸다. 시험 OI8·OC1의 기대값 변경도 같은 커밋에서 PM이 검수한다.
+3. 같은 SHA CI 통과 → PM 개방 검수 → 배포 결정(별도) → 광고 목적지 설정(사용자).
+
+### 2-6. 카카오톡 상품 문의 준비 (PM 6938169689, 기본 꺼짐)
+- **운영 방식(사용자 답변, PM 6938051113):** 고객 → 사용자(카카오톡) → 총판 전달.
+  - 카카오톡은 **사용자가 운영하는 상품 문의 창구**이고, 총판의 정식 가입 접수처가 아니다. 공식 접수 등록부(2절)와 섞지 않는다.
+- **코드 구성**
+  - `src/content/kakaoInquiry.ts`(순수 판정)와 `src/server/inquiry/kakaoInquiryConfig.ts`(server-only)
+    - 현재 값은 `KAKAO_INQUIRY_ENABLED=false`, `URL=null`, `REVIEW_REF=null`이다.
+    - **전역 gate `EXTERNAL_CONSULT_ENABLED`(false 유지)와 모두 true**이고 URL·검수 근거가 유효할 때만 링크가 나온다.
+    - 기존 환경변수 기반 `KAKAO_CHANNEL_URL`(`NEXT_PUBLIC_KAKAO_CHANNEL_URL`/`#kakao-channel`)은 제거했다.
+  - URL 검증은 2절의 https 고정 검증을 재사용하고, 호스트는 `pf.kakao.com`과 정확히 일치해야 한다.
+    - 경로 정규식은 **가짜 시험용 임시 제약**이고, 실제 형식은 공개 링크를 받은 뒤 대조한다.
+    - 오픈채팅·개인 프로필은 제외한다.
+  - 표시 범위
+    - 상담 페이지(폼 안내)와 인터넷TV 상세에만 표시한다. 공통 하단 버튼의 카톡 분기는 제거했다.
+    - 링크 1개와 안내 문구를 둔다. 안내 문구는 "상품 문의만, 가입 접수는 총판 확인 뒤"와 "주민등록번호·신분증·계좌번호·정확한 주소는 보내지 마세요"이다.
+    - 입력칸·SDK·추적·저장은 없다. 안내 문구가 고객이 카톡에 민감정보를 입력하는 것까지 막지는 못한다.
+- **시험**
+  - unit KI1~KI6, route KC1
+  - preview `14`·`15` 가상 켜짐(320/390): 링크 1개, 정확한 href, 속성, 안내, 입력칸 추가 0, 외부요소·요청 0
+  - 나머지 화면은 카톡 표식 0
+  - 실Next smoke H10: `/consult`·`/products/internet-tv` HTML·RSC에서 표식 0, 준비 중·잠금, noindex
+- **켜기 전 미확인**
+  - 실제 공개 채널 주소, 운영자 표시와 개인정보 공개(J3)
+  - 중개 수집·전달 조건: 처리 역할, 고지·동의, 보관·삭제, 전달 보안, 주민번호·계좌 처리 근거
+  - 수신 총판·딜러 귀속
+  - 카톡 직접 목적지의 매체 허용. S9는 표시·연결 URL 도메인 일치 조건일 뿐이며, 카톡 직접 경로를 금지하거나 FIDEON 경유만 가능하다는 증명이 아니다.
+- **집계:** 카톡 문의·인입 수는 접수가 아니다. 총판이 수신·접수를 확인한 건만 4절 기준으로 센다.
+
+## 3. AI 광고·자동 상담 운영 준비
+
+### 3-1. 광고 문안 — 상황별 3안 (**미게시 초안**, 목적지 미확정)
+
+> 상태: **미게시 초안.** 목적지(1번 표 4번)가 확정되기 전에는 게시·예약하지 않는다.
+> - 고객군은 **가설**이다. 고객 인터뷰, 리뷰 분석, 경쟁사 분석은 하지 않았다.
+> - 적용한 마케팅 실행 요지(사용자 공유 자료, PM 6925800166 정리. 원문은 기다리지 않는다):
+>   고객·상황 가설 → 가치 제안·4P → **1상황 1문안 1CTA** → 한 매체 소규모 검증 → 접수·가입·개통·정산을 나눠 측정 → 결과·원인 가설·다음 실험.
+>   근거 없는 가격·혜택·리뷰·성과는 만들지 않는다. 이 요지는 추적, CRM 메시지 발송, 유료 도구 설치 승인이 아니다.
+>   문안은 이 요지와 기존 A/B안, 상담 멘트(`docs/COUNSELING-SCRIPTS.md`)를 바탕으로 했다.
+> - 3안은 목적지·허용 표현·심사 조건을 확인한 뒤 최종 조정한다.
+> - CTA는 목적지가 확정된 뒤 실제 동작과 같은 문구 하나만 쓴다. 아래 CTA는 (가)·(나) 경로 모두 "공식 접수처"로 가는 경우를 기준으로 한다.
+
+**공통 미확인 주장 금지 목록(3안 모두 적용)**
+- 금액: 요금, 사은품·현금·혜택 금액, "최저가", "최대 ○○원", "무료 설치"
+- 범위·일정: "전국 설치", "당일·익일 설치/개통", 특정 지역 가능 여부
+- 신분: "공식", "본사", "공식 대리점", "통신사 직영"(총판 서면 허용 전), 통신사 로고
+- 보장: "100% 승인", "무조건", "장애 없음", "위약금 대납·지원"(확인 전)
+- 기타: 경쟁사(기가팡 등) 문구·디자인·자료, 고객 후기·평점(실제 확인 자료 없음)
+
+**안 1 — 이사 (가설 고객군: 새집 입주·이사를 앞둔 가구)**
+- 상황: 이사 일정이 잡혀 새집 인터넷·TV를 알아보는 중
+- 제목: 이사 앞두고 인터넷·TV 알아보세요
+- 설명: 새집 인터넷과 TV, 이용 패턴에 맞는 속도와 결합 조건을 확인하세요. 설치 가능 여부와 요금·혜택은 공식 접수처에서 확인되는 조건으로 안내됩니다.
+- CTA(1개): 공식 접수처에서 신청
+- 확인할 조건(게시 전): 이사 고객용 이전·신규 설치 조건 표현을 총판이 허용하는지, 설치 가능 여부를 접수처가 확인하는지
+
+**안 2 — 약정 종료 (가설 고객군: 현재 약정 만료가 가까운 가구)**
+- 상황: 기존 인터넷·TV 약정이 곧 끝나 재약정과 변경을 비교하는 중
+- 제목: 인터넷·TV 약정 만료 전 확인할 것
+- 설명: 약정 종료일, 휴대폰 결합, 월요금과 설치비를 함께 비교해 보세요. 기존 약정 해지 비용과 유지 조건도 신청 전에 확인합니다.
+- CTA(1개): 공식 접수처에서 신청
+- 확인할 조건(게시 전): 해지 비용 안내 책임이 누구인지(총판·통신사), "약정 만료" 표현의 매체 정책 위반 여부
+
+**안 3 — 일반 비교 검토 (가설 고객군: 통신사 변경·결합을 처음 검토하는 가구)**
+- 상황: 특정 계기 없이 인터넷+TV 결합을 비교해 보고 싶음
+- 제목: 인터넷+TV, 우리 집 기준으로 비교해 보세요
+- 설명: 사용 기기 수와 TV 시청 패턴에 맞춰 필요한 속도와 구성을 정하고, 결합 조건을 확인하세요. 요금·혜택은 신청 시점에 확정된 조건만 안내됩니다.
+- CTA(1개): 공식 접수처에서 신청
+- 확인할 조건(게시 전): 통신사 이름을 문안·키워드에 쓸 수 있는지(3번), 비교 표현이 매체의 비교 광고 정책에 맞는지
+
+**AI 활용 범위**
+- 할 일: 위 3안의 변형 초안, 매체별 글자 수 맞춤, 집행 후 지표 요약 초안. 사람이 검수한 뒤에만 쓴다.
+- 하지 않는 일: 자동 게시, 자동 입찰 최적화, 예산 자동 증액, 실측 전 목표 수치 조작(LAUNCH-READINESS 4절).
+
+**집행 순서(엄격 상한 수단 확인 등 조건 충족 후 사용자, AD-LAUNCH-PACK 4절)**
+1. 소규모 테스트로 1~2개 안만 쓴다.
+2. 하루예산은 승인 상한 안에서 정한다. 다만 하루예산은 공식 근거상 강제 상한이 아니다(초과 과금 가능).
+3. 매일 비용·클릭·공식 접수처 이동 수를 확인한다.
+4. 3일째에 종료한다. 자동 연장은 없다. 계속하려면 **사용자의 예산 재승인**이 필요하고, PM은 결과 정리와 의견만 낸다.
+
+**광고 초안 구조화(PM 6943038907, 미배선·미집행)**
+- `src/content/adDrafts.ts`: 3안(moving / contract_end / general_compare)을 고정 데이터로 옮겼다.
+  - 각 안: 고정 ID, 상황(가설), 제목, 설명, CTA=UNSET, 근거 상태=HYPOTHESIS_UNVERIFIED
+  - 길이 기준은 N6(제목 ≤15자, 설명 20~45자)이고 **코드포인트 수**로 셌다. 제목 14/14/14, 설명 44/43/45.
+  - 매체 실제 집계·심사 통과의 증거가 아니다.
+  - 사전 작성 초안이며 생성형 AI 실행 결과가 아니다.
+- `src/server/advertising/campaignDraft.ts`(server-only, 순수 함수)
+  - 입력: 소재 ID, `internet-tv`, 예산 정수(일 ≤10,000원, 총 ≤30,000원, 일 ≤ 총 ≤ 일×3)만 받는다.
+  - 출력: 미게시 초안 DTO. 목적지·CTA=UNSET, `executionAllowed:false`, blocker 7개는 고정이다(`CAP_NOT_VERIFIED` 등).
+  - 승인·예약·게시·과금 함수와 타이머는 없다. 예산이 한도 안이어도 집행 가능을 반환하지 않는다.
+- 시험(가상 입력만)
+  - unit AD1~AD4: 구조·길이, 금지 주장·숫자·URL 없음, 동결, 정적 미배선
+  - route CD1~CD4: 정상이어도 집행 불가, 형식·예산 거부, 허용 목록 DTO·불변
+- 화면·API·광고 계정·네트워크·DB·환경변수·LLM 연결은 없다. production 사용처도 없다.
+
+**AI 생성 어댑터(PM 6943345830, 실모델 미호출·매체 미게재)**
+- `src/server/advertising/adGeneration.ts`(server-only): 생성 오케스트레이터
+  - 입력: 고정 상황 ID + `internet-tv`만. 프롬프트는 서버가 고정 문장으로 구성한다.
+  - 생성기는 필수 주입이다. 없으면 호출 0회, `NOT_CONFIGURED`.
+  - 모델 반환은 불신 데이터로 취급한다.
+    - 정확히 `{title, description}`이어야 하고, 길이(N6)·허용 문자(숫자 불가)·금지 주장(금액·최저·당일·공식·통신사명·연락처·URL 등)을 검사한다.
+    - 실패하면 고정 오류 코드만 돌려준다. 고정 초안 fallback은 없다.
+  - 성공 결과도 `DRAFT_UNPUBLISHED`·`executionAllowed:false`다. 금지 문구 필터는 완전한 사실 검증이 아니다.
+- `src/server/advertising/openAiAdGenerator.ts`(server-only): OpenAI Responses HTTP 어댑터, **비활성**
+  - transport·키·모델·실행 허용은 모두 명시 주입이다. env·SDK·기본 클라이언트는 없다.
+  - 요청: 고정 `https://api.openai.com/v1/responses`, `redirect:'error'`
+    - body: `store:false`, strict `json_schema`, `max_output_tokens`. tools·stream·background는 없다.
+  - 1회 호출에 deadline을 두고 재시도는 하지 않는다(PM 6944243176 보완).
+    - 마감 시 AbortSignal을 보내고 진행 중인 reader를 취소한다.
+    - 마감 뒤 도착한 응답은 본문을 읽지 않고 취소만 한다. 취소 완료를 기다리지 않으므로 정리가 막혀도 반환이 지연되지 않는다.
+    - 취소가 전송·청구 취소를 보장하지는 않는다.
+  - 응답 크기 상한은 transport가 fetch Response처럼 `body` 스트림을 주면 어댑터가 chunk마다 실제 바이트를 세는 방식이다. 넘는 순간 읽기를 취소한다.
+    - Content-Length는 믿지 않는다.
+    - 실제 최대 수신량은 상한 + 마지막 chunk 크기다.
+  - 오류 응답(429·非2xx) 본문은 읽지 않는다.
+  - 불신 결과 계약: 생성기 성공은 `called === true`일 때만 인정한다. 오류의 `called`도 boolean인지 검사한다. deps·outcome·data의 접근자·Proxy 예외는 고정 실패로 닫는다.
+  - 응답은 `output[].message.content[].output_text`를 읽는다. refusal·incomplete·429·非JSON은 고정 코드로 닫는다.
+  - 계약 근거는 PM이 확인한 공식 자료다(Claude 환경에서는 원문 미열람).
+  - `store:false`는 보관 0의 보증이 아니고, `max_output_tokens`는 원화 청구 상한이 아니다. 모델명·가격·지원 여부는 미확인이다.
+- 시험(가짜 생성기·가짜 transport만): route AG1~AG7, OA1~OA6·OA4b, unit AD4·AD5(정적, 미배선)
+  - 실제 OpenAI 연결이나 품질·사실성을 증명하지 않는다.
+- 실제 키·모델 호출·요금 발생·매체 게시·화면/API 배선은 없다.
+
+**유튜브 한 채널 비공개 게시·상태 조회 어댑터(PM 6951004870, 비활성·실접속 0)**
+- 사용자 지시는 "AI 자동광고 / 이번 달 접수 100개 시작"이다. 이 묶음은 그 첫 구현 단계이며, 실제 자동광고 운영 완료가 아니다.
+- **공식 근거(2026-11-17 Claude가 developers.google.com 원문 대조)**
+  - `videos.insert`: POST `https://www.googleapis.com/upload/youtube/v3/videos`
+    - `part`가 필수이고, OAuth 범위(youtube.upload 등)가 필요하다.
+    - 업로드 쿼터는 1단위이고 일 100회 버킷이다. MIME은 `video/*`이다.
+    - 미검증 API 프로젝트의 비공개 제한 문구는 **열람 결과가 엇갈린다.**
+      - Claude가 연 원문: "not restricted to private viewing mode"
+      - PM이 연 원문: private 제한 명시
+    - 확정하지 않는다. 어댑터는 어느 쪽이든 `privacyStatus:'private'`를 직접 고정한다. 실업로드 조건과 쿼터는 실계정에서 다시 확인한다.
+  - `videos` 리소스
+    - privacyStatus는 private/public/unlisted이고, 생략하면 public이 기본일 수 있다.
+    - uploadStatus 값, processingDetails.processingStatus(failed/processing/succeeded/terminated)
+    - 제목은 최대 100자이고 설명은 5000바이트이며, `<` `>`를 쓸 수 없다.
+  - `channels.list(part=id, mine=true)`·`videos.list(id, part=status,processingDetails)`: PM이 원문 열람으로 확인했다.
+    - 실제 token에 필요한 OAuth 범위는 미검증이다(upload 범위만으로 조회까지 보장하지 않음).
+    - insert의 필수 metadata·category와 multipart 수락 여부도 공식 업로드 원문과 다시 대조해야 한다.
+    - 가짜 요청 계약 시험은 실제 Google 수락을 뜻하지 않는다.
+  - `uploadType=multipart`는 Google API 공통 업로드 방식이다. insert 문서 표에는 없고, 예제는 resumable이다.
+- **`src/server/advertising/youtubePrivatePublisher.ts`**(server-only)
+  - **필수 주입:** transport·OAuth access token·예상 채널 ID·`uploadAllowed===true`. env·기본 fetch·SDK·키 저장·발급·로그인 경로는 없다. 하나라도 없으면 transport 0이다.
+  - **고정 endpoint 3개:** `channels?part=id&mine=true`, `upload/.../videos?uploadType=multipart&part=snippet,status`, `videos?part=status,processingDetails&id=<검증된 11자 ID>`
+  - **채널 확인:** 정확히 1건이고 예상 ID와 같을 때만 업로드한다.
+  - **multipart:** 경계·Content-Type은 서버가 통제한다. 경계가 영상 바이트에 들어 있으면 거부한다.
+    - 메타데이터는 `{snippet:{title,description}, status:{privacyStatus:'private'}}`만 보낸다.
+    - 아동 대상(selfDeclaredMadeForKids)·합성물(containsSyntheticMedia)·category·publishAt은 **보내지 않는다.** 이 코드는 그 사실을 판정하지 않으므로 실업로드 전에 사람이 정해야 한다.
+  - **영상:** 메모리 `Uint8Array` 1바이트~5MiB, mp4(ftyp)·webm(EBML) 서명만 받는다. 방어 복사를 하고 원본은 불변이다.
+    - 서명 검사는 형식 확인일 뿐, 내용 안전성 확인이 아니다.
+  - **문구:** `validateAdCopy` 통과값만 쓴다.
+  - **업로드 결과**
+    - HTTP 오류: UPLOAD_FAILED(401/403/429/기타)
+    - 마감·전송 오류·2xx 판독 불가: **RESULT_UNKNOWN**. 재업로드 판단 금지, 재시도 0.
+    - 비공개가 아님: NOT_PRIVATE(숨기지 않음)
+    - 성공: UPLOADED_PRIVATE + 최소 videoId
+  - **상태 조회 결과:** PRIVATE_PROCESSING / PROCESSED / PROCESSING_FAILED / PROCESSING_UNKNOWN, NOT_PRIVATE, UPLOAD_REJECTED, NOT_FOUND, QUERY_FAILED
+  - 마감·바이트 상한·늦은 본문 취소는 `boundedHttp.ts`가 맡는다(검수된 OpenAI 어댑터 패턴). 취소가 실제 업로드·청구 취소를 보장하지는 않는다.
+  - **PM 6952112639 보완**
+    - config는 속성마다 한 번만 읽어 스냅샷으로 만들고, 그 스냅샷을 검증해 그대로 쓴다. 이후 원본 변경은 무시한다.
+    - `uploadPrivate` 하나에 **절대 마감 1개**를 둔다. 채널 확인과 업로드가 남은 시간을 공유한다.
+      - 마감 뒤에는 새 요청을 보내지 않고 TIMEOUT_BEFORE_UPLOAD(uploadAttempted:false)를 돌려준다.
+      - 업로드를 이미 보냈다면 RESULT_UNKNOWN이다.
+    - 상태 판정
+      - privacyStatus·uploadStatus는 enum이어야 한다. 누락·불량이면 QUERY_FAILED.
+      - processingDetails·processingStatus가 누락되면 PRIVATE_PROCESSING_UNKNOWN(성공 아님)이고, 값이 enum 밖이면 QUERY_FAILED.
+    - `boundedHttp`: status·body는 한 번만 읽는다. read reject, getReader 예외, 접근자 예외에서 소유한 reader/body를 정리하고, 정리를 기다리지 않는다.
+  - 영속 멱등 저장소·백그라운드 재시도·스케줄러는 없다.
+- **`src/server/advertising/youtubeAdPreparation.ts`**
+  - 생성기·게시 어댑터·`totalTimeoutMs`를 필수 주입받는다. deps는 한 번만 읽는다.
+  - **영상 검증을 생성 전에** 한다. 불량이면 생성 0·업로드 0이다.
+  - 그 뒤 생성→`validateAdCopy`→비공개 업로드→상태 조회를 조합한다.
+  - 생성 결과 계약: ok·source:'model'·generatorCalled===true·같은 situation/product·DRAFT_UNPUBLISHED·executionAllowed:false가 모두 맞아야 한다.
+  - 업로드·조회 결과는 state·videoId·uploadAttempted를 한 번만 읽어 상태별 계약과 대조한다. 모순되면 RESULT_UNKNOWN이다.
+  - 마감 계약(PM 6952678159 보완)
+    - 조합의 절대 마감 `deadlineAt`을 publisher의 `uploadPrivate`·`getStatus`에 **명시 전달**한다. 어댑터는 자체 상한과 비교해 이른 쪽(min)을 쓰고, 호출자 값이 불량이면 닫힌다.
+    - 마감 대조 시점
+      - 생성 실행 직전, 각 await 뒤, 새 요청·읽기·파싱 직전마다 `Date.now()`로 절대 마감을 직접 대조한다.
+      - 타이머는 abort·반환 보조일 뿐이고, 이미 지난 시각의 성공은 TIMEOUT으로 바꾼다.
+    - 조합이 반환한 뒤 publisher가 늦은 채널 결과로 새 업로드·조회 요청을 시작하지 않는다(R8).
+    - 한계
+      - 이미 시작한 생성 호출은 취소할 수 없어 늦은 결과를 버린다. 이것은 실행 중단이 아니다.
+      - 이미 보낸 업로드는 RESULT_UNKNOWN이다.
+      - 실제 전송·업로드·청구 취소는 보장하지 않는다.
+  - 입력: 고정 상황 ID·`internet-tv`·메모리 영상만
+  - 생성 실패나 꺼짐이면 업로드 0이다.
+  - 결과 stage: `PRIVATE_TEST_ONLY` / `UPLOAD_NOT_COMPLETED` 등. 항상 `publicPublished:false`·`paidExecutionAllowed:false`다.
+  - HTTP route/UI 배선은 없다.
+- **시험(가짜 transport, 실네트워크 0을 전역 fetch 차단으로 확인)**
+  - route YT1~YT7·YP1~YP3·R1~R10(PM 재현 결함·마감 전파 회귀), unit AD4(정확 사용처 목록)·AD6(정적)
+  - 가짜 성공은 실영상 품질·실계정·실 AI·문의 성과가 아니다.
+- **남은 실제 조건**
+  - 실제 영상 제작 방식과 무료 로컬 도구
+  - 사용자 YouTube 채널과 OAuth 동의(토큰 보관 방식 별도 검수)
+  - 아동 대상·합성물 판단
+  - 공개 전환·중단·성과 연결(별도 승인)
+
+### 3-1-b. 로컬 세로 자막 영상 제작 (PM 6954300094, 제작·검사까지만)
+- **범위:** 검증된 문구 1쌍 → storyboard → 실제 mp4 → 판독. 생성 호출·업로드·외부 접속·지출 0.
+  `prepareYoutubeAdPrivateTest` 연결과 `videoAdPipeline`은 만들지 않았다(같은 copy·출처·영상 결합 연결안은 별도 검수).
+- **파일**
+  - `src/server/advertising/video/storyboard.ts`: 순수 계약. 입력 `{situationId(고정 3종), copy:{title,description}, copySource:'model'|'fixed_draft'}`만. copy는 `validateAdCopy`를 다시 통과하고 한 번만 읽는다. 고정 3장면(제목 0~5초 64px / 설명 5~13초 48px / 확인 필요 안내 13~18초 40px), 고정 색·좌표. 줄바꿈은 추정 em 폭으로 최소 줄 수 안에서 균형 분할한 **후보**다.
+  - `src/server/advertising/video/ffmpegRenderer.ts`: 준비 확인 → 실제 폰트 측정 → 렌더 → 파일·디코딩·probe·faststart 검사 → (선택) 프레임 → 정리.
+  - `src/server/advertising/video/videoProbe.ts`: ffprobe JSON 불신 판정, faststart(moov가 mdat 앞) 확인.
+  - `src/server/advertising/video/boundedProcess.ts`(내부 helper): 위 두 모듈의 유일한 프로세스 실행 경로. 소유권·절대 마감·출력 한도·종료 확인을 한 곳에 둔다.
+  - `tests/route/video-renderer.test.ts`: 가짜 process VR1~VR17(CI 포함, ffmpeg 없어도 skip 없음).
+  - `scripts/video/render-sample.mjs`: 실제 1편 렌더 + 증거(수동, CI 미연결).
+- **영상 형식:** 720×1280, 30fps, 18초(540프레임), H.264 High, yuv420p, +faststart, 오디오 없음, 최종 5MiB 이하(실측 stat·probe로 판정).
+- **실행 계약**
+  - 모든 도구는 `/usr/bin/unshare -n -- /usr/bin/prlimit --as=1GiB --cpu=60 --fsize=16MiB --nproc=64 -- <고정 실행 파일>`로만 실행한다. `spawn(고정 경로, 인자 배열, {shell:false, detached:true, stdin ignore, env {LC_ALL}만, cwd 자기 임시 디렉터리})`.
+  - 렌더마다 격리 안에서 `/proc/net/dev`가 lo 하나뿐인지, `/proc/self/limits`에 한도가 실제 적용됐는지 확인한다. 아니면 `NETWORK_ISOLATION_UNAVAILABLE`/`LIMITS_UNAVAILABLE`이고 일반 네트워크 실행 fallback은 없다.
+  - 문구는 인자에 넣지 않고 자기 임시 디렉터리의 `t<i>.txt`로만 넘긴다(`drawtext textfile=…:expansion=none:reload=0`). 입력은 고정 `lavfi color` 1개, `-protocol_whitelist file`, `-nostdin`, 출력 `file:out.mp4` 고정.
+  - 마감은 전체 절대 마감 하나(1~120초)를 모든 단계가 공유한다. 마감 뒤 새 process 0. 중단은 자기 프로세스 그룹에만 SIGKILL 1회, 종료 확인 실패면 `CLEANUP_FAILED`이고 새 기동을 거부하며 그 자식이 쓰는 디렉터리를 지우지 않는다.
+  - 정리 실패는 `RENDERED`와 함께 숨기지 않는다(`CLEANUP_FAILED`, 원래 실패는 `primary`로 보존).
+  - 한계: 실행 사용자가 root면 `nproc` 한도는 효과가 없다. `-threads 2`·`-filter_threads 1`로 스레드를 제한한다.
+- **폰트(읽기 전용 대조)**
+  - `/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc`(Debian `fonts-noto-cjk` 1:20230817+repack1-3). 패키지 copyright의 License 항목은 `SIL-1.1`, 폰트 name 테이블 라이선스 URL은 OFL이다.
+  - 크기 20,050,760바이트와 SHA-256 `faa5f365…5056ceb`가 같을 때만 렌더한다(다르면 `FONT_UNAVAILABLE`).
+  - ffmpeg 6.1 `drawtext`는 ttc face index를 고를 수 없어 **face 0 = Noto Sans CJK JP Bold**가 쓰인다. 한글 음절 11172자 전부가 있고 한글 글리프는 KR face와 같은 디자인이지만, `·` 등 일부 문장부호 모양·폭은 KR face와 다를 수 있다.
+  - fontconfig 이름(`font=Noto Sans CJK KR:style=Bold`)은 쓰지 않는다. `fc-match`는 KR Bold로 해석했지만 같은 지정으로 ffmpeg가 그린 프레임에는 한글이 "NO GLYPH" 상자로 나왔다(첫 실렌더 육안 검사에서 발견).
+- **실행 명령(실렌더, 수동)**
+
+  ```bash
+  TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server \
+    --require ./tests/route/fallback.cjs --import tsx scripts/video/render-sample.mjs --out /저장소-밖/빈-폴더
+  ```
+
+  - 기존 설치 tsx만 쓴다(npx 자동 다운로드 없음). 도구 경로가 다른 환경(macOS 등)에서는 `NOT_AVAILABLE`로 끝난다.
+  - 결과(영상·프레임·evidence.json)는 저장소·PR에 올리지 않는다.
+- **가독성 근거:** 320px 폭에서 0.444배로 보여 64/48/40px가 약 28/21/18px다. 실제 측정 최대 줄 폭은 600px 이하여야 하고(좌우 여백 각 60px), 줄 높이를 넘으면 렌더 0.
+
+### 3-1-c. 30초 설명형 무음 화면 시안 (PM 6983216833, 내부 검토용)
+- **성격:** 내부 검토용 **무음 화면 시안**이다. 음성·음성 동기·판매용 완성·광고 집행 승인이 아니다. 화면 품질은 자동 판정이 아니라 사용자·PM 육안 검수다.
+- **대본:** PM 일반 인터넷 선택안 5문장. 결합 할인 유도·혜택·금액·상품 판정·실적·URL·전화·QR·CTA 없음.
+- **파일**
+  - `src/server/advertising/video/explainerStoryboard.ts`: 고정 계획(그림 25개·문구 33줄)과 순수 검증. 입력은 정확히 `{ variant: 'general_internet_v1' }`. 정수 좌표·고정 색·0~30초·허용 문자·데이터 속성만(접근자 거부)·중복 id 거부.
+  - `src/server/advertising/video/explainerRenderer.ts`: 그림은 고정 도형(둥근 사각형·원·고리·선·호)을 `geq`로 1프레임 그린 뒤 `loop`·`fade`·`overlay`로 움직인다. 외부 이미지·폰트·음원 입력 0. 문구는 `e<i>.txt` + `drawtext expansion=none:reload=0`.
+  - `src/server/advertising/video/videoProbe.ts`: 30초 전용 `checkExplainerProbeJson`·`probeExplainerVideo`를 **별도 추가**했다(30.0±0.5초·900프레임·오디오 0·5MiB 이하). 18초 `checkProbeJson`·`probeVideo` 판정은 같다(내부 기준값 상수화만).
+  - `src/server/advertising/video/ffmpegRenderer.ts`: 내부 helper에 `export`만 추가했다(동작 변경 0).
+  - `tests/route/video-explainer.test.ts` EX1~EX9, `scripts/video/render-explainer-sample.mjs`(수동, CI 미연결).
+- **자원 제한(30초 시안 전용):** 주소 공간만 2GiB(`EX_LIMITS`)이고, CPU 60초·파일 16MiB·프로세스 64는 18초와 같다. 18초 renderer의 1GiB는 그대로다.
+  - 근거(Claude 세션 실측): 문구 33줄의 drawtext가 각자 폰트를 열어 1GiB에서는 측정 단계에서 할당 실패. `-filter_complex_threads 1`일 때 가상 메모리 최대 약 1.5GiB, 실제 상주 약 0.6GiB, 렌더 CPU 약 42초.
+  - CPU 60초 한도와 여유가 크지 않다. 느린 환경에서는 `TIMEOUT`이나 CPU 한도로 실패할 수 있다.
+- **실행(수동):** `TSX_TSCONFIG_PATH=tests/route/tsconfig.json node --conditions=react-server --require ./tests/route/fallback.cjs --import tsx scripts/video/render-explainer-sample.mjs --out /저장소-밖/빈-폴더`
+- **대표 프레임:** 3.2·9.6·16.4·23.6·28.6초 × 720·390·320 폭. 결과는 저장소·PR에 올리지 않는다.
+- **결함 수정(PM 6984125979):**
+  - 공개 진입점 예외 경계: Proxy·접근자·deps·FS 예외를 원문 없이 고정 결과로 닫는다.
+  - FS 작업(실행 파일 확인·mkdtemp·폰트 해시·파일 쓰기/stat/읽기·정리)도 전체 절대 마감 안에서만 결과를 받는다. Node 비동기 FS는 취소할 수 없어서, 늦게 끝나는 작업은 별도 정리 한도(killWaitMs) 안에 완료를 확인한다. 확인하지 못하면 `CLEANUP_FAILED`이고 디렉터리를 지우지 않는다. 마감 뒤 늦게 생긴 자기 mkdtemp 디렉터리도 같은 규칙으로 지운다.
+  - 공유 `ProcessOwner`: spawn 직후와 결과 반환 직전에 마감을 대조한다(동기 차단 뒤 결과도 TIMEOUT). 18초·30초 renderer 모두 마지막 파일 읽기 뒤 마감을 대조한다.
+  - `EXPLAINER_PLAN` 깊은 동결.
+  - **18초 renderer의 FS 작업 마감은 이번 범위에서 바꾸지 않았다(같은 한계가 남아 있다).**
+
+### 3-2. 자동 상담 응대 흐름 (제안, 실행 중 아님)
+1. **상품 문의**
+   - 인터넷+TV 문의만 받는다(1단계 활성 상품).
+2. **조건 확인**
+   - 비식별 질문만 한다: 이사 여부, 약정 만료 시기, 휴대폰 결합 여부, 희망 속도, TV 필요 여부.
+   - 주민번호, 신분증, 계좌, 정확한 설치 주소는 묻지도 받지도 않는다.
+3. **확정 정책만 안내**
+   - 기존 정책 판정 경로(`src/server/policies`, `docs/POLICY-QUOTING-CONTRACT.md`)를 쓴다.
+   - 그 경로가 "확정"이라고 판정한 항목만 안내한다.
+   - 모르는 것은 0이나 추정이 아니라 "확인 필요"로 둔다.
+4. **공식 접수 연결**
+   - 고객이 공식 접수처에서 직접 신청하도록 안내한다(2절 링크가 열린 뒤).
+5. **담당자 처리**
+   - 확인이 필요한 질문, 불만, 해지 문의는 담당자(사람)에게 넘긴다.
+
+**준비 순서:**
+1. 검증된 FAQ와 규칙 응답(상담 멘트 `docs/COUNSELING-SCRIPTS.md` 재사용)
+2. 정책 판정 경로 연결
+3. 생성형 AI 연결은 별도 구체안으로 검수한다. 모델·비용·고객 발화 전송 범위·보존·마스킹을 다룬다.
+   - 유료 LLM/API와 고객정보 외부 전송은 그 검수 전에 하지 않는다.
+   - 기가팡의 내부 AI 구현을 검증한 적이 없다. 참고 대상은 공개 화면의 상담 흐름 개념뿐이고, 디자인·자료는 복제하지 않는다.
+
+**1단계 준비물 — 고정 주제 규칙 응답(PM 6924799021, 비활성)**
+- 파일: `src/content/productGuide.ts`(순수), 시험 `tests/unit/product-guide.test.ts`(PG1~PG6, 가상 입력만)
+- 입력은 `{ product: 'internet-tv', topic }` 하나뿐이다.
+  - 주제는 9개다: speed, tv, bundle, contract, moving, install, fees, privacy, apply.
+  - 추가 키, null, 배열, 오타, 예약 상품, 자유 문구, 접근자 예외는 모두 고정 안전 안내로 닫는다.
+  - 입력 값은 응답에 되돌려 넣지 않는다.
+- 응답은 구분해서 표시한다(`kind`).
+  - `general`: 사이트에 이미 게시된 일반 안내
+  - `needs_check`: 요금·결합·설치·이사처럼 조건 확인이 필요해 여기서 답하지 않는 것
+  - `not_ready`: 준비 중
+  - 금액, 혜택, 지역, 일정, "최저·무료·당일·보장" 문구는 없다.
+- `apply` 주제는 서버가 이미 판정한 공식 접수 결과의 상태만 `available`/`unavailable`로 구분한다.
+  - 목적지 주소, 등록 정보, 우회 링크를 담지 않는다.
+  - 꺼짐이면 "준비 중"으로 답하고, 신청 완료·담당자 연결 완료를 만들지 않는다.
+- 응답 출처는 `source: 'rules'`(규칙 안내)다. 생성형 AI 상담으로 표시하지 않는다.
+- 저장소, 로그, 네트워크, DB, 환경변수, 키, SDK, LLM에 접근하지 않는다.
+- 연결 상태(`c2ebabe` 기준): 규칙 응답은 기본 꺼짐 UI 배선 하나에만 연결돼 있다(`ProductGuidePanel` → `ProductPage`, `PRODUCT_GUIDE_ENABLED=false`라 렌더되지 않음).
+  - PG5는 이 표시 경로 외의 사용처(HTTP·API·정책·SDK)가 없는지 확인한다.
+  - 홈·폼·API·상담 채널에는 연결하지 않았다.
+- 정책 저장소·실자료와 연결돼 있지 않다. 연결은 별도 구체안으로 다룬다.
+
+**선택형 안내 화면 — 기본 꺼짐 준비(PM 6925800166)**
+- 구성
+  - `src/components/ProductGuidePanel.tsx`: 서버 컴포넌트. 9개 고정 질문·응답을 서버에서 미리 그리고, 브라우저 기본 `details/summary`로만 펼친다.
+  - 클라이언트 JS, 버튼, 폼, 입력칸, 요청, 주소(hash) 변경이 없다.
+- 켜짐 조건
+  - 스위치: `src/content/channels.ts`의 `PRODUCT_GUIDE_ENABLED: boolean = false`(코드 상수, 환경변수로 켜지지 않음)
+  - `ProductPage`가 이 값이 true이고 상품이 인터넷TV일 때만 표시한다. 홈·폼·API·상담 채널·다른 상품에는 없다.
+- 신청 안내
+  - 인터넷TV 페이지가 서버에서 판정한 공식 접수 결과만 받는다. 실제 값은 꺼짐이라 "준비 중"이다.
+  - 가상 켜짐에서만 이미 검수된 `OfficialIntakeCta`를 재사용한다.
+- 표시: "규칙 기반 상품 안내"라고 쓴다. AI 상담·상담원 연결·신청 접수라고 쓰지 않는다.
+- 근거를 종류별로 나눈다
+  - **정적 렌더(미리보기):** `npm run test:preview`의 `12-product-guide-intake-off`·`13-product-guide-intake-fake-on`(320/390, 가상 켜짐)
+    - 9주제, 금액 표기 0, 보장·AI 표현 없음, 넘침 없음, 입력·폼·버튼·외부요소 0을 확인한다.
+    - 패널이 없는 나머지 화면에는 패널 표식이 없어야 한다(9개 화면 × 320/390 = 18건, `11-official-intake-fake` 포함. 공식 접수 표식은 11·13을 뺀 9개 화면 × 2 = 18건에서 따로 확인. 미리보기 전체 22건, `c2ebabe` CI 기준).
+  - **가상 클릭(같은 미리보기의 실브라우저 이벤트):**
+    - 모든 주제 펼침·닫기 3회 반복
+    - 키보드 Enter/Space 펼침·닫기, 초점 유지, Tab으로 다음 질문 이동
+    - 신청 안내: 꺼짐이면 준비 중·링크 0, 가상 켜짐이면 검수된 링크 2개(열지 않음)
+    - 주소 변화 0, 요청 0
+  - **실Next 닫힘(server smoke H9):** 빌드된 실제 서버의 `/products/internet-tv` HTML·RSC를 확인한다.
+    - 패널·공식 접수 표식 0, 준비 중 안내 유지, HTML noindex
+    - 가짜 계측값만 쓰고 실env·DB·외부 접속 없이, 자기 서버를 정리한다.
+- 켜는 순서: 문구 PM 검수 → 별도 커밋으로 `true` → 배포 결정(별도)
+
+**현재 상태(단계를 나눠 쓴다):**
+| 단계 | 상태 |
+|---|---|
+| 정적 준비 코드 | 있음. 규칙 응답 모듈과 패널, `PRODUCT_GUIDE_ENABLED=false` |
+| 가상 상호작용 | 통과. 미리보기 실브라우저, 가상 켜짐 4화면 |
+| 실Next 닫힘 | 통과. smoke H9, 실제 서버에서 렌더되지 않음 |
+| 실공개 | **없음.** 켜기·배포는 보류(PM 6928989118). 문구 검수는 통과 |
+
+"AI 자동상담 실행 중"이라고 쓰지 않는다. 생성형 AI는 연결하지 않았다.
+
+### 3-3. AI 고객관리(CRM) 후속 순서
+1. **웹 CRM과 공통 서버 권한을 먼저 안정화한다.**
+   - 현재 관리자 읽기 전용 목록(가상·로컬), staff 인증 설계, 등록 모델이 있다.
+   - 이 묶음들은 보류 중이고 매출 경로 뒤에 재개한다.
+2. **공식 접수 건 관리를 붙인다.**
+   - 딜러 귀속 확인, 응대 메모, 상태(접수/가입/개통/정산)를 다룬다.
+   - 고객 원문 정보는 처리 주체 확정 전 저장하지 않는다.
+3. **Android·iPhone 앱**
+   - 웹 CRM과 서버 권한이 안정된 뒤 같은 서버 API 위에 만든다.
+   - PWA(웹 설치형)는 네이티브 앱 출시가 아니다. 둘을 구분해 보고한다.
+   - 앱 코드, 스토어 계정, 배포, 유료 리소스는 이번 범위에 없다.
+
+## 4. 실적 집계 원칙
+- **단계를 따로 센다:** 공식 접수 → 가입 → 개통 → 정산(매출 인정). 광고 클릭이나 접수처 이동은 접수가 아니다.
+- **단계 간 크기 비교는 조건부다(PM 6924799021 정정).**
+  - "뒤 단계가 앞 단계보다 클 수 없다"는 **같은 접수 코호트, 같은 귀속 기준, 같은 중복 제거 기준**일 때만 적용한다.
+  - 서로 다른 기간에 발생한 건수(예: 이번 주 접수 수와 이번 주 개통 수)에는 적용하지 않는다. 지난주 접수가 이번 주에 개통될 수 있다(LAUNCH-READINESS 4절 `cohort`/`occurrence` 구분과 같다).
+- **출처:** 총판이 확인해 준 건만 센다.
+  - 확인되지 않은 누적은 0으로 두지 않는다. "데이터 없음"으로 표시한다(진행판의 `value: null` 규칙과 같다).
+- **두 총판 합산 100건은 목표치다.** 진행 보고에는 총판별 확인 수와 확인 시각을 함께 적는다.
+  - "100건 달성 보장", "내일 매출 보장" 같은 문구는 쓰지 않는다.
+- **매출:** 인정된 판매 수수료와 환수·취소를 **각각 따로** 표시하고, 순액(인정 − 환수·취소)은 그 둘에서 계산한 값으로만 덧붙인다.
+  - 환수가 확인되지 않았으면 0이 아니라 "확인 안 됨"으로 둔다.
+  - 통신사 월요금이나 예상 마진은 매출이 아니다.
+
+## 5. 이번 묶음에서 하지 않은 것
+- 실제 링크·버튼 개방, 등록부 항목 추가, 활성 변경
+- 광고 게시·예약·지출, 계정 생성·연결, 매체 심사 요청
+- 실env·키·workflow·schema·권한·정식 0007/0008·원격 Auth/DB 변경
+- 고객정보 수집·저장, 봇, 추적·픽셀, noindex/robots/도메인 변경, 상품 활성 변경, 배포·main 병합
+- 총판·공급처에 메시지 발송, 같은 질문 자동 재발송
+- 등록 모델 추가 확장, SQL, 새 인증 경로, 정책 저장소 모델 확장(보류)
+- 상품 안내 패널 켜기(코드 상수 false 유지), API·상담 채널 연결

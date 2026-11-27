@@ -3,34 +3,56 @@ on:
   pull_request:
   push:
     branches: [main]
+  # 실제 OpenAI 호출 시험은 수동 실행(Actions → ci → Run workflow)에서만 한다(PM 11/26: 일반 CI 자동 호출 금지·비용 통제).
+  workflow_dispatch:
 
 permissions:
   contents: read
+  # gitleaks-action은 PR 이벤트에서 PR 커밋 목록(GET /pulls/{n}/commits)을 조회한다.
+  # contents: read만 있으면 이 조회가 403(Resource not accessible by integration)으로 실패한다(CI 실행 43628715194).
+  # 읽기 권한만 추가한다. 쓰기 권한은 주지 않는다.
+  pull-requests: read
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        # v3: Node 24 실행 환경(v2의 Node 20은 GitHub 실행기에서 제거됨). 입력·동작은 v2와 같다.
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PR 댓글 기능 끔. 댓글은 pull-requests: write 권한이 필요하고, 이 워크플로는 읽기 권한만 갖는다.
+          # 탐지 결과는 작업 실패 + 작업 요약(job summary) + SARIF 산출물로 확인한다.
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          # SARIF 산출물 업로드 끔(11/26 artifact 저장 공간 초과 원인 중 하나, 347개). 탐지 시 작업 실패·작업 요약으로 확인한다.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - name: Dependency audit
         run: npm audit --audit-level=high --omit=dev
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
+      - name: API route test (reserved products → 403 PRODUCT_NOT_ACTIVE, no server/DB/external calls)
+        run: npm run test:route
+      - name: Live AI integration (real OpenAI call only on manual workflow_dispatch with CI secret; otherwise SKIP)
+        env:
+          # PR·push 자동 실행에서는 키를 넘기지 않는다 → 시험은 SKIP(통과로 세지 않음). 수동 실행에서만 실제 호출.
+          CONSULT_AI_API_KEY: ${{ github.event_name == 'workflow_dispatch' && secrets.CONSULT_AI_API_KEY || '' }}
+        run: npm run test:live-ai
       - name: DB security tests (local virtual DB, PostgreSQL from runner image)
         run: npm run test:db
+      - run: npx playwright install --with-deps chromium   # 관리자 화면 E2E(AP7)·모바일 화면 검수 공용
+      - name: Next server E2E (consult → DB, disposable local DB, mock model)
+        run: npm run test:next-e2e
       - name: Restore drill (virtual data)
         run: npm run test:restore
       - run: npm run build
@@ -39,11 +61,11 @@ jobs:
           if grep -rEn "(sb_secret_|service_role|PII_ENC_KEYS|PII_HMAC_KEY|SIGNING_KEY|postgres(ql)?://)" .next/static; then
             echo "secret-like string found in client bundle"; exit 1
           fi
-      - run: npx playwright install --with-deps chromium
       - name: Mobile screens (no price text, no horizontal overflow)
         run: npm run test:preview
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: test-results
           path: test-results/
+          retention-days: 7   # 11/26 저장 공간 초과(701개·4.9GB) 재발 방지

@@ -119,10 +119,11 @@ h1, h2, h3 { line-height: 1.3; letter-spacing: -0.03em; margin: 0; }
   display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid var(--line);
 }
+.sticky-cta > :only-child { grid-column: 1 / -1; } /* 외부 상담 버튼이 꺼져 버튼이 하나일 때 전체 폭 */
 
 /* consult form */
-.consult-form { display: grid; gap: 16px; }
-.consult-form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; }
+.consult-form { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.consult-form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .form-banner { display: grid; gap: 8px; padding: 16px; border-radius: var(--radius); background: var(--signal-soft); border: 1px solid #ffd4c4; }
 .form-banner strong { font-size: 16px; }
 .form-banner span { font-size: 14px; color: var(--ink-2); }
@@ -133,6 +134,11 @@ h1, h2, h3 { line-height: 1.3; letter-spacing: -0.03em; margin: 0; }
   font: inherit; font-size: 16px; font-weight: 400; color: var(--ink); background: #fff;
 }
 .note-input { padding: 12px 14px; }
+.field-fixed {
+  margin: 0; min-height: 48px; display: flex; align-items: center; padding: 0 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--wash);
+  font-size: 16px; font-weight: 700; color: var(--ink);
+}
 fieldset:disabled .field input, fieldset:disabled .field select { background: var(--wash); }
 .consent-box { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
@@ -140,6 +146,13 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
 .consent-box details { font-size: 13px; color: var(--muted); padding-left: 30px; }
 .consent-box details p { margin: 4px 0; }
 .form-result { padding: 12px; border-radius: 10px; background: var(--wash); font-size: 14px; }
+.form-result.error { background: #fef2f2; color: #7f1d1d; }
+.field-error { display: block; font-size: 13px; font-weight: 600; color: #b91c1c; }
+.field-hint { font-size: 13px; color: var(--muted); margin: 0; }
+.field input[aria-invalid='true'] { border-color: #b91c1c; }
+.check input[aria-invalid='true'] { outline: 2px solid #b91c1c; outline-offset: 2px; }
+.turnstile-box { min-height: 65px; }
+.bot-recover { display: grid; gap: 8px; }
 
 /* admin */
 .admin { min-height: 100vh; background: var(--wash); padding-bottom: 24px; }
@@ -196,4 +209,152 @@ fieldset:disabled .field input, fieldset:disabled .field select { background: va
   .admin-main { max-width: 760px; margin: 0 auto; }
 }
 body:has(.admin), body:has(.login) { padding-bottom: 0; }
-</style></head><head></head><body><div class="admin"><header class="admin-bar"><span class="brand brand-sm"><span class="brand-mark" aria-hidden="true"></span>FIDEON 관리</span><span class="mock-badge">가상 데이터</span></header><main class="admin-main"><section class="admin-kpis" aria-label="오늘 현황"><div><b>1</b><span>신규</span></div><div><b>2</b><span>연락 필요</span></div><div><b>1</b><span>접수전환</span></div></section><div class="filter-row" role="tablist" aria-label="상태 필터"><button class="chip chip-on" role="tab" aria-selected="true">전체 6</button><button class="chip" role="tab" aria-selected="false">신규 1</button><button class="chip" role="tab" aria-selected="false">연락중 1</button><button class="chip" role="tab" aria-selected="false">부재 1</button><button class="chip" role="tab" aria-selected="false">상담완료 1</button></div><ul class="lead-list"><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0007</span></div><div class="lead-meta"><span>인터넷 + TV</span><span>11.13 20:41</span><span>미배정</span></div><span class="status status-new">신규</span></li><li class="lead-row lead-row-on"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0006</span></div><div class="lead-meta"><span>CCTV · 보안</span><span>11.13 18:12</span><span>상담원A</span></div><span class="status status-contacting">연락중</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테**트</span><span class="lead-phone">010-****-0005</span></div><div class="lead-meta"><span>인터넷 + 집전화</span><span>11.13 15:03</span><span>상담원A</span></div><span class="status status-no_answer">부재</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0004</span></div><div class="lead-meta"><span>인터넷 + TV</span><span>11.12 21:47</span><span>대표</span></div><span class="status status-consulted">상담완료</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0003</span></div><div class="lead-meta"><span>인터넷만</span><span>11.12 13:18</span><span>대표</span></div><span class="status status-converted">접수전환</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0002</span></div><div class="lead-meta"><span>인터넷 + TV</span><span>11.11 09:55</span><span>상담원A</span></div><span class="status status-declined">거절</span></li></ul><section class="lead-detail" aria-label="선택한 상담"><h2>테*트 · 010-****-0006</h2><p class="detail-sub">CCTV · 보안 · 연락 희망 오전 10시 이후 · 유입 kakao</p><div class="reveal"><label class="field"><span>원문 보기 사유 <em>(필수, 기록됨)</em></span><input placeholder="예: 고객 요청 회신 전화" disabled=""/></label><button class="btn btn-ghost" disabled="">연락처 원문 보기</button><p class="hint">원문 조회는 배정된 상담만 가능하며 1시간 30건으로 제한됩니다.</p></div><label class="field"><span>상태</span><select disabled=""><option value="contacting" selected="">연락중</option><option value="consulted">상담완료</option><option value="no_answer">부재</option><option value="declined">거절</option></select></label><h3>메모</h3><ul class="notes"><li><span>11.13 18:30 · 상담원A</span>매장 카메라 4대 희망, 현장 구조 사진 요청함</li></ul><textarea class="note-input" placeholder="메모 추가" rows="3" disabled=""></textarea></section></main></div></body></html>
+.section-note { margin: -4px 0 16px; color: var(--muted); font-size: 15px; }
+
+/* 관리자 인증(PHASE 1 OI-002) */
+.form-error { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fee2e2; color: #7f1d1d; font-size: 14px; }
+.admin-bar-end, .admin-logout { display: flex; align-items: center; gap: 8px; }
+.admin-role { font-size: 12px; opacity: .85; }
+.admin-logout .btn { padding: 6px 12px; font-size: 13px; min-height: 0; color: #fff; border-color: rgba(255,255,255,.4); }
+
+/* 대표 전용 진행판 */
+.admin-link { color: #fff; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.progress { display: grid; gap: 14px; }
+.progress section { background: #fff; border-radius: 14px; padding: 14px 16px; }
+.progress h2 { font-size: 15px; margin: 0 0 8px; }
+.progress ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.progress p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.progress-stamp { font-size: 13px; color: var(--muted); }
+.progress-stale { color: #7f1d1d; font-weight: 700; }
+.progress-checks { list-style: none; padding: 0 !important; }
+.progress-checks li { display: flex; justify-content: space-between; gap: 12px; }
+.pcheck { font-size: 12px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.pcheck-통과 { background: #dcfce7; color: #14532d; }
+.pcheck-실패 { background: #fee2e2; color: #7f1d1d; }
+.pcheck-미확인 { background: #f1f5f9; color: #334155; }
+
+/* 키보드 이동 시 초점 표시(접근성) */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 3px solid var(--signal); outline-offset: 2px;
+}
+/* 로컬 시험용 읽기 전용 목록(PM 6915664371) */
+.test-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #e0f2fe; color: #0c4a6e; }
+.read-note { font-size: 13px; color: var(--muted); margin: 0; }
+.read-empty { background: #fff; border-radius: 12px; padding: 16px; text-align: center; margin: 0; }
+.read-pager { display: flex; justify-content: space-between; font-size: 14px; }
+.read-pager a { padding: 8px 12px; background: #fff; border-radius: 10px; }
+
+/* 총판 공식 접수처 연결(기본 꺼짐 — 등록·검수 전에는 그려지지 않음) */
+.official-intake { margin-top: 18px; display: grid; gap: 10px; }
+.official-intake-title { margin: 0; font-weight: 700; }
+.official-intake-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.official-intake-list li { display: grid; gap: 4px; min-width: 0; }
+.official-intake-list .btn { white-space: normal; text-align: center; }
+.official-intake-host, .official-intake-note { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.official-intake-note { margin: 0; }
+
+/* 선택형 상품 안내(규칙 기반 고정 질문, 기본 꺼짐) */
+.guide-list { display: grid; gap: 8px; }
+.guide-item { border: 1px solid var(--line); border-radius: 12px; background: #fff; min-width: 0; }
+.guide-item summary { display: flex; gap: 8px; align-items: center; justify-content: space-between; min-height: 48px; padding: 12px 14px; cursor: pointer; font-weight: 700; list-style: none; }
+.guide-item summary::-webkit-details-marker { display: none; }
+.guide-item summary::after { content: '+'; flex: none; color: var(--muted); font-weight: 400; }
+.guide-item[open] summary::after { content: '−'; }
+.guide-item summary:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; border-radius: 10px; }
+.guide-q { min-width: 0; overflow-wrap: anywhere; }
+.guide-tag { flex: none; margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--signal-soft); color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.guide-answer { padding: 0 14px 14px; color: var(--ink-2); font-size: 15px; }
+.guide-answer p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.guide-answer .official-intake { margin-top: 8px; }
+
+/* 카카오톡 상품 문의(기본 꺼짐) */
+.kakao-inquiry { margin-top: 12px; display: grid; gap: 6px; }
+.kakao-inquiry .btn { white-space: normal; text-align: center; }
+.kakao-inquiry-note { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.form-banner .kakao-inquiry-note { display: block; }
+.hero .kakao-inquiry-note { color: rgba(255, 255, 255, 0.82); }
+
+/* 모바일 웹 상담 비공개 시안(가상 대화) — 입력칸 없음, 보기 선택만. 글자색은 어두운 색(--ink, --ink-2)만 쓴다 */
+.cp-wrap { max-width: 560px; margin: 0 auto; padding: 0 16px 48px; display: grid; gap: 16px; min-width: 0; }
+.cp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 14px 0 0; }
+.cp-badge { padding: 4px 10px; border-radius: 999px; background: var(--signal-soft); color: #9a3412; font-size: 12px; font-weight: 700; }
+.cp-start { display: grid; gap: 14px; padding-top: 8px; min-width: 0; }
+.cp-hero-q { margin: 0; font-size: 26px; line-height: 1.35; font-weight: 800; color: var(--ink); overflow-wrap: anywhere; word-break: keep-all; }
+.cp-hero-q:focus, .cp-question:focus, .cp-summary h2:focus { outline: none; }
+.cp-hero-q:focus-visible, .cp-question:focus-visible, .cp-summary h2:focus-visible { outline: 3px solid var(--signal); outline-offset: 4px; border-radius: 6px; }
+.cp-notices { display: grid; gap: 8px; }
+.cp-notice { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--wash); color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.cp-notice-ai { background: var(--ink); color: #fff; font-weight: 700; }
+.cp-chat { display: grid; gap: 16px; min-width: 0; }
+.cp-current { display: grid; gap: 12px; min-width: 0; }
+.cp-progress { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+.cp-question { margin: 0; font-size: 22px; line-height: 1.35; font-weight: 800; color: var(--ink); overflow-wrap: anywhere; word-break: keep-all; }
+.cp-bubble { max-width: 100%; padding: 12px 14px; border-radius: 14px; font-size: 15px; overflow-wrap: anywhere; }
+.cp-bubble p { margin: 0; }
+.cp-bot { background: var(--wash); color: var(--ink); border-top-left-radius: 4px; }
+.cp-choices { display: grid; gap: 10px; }
+.cp-choice { display: grid; gap: 2px; text-align: left; min-height: 56px; padding: 12px 16px; border: 1px solid var(--ink-2); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; word-break: keep-all; }
+.cp-choice span { font-size: 13px; font-weight: 400; color: var(--ink-2); }
+.cp-choice:focus-visible, .cp-ad-cta:focus-visible, .cp-edit:focus-visible, .cp-fold > summary:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.cp-fold { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; min-width: 0; }
+.cp-fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 12px 16px; cursor: pointer; font-weight: 700; color: var(--ink); list-style: none; }
+.cp-fold > summary::-webkit-details-marker { display: none; }
+.cp-fold > summary::after { content: '+'; flex: none; color: var(--ink-2); font-weight: 400; }
+.cp-fold[open] > summary::after { content: '−'; }
+.cp-fold[open] > summary { border-bottom: 1px solid var(--line); }
+.cp-fold > .guide-list, .cp-fold > .cp-example, .cp-history-list { margin: 0; padding: 12px 16px 16px; }
+.cp-history-list { list-style: none; display: grid; gap: 14px; }
+.cp-history-list li { display: grid; gap: 6px; min-width: 0; }
+.cp-hq { margin: 0; font-size: 14px; font-weight: 700; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-hreply { margin: 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-answer-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cp-answer { max-width: 100%; padding: 10px 14px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.cp-edit { min-height: 44px; min-width: 44px; padding: 0 12px; border: 1px solid var(--ink-2); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.cp-summary, .cp-phone { padding: 18px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; min-width: 0; }
+.cp-summary h2, .cp-phone h2 { margin: 0 0 10px; font-size: 18px; font-weight: 800; color: var(--ink); }
+.cp-summary h3 { margin: 16px 0 6px; font-size: 14px; color: #9a3412; }
+.cp-summary ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+/* 요약 목록은 한글 단어 중간에서 줄이 바뀌지 않게 하고, 띄어쓰기 없이 긴 값만 비상 줄바꿈한다 */
+.cp-summary li { word-break: keep-all; overflow-wrap: anywhere; }
+.cp-keypoint { margin: 0 0 14px; padding: 14px; border-radius: 12px; background: var(--signal-soft); border: 1px solid #f3c9b8; display: grid; gap: 4px; color: var(--ink); }
+.cp-keypoint-label { font-size: 13px; font-weight: 700; color: #9a3412; }
+.cp-keypoint strong { font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; word-break: keep-all; }
+.cp-keypoint-reason { font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-costs { list-style: none; padding-left: 0 !important; }
+.cp-costs li { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.cp-cost-status { font-size: 14px; color: var(--ink-2); }
+.cp-summary-note, .cp-mock-result { margin: 12px 0 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-phone p { margin: 0 0 10px; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.cp-aux .guide-list { gap: 8px; }
+.cp-example { padding: 10px 16px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+.cp-aux > summary + .cp-example { border-top: 0; }
+.cp-example p { margin: 0; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.cp-example-title { font-weight: 800; }
+.cp-example-ask { color: var(--ink-2) !important; }
+.cp-handoff-fold { margin: 8px 16px 16px; }
+.cp-handoff { display: grid; gap: 10px; padding: 12px 16px 16px; min-width: 0; }
+.cp-handoff p { margin: 0; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; word-break: keep-all; }
+.cp-handoff .cp-handoff-note { color: var(--ink-2); }
+.cp-handoff-cases { display: grid; gap: 10px; }
+.cp-handoff-case[aria-pressed="true"] { border-color: #9a3412; background: #fff7ed; }
+.cp-handoff-out { min-width: 0; }
+.cp-handoff-result { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; min-width: 0; }
+.cp-handoff .cp-handoff-state { font-weight: 800; }
+.cp-handoff .cp-handoff-events, .cp-handoff .cp-handoff-empty { color: var(--ink-2); }
+.cp-handoff-mock { display: inline-block; margin-left: 8px; padding: 2px 8px; border: 1px solid #9a3412; border-radius: 999px; background: #fff7ed; color: #9a3412; font-size: 13px; font-weight: 800; white-space: normal; }
+/* 새 질문·요약이 나타날 때의 부드러운 등장: 모션 축소를 선택한 사용자에게는 움직임을 쓰지 않는다 */
+@media (prefers-reduced-motion: no-preference) {
+  .cp-now { animation: cp-in 0.18s ease-out; }
+}
+@keyframes cp-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.cp-ad { border: 1px dashed var(--line, #cbd5e1); border-radius: 12px; padding: 12px; margin: 0 0 12px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.cp-ad p { margin: 0; }
+.cp-ad-note { font-size: 0.8rem; color: var(--ink-2); }
+.cp-ad-title { font-weight: 700; }
+.cp-ad-cta { min-height: 44px; margin-top: 4px; }
+
+.cp-quick { display: grid; gap: 8px; margin: 0 0 12px; }
+.cp-quick-btn { min-height: 44px; }
+.cp-quick-btn:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+</style></head><head></head><body><div class="admin"><header class="admin-bar"><span class="brand brand-sm"><span class="brand-mark" aria-hidden="true"></span>FIDEON 관리</span><span class="admin-bar-end"><span class="mock-badge">가상 데이터</span></span></header><main class="admin-main"><section class="admin-kpis" aria-label="오늘 현황"><div><b>1</b><span>신규</span></div><div><b>2</b><span>연락 필요</span></div><div><b>1</b><span>접수전환</span></div></section><div class="filter-row" role="tablist" aria-label="상태 필터"><button class="chip chip-on" role="tab" aria-selected="true">전체 6</button><button class="chip" role="tab" aria-selected="false">신규 1</button><button class="chip" role="tab" aria-selected="false">연락중 1</button><button class="chip" role="tab" aria-selected="false">부재 1</button><button class="chip" role="tab" aria-selected="false">상담완료 1</button></div><ul class="lead-list"><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0007</span></div><div class="lead-meta"><span>인터넷 + TV</span><span>11.13 20:41</span><span>미배정</span></div><span class="status status-new">신규</span></li><li class="lead-row lead-row-on"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0006</span></div><div class="lead-meta"><span>CCTV · 보안</span><span>11.13 18:12</span><span>상담원A</span></div><span class="status status-contacting">연락중</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테**트</span><span class="lead-phone">010-****-0005</span></div><div class="lead-meta"><span>인터넷 + 집전화</span><span>11.13 15:03</span><span>상담원A</span></div><span class="status status-no_answer">부재</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0004</span></div><div class="lead-meta"><span>인터넷 + TV</span><span>11.12 21:47</span><span>대표</span></div><span class="status status-consulted">상담완료</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0003</span></div><div class="lead-meta"><span>인터넷만</span><span>11.12 13:18</span><span>대표</span></div><span class="status status-converted">접수전환</span></li><li class="lead-row"><div class="lead-main"><span class="lead-name">테*트</span><span class="lead-phone">010-****-0002</span></div><div class="lead-meta"><span>인터넷 + TV</span><span>11.11 09:55</span><span>상담원A</span></div><span class="status status-declined">거절</span></li></ul><section class="lead-detail" aria-label="선택한 상담"><h2>테*트 · 010-****-0006</h2><p class="detail-sub">CCTV · 보안 · 연락 희망 오전 10시 이후 · 유입 kakao</p><div class="reveal"><label class="field"><span>원문 보기 사유 <em>(필수, 기록됨)</em></span><input placeholder="예: 고객 요청 회신 전화" disabled=""/></label><button class="btn btn-ghost" disabled="">연락처 원문 보기</button><p class="hint">원문 조회는 배정된 상담만 가능하며 1시간 30건으로 제한됩니다.</p></div><label class="field"><span>상태</span><select disabled=""><option value="contacting" selected="">연락중</option><option value="consulted">상담완료</option><option value="no_answer">부재</option><option value="declined">거절</option></select></label><h3>메모</h3><ul class="notes"><li><span>11.13 18:30 · 상담원A</span>매장 카메라 4대 희망, 현장 구조 사진 요청함</li></ul><textarea class="note-input" placeholder="메모 추가" rows="3" disabled=""></textarea></section></main></div></body></html>

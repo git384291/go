@@ -34,7 +34,7 @@ jobs:
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid sha"; exit 1; }
           [[ "$REVIEW" =~ ^FIDEON-PM-REV-[0-9]{3,}$ ]] || { echo "invalid review id"; exit 1; }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
@@ -49,7 +49,7 @@ jobs:
           c=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ inputs.sha }}&status=completed&event=push" \
                 --jq '.workflow_runs[0].conclusion')
           [ "$c" = "success" ] || { echo "CI conclusion: $c"; exit 1; }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
