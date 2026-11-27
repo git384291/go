@@ -1,5 +1,4 @@
-// 총판 공식 접수 경로 연결 준비(PM 6920265190 / 6920404685) — 순수 검증·판정과 기본 꺼짐 정적 확인.
-// 실제 목적지·활성 변경은 이 시험의 범위가 아니다. 가상 주소는 IANA 예시 도메인(example.com)만 쓴다.
+// 총판 공식 접수 경로 — 순수 검증·판정과 서버 고정 등록부 정적 확인.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -109,11 +108,15 @@ test('OI7 판정 함수는 요청·고객 입력을 받지 않는다(추가 입�
   }
 });
 
-test('OI8 실제 서버 설정은 꺼짐·빈 등록부·코드 상수(환경변수 미사용)·server-only', () => {
+test('OI8 실제 서버 설정은 검수된 네이버 폼 1곳·코드 상수(환경변수 미사용)·server-only', () => {
   const src = readFileSync('src/server/intake/officialIntakeConfig.ts', 'utf8');
   assert.match(src, /^import 'server-only';/);
-  assert.match(src, /export const OFFICIAL_INTAKE_ENABLED: boolean = false;/);
-  assert.match(src, /export const OFFICIAL_INTAKE_REGISTRY: readonly OfficialIntakeEntry\[\] = Object\.freeze\(\[\]\);/);
+  assert.match(src, /export const OFFICIAL_INTAKE_ENABLED: boolean = true;/);
+  assert.match(src, /id: 'naver-form'/);
+  assert.match(src, /label: '바른365'/);
+  assert.match(src, /url: 'https:\/\/form\.naver\.com\/response\/By757YMGRuN'/);
+  assert.match(src, /products: Object\.freeze\(\['internet-tv'\] as const\)/);
+  assert.match(src, /reviewRef: 'PM-202611280433'/);
   assert.ok(!/process\.env|NEXT_PUBLIC|searchParams|headers\(|cookies\(/.test(src), '환경변수·요청 값 미사용');
   const pure = readFileSync('src/content/officialIntake.ts', 'utf8');
   assert.ok(!/process\.env|fetch\(|https:\/\/(?!')[a-z]/.test(pure.replace(/\/\/.*$/gm, '')), '순수 모듈에 실제 목적지·환경·요청 없음');

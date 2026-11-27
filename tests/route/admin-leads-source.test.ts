@@ -52,6 +52,19 @@ test('S2 db 읽기 준비: 지정된 로컬 폐기 시험 DB URL만, 배포 환�
     ['해시', { DATABASE_URL: `${OK_URL}#x` }],
   ];
   for (const [label, o] of bad) assert.equal(dbReadReady(env(o)), false, label);
+
+  const ref = 'abcdefghijklmnopqrst';
+  const prod = {
+    ADMIN_LEADS_SOURCE: 'db', ADMIN_AUTH_MODE: 'supabase', ADMIN_PRODUCTION_ENABLED: 'true',
+    APP_ENV: 'production', NEXT_PUBLIC_SUPABASE_URL: `https://${ref}.supabase.co`,
+  };
+  assert.equal(dbReadReady({ ...prod, DATABASE_URL: `postgresql://app_server.${ref}:secret@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require` }), true);
+  assert.equal(dbReadReady({ ...prod, DATABASE_URL: `postgresql://postgres:secret@db.${ref}.supabase.co:5432/postgres` }), true);
+  for (const badUrl of [
+    `postgresql://app_server.wrongwrongwrongwrong:secret@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres`,
+    `postgresql://app_server.${ref}:secret@evil.example.com:6543/postgres`,
+    `postgresql://app_server.${ref}:secret@aws-0-ap-northeast-2.pooler.supabase.com:6543/other`,
+  ]) assert.equal(dbReadReady({ ...prod, DATABASE_URL: badUrl }), false, badUrl);
 });
 
 function deps(env: Record<string, string | undefined>, o: { staff?: StaffIdentity | Error; rows?: unknown[] } = {}) {

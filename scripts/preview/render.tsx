@@ -256,9 +256,17 @@ async function main() {
       const notice = PUBLIC_PAGES.has(name) ? `\t준비 중 안내=${body.includes(NOTICE)}` : '';
       const fixed = name.startsWith('05')
         ? `\t상담 대상 고정=${html.includes('name="interest" value="internet_tv"') && !html.includes('<select name="interest"')}` : '';
-      // 공식 접수처 연결: 기본(실제 설정) 화면에는 표식이 없어야 하고, 가상 화면은 고정 목적지·비전달 속성만 가져야 한다
+      // 공식 접수처 연결: 홈·인터넷TV는 검수된 실제 고정 목적지 1개, 가상 화면은 가상 고정 목적지만 허용한다.
       let intakeCheck = '';
-      if (name.startsWith('11')) {
+      if (name.startsWith('01') || name.startsWith('02')) {
+        const anchors = await page.evaluate(() => Array.from(document.querySelectorAll('[data-official-intake] a')).map((a) => ({
+          href: a.getAttribute('href'), rel: a.getAttribute('rel'), rp: a.getAttribute('referrerpolicy'), target: a.getAttribute('target') })));
+        const inputs = await page.evaluate(() => document.querySelectorAll('[data-official-intake] input, [data-official-intake] form, [data-official-intake] iframe, [data-official-intake] script, [data-official-intake] img').length);
+        const okLink = anchors.length === 1 && anchors[0]!.href === 'https://form.naver.com/response/By757YMGRuN'
+          && /\bnoreferrer\b/.test(anchors[0]!.rel ?? '') && /\bnoopener\b/.test(anchors[0]!.rel ?? '')
+          && anchors[0]!.rp === 'no-referrer' && anchors[0]!.target === '_blank';
+        intakeCheck = `\t공식접수 실제 링크=${okLink}\t공식접수 입력·외부요소=${inputs}`;
+      } else if (name.startsWith('11')) {
         const anchors = await page.evaluate(() => Array.from(document.querySelectorAll('[data-official-intake] a')).map((a) => ({
           href: a.getAttribute('href'), rel: a.getAttribute('rel'), rp: a.getAttribute('referrerpolicy'), target: a.getAttribute('target') })));
         const inputs = await page.evaluate(() => document.querySelectorAll('[data-official-intake] input, [data-official-intake] form, [data-official-intake] iframe, [data-official-intake] script, [data-official-intake] img').length);
@@ -300,7 +308,7 @@ async function main() {
   // 광고 예산 화면(19·20)의 금액은 상품 요금이 아니라 관리자 한도 숫자이므로 요금 노출 검사에서만 제외한다(나머지 검사는 동일).
   const bad = report.filter((r) =>
     r.includes('가로 넘침=true') || (/금액 표기=[1-9]/.test(r) && !/^(19|20|25|26|31|32)-admin-ads|^3[3-5]-admin-ai/.test(r)) || /예약 상품 노출=(?!없음)/.test(r) || /외부 상담 연결=(?!없음)/.test(r) || /접수 오해 문구=(?!없음)/.test(r) || /준비 중 안내=false/.test(r)
-    || /(404|고정)=false/.test(r) || /공식접수 (가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
+    || /(404|고정)=false/.test(r) || /공식접수 (실제 링크|가상 링크|표식 없음)=false/.test(r) || /공식접수 입력·외부요소=[1-9]/.test(r)
     || /상품안내 [^=\t]+=false/.test(r) || /상품안내 (입력·외부요소|요청)=[1-9]/.test(r)
     || /카톡문의 [^=\t]+=false/.test(r) || /카톡문의 (외부요소|요청)=[1-9]/.test(r));
   if (bad.length) {

@@ -1,8 +1,8 @@
-import { isHostedDeploy, isProduction } from '../env/deployEnv';
+import { isHostedDeploy, isLiveProduction, isProduction } from '../env/deployEnv';
 /**
  * 관리자 인증 스위치(기본 꺼짐). 순수 함수: middleware·서버 화면·시험에서 함께 쓴다.
  * - ADMIN_AUTH_MODE=supabase 이고 필요한 서버 설정이 모두 있을 때만 켠다. 하나라도 비면 꺼진다.
- * - 운영(VERCEL_ENV=production)에서는 켜지 않는다. 운영 활성화는 PM·사용자 별도 승인 뒤 이 줄을 바꾼다.
+ * - 운영은 ADMIN_PRODUCTION_ENABLED=true까지 명시한 실제 운영 배포에서만 켠다.
  * - 꺼져 있으면 관리자 화면은 잠기고, 가상 데이터 화면은 로컬 개발 서버(next dev)에서만 보인다.
  */
 export type AdminAuthMode = 'disabled' | 'supabase';
@@ -31,7 +31,7 @@ export function isLocalDatabaseUrl(url: string | undefined): boolean {
 }
 
 export function adminAuthMode(env: Env = process.env): AdminAuthMode {
-  if (isProduction(env)) return 'disabled'; // 운영(Vercel·Cloud Run·APP_ENV) 자동 차단
+  if (isProduction(env) && (env.ADMIN_PRODUCTION_ENABLED !== 'true' || !isLiveProduction(env))) return 'disabled';
   if (env.ADMIN_AUTH_MODE !== 'supabase') return 'disabled';
   if (!ADMIN_AUTH_REQUIRED_ENV.every((k) => (env[k] ?? '').trim() !== '')) return 'disabled';
   // 원격 DB는 CA 인증서가 없으면 db/client.ts가 접속을 거부한다. 켜진 척하지 않고 꺼서 관리자 화면·API를 잠금·503으로 닫는다

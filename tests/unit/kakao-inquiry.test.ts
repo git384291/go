@@ -60,10 +60,10 @@ test('KI5 실제 서버 설정: false/null 코드 상수, 환경변수·요청 �
   assert.ok(!/process\.env|NEXT_PUBLIC|searchParams|headers\(|cookies\(|fetch\(/.test(cfg.replace(/\/\/.*$/gm, '')));
   const pure = readFileSync('src/content/kakaoInquiry.ts', 'utf8').replace(/\/\/.*$/gm, '');
   assert.ok(!/process\.env|fetch\(|console\.|import\(|require\(/.test(pure));
-  // 공식 접수 등록부·스위치는 그대로(빈값/false), 카카오 문의와 섞지 않는다
+  // 공식 접수 등록부는 네이버 폼만 고정하며 카카오 문의와 섞지 않는다
   const official = readFileSync('src/server/intake/officialIntakeConfig.ts', 'utf8');
-  assert.match(official, /export const OFFICIAL_INTAKE_ENABLED: boolean = false;/);
-  assert.match(official, /export const OFFICIAL_INTAKE_REGISTRY: readonly OfficialIntakeEntry\[\] = Object\.freeze\(\[\]\);/);
+  assert.match(official, /export const OFFICIAL_INTAKE_ENABLED: boolean = true;/);
+  assert.match(official, /url: 'https:\/\/form\.naver\.com\/response\/By757YMGRuN'/);
   assert.ok(!/kakao/i.test(official));
 });
 
