@@ -7,13 +7,14 @@ import { POST } from '../../src/app/api/admin/intake/naver/route';
 
 const ENV = { ADMIN_CRM_SOURCE: 'db', NODE_ENV: 'test', DATABASE_URL: 'postgresql://u@127.0.0.1:5432/fideon_lrs_123_abcdef01' };
 const OWNER = { actor: '00000000-0000-4000-8000-000000000001', session: '10000000-0000-4000-8000-000000000001', token: 'staff-token', role: 'owner' } as StaffIdentity;
+const NOW = new Date('2026-11-28T12:00:00.000Z');
 const crypto = createPiiCrypto({ encKeys: { '1': Buffer.alloc(32, 1) }, currentVersion: '1', hmacKey: Buffer.alloc(32, 2), ipHashKey: Buffer.alloc(32, 3) });
 const csv = (rows: string) => `응답일시,1. 원하시는 가입 유형,2. 성함,3. 연락처,4. 개인정보 수집 및 이용 동의,5. 설치 희망 지역(시·군·구)\n${rows}`;
 
 function deps(role: StaffIdentity['role'] = 'owner', result = 'imported') {
   const calls = { tx: 0, sql: [] as string[], vals: [] as unknown[][] };
   const d: NaverImportDeps = {
-    env: () => ENV, mode: () => 'supabase', requireStaff: async () => ({ ...OWNER, role }), now: () => new Date(), crypto: () => crypto,
+    env: () => ENV, mode: () => 'supabase', requireStaff: async () => ({ ...OWNER, role }), now: () => NOW, crypto: () => crypto,
     runInTransaction: async (fn) => {
       calls.tx++;
       const tag = (async (s: TemplateStringsArray, ...v: unknown[]) => { calls.sql.push(s.join('?')); calls.vals.push(v); return [{ result }]; }) as never;
@@ -25,15 +26,16 @@ function deps(role: StaffIdentity['role'] = 'owner', result = 'imported') {
 
 test('NF1 CSV·TSV 헤더와 따옴표를 읽고 필수 열 누락은 거부한다', () => {
   const a = parseNaverFormExport(csv(`2026-11-28,인터넷+TV,"홍,길동",010-1234-5678,동의합니다,"서울, 강남구"`));
-  assert.deepEqual(a[0], { row: 2, kind: '인터넷+TV', name: '홍,길동', phone: '010-1234-5678', consent: '동의합니다', area: '서울, 강남구' });
-  const t = `원하시는 가입 유형\t성함\t연락처\t개인정보 수집 및 이용 동의\t설치 희망 지역(시·군·구)\n인터넷+TV\t가상고객\t01011112222\t동의합니다\t서울 강남구`;
+  assert.deepEqual(a[0], { row: 2, respondedAt: '2026-11-28', kind: '인터넷+TV', name: '홍,길동', phone: '010-1234-5678', consent: '동의합니다', area: '서울, 강남구' });
+  const t = `응답일시\t원하시는 가입 유형\t성함\t연락처\t개인정보 수집 및 이용 동의\t설치 희망 지역(시·군·구)\n2026. 11. 28. 오후 8:30:05\t인터넷+TV\t가상고객\t01011112222\t동의합니다\t서울 강남구`;
   assert.equal(parseNaverFormExport(t).length, 1);
   assert.throws(() => parseNaverFormExport('성함,연락처\n가상,01011112222'), /HEADERS_MISMATCH/);
+  assert.throws(() => parseNaverFormExport(`응답일시,원하시는 가입 유형,성함,연락처,개인정보 수집 및 이용 동의,개인정보 수집 및 이용 동의,설치 희망 지역(시·군·구)\n2026-11-28,인터넷+TV,가상,01011112222,동의합니다,동의하지 않습니다,서울`), /DUPLICATE_HEADERS/);
 });
 
 test('NF2 정상 행은 암호화·HMAC 후 대표 전용 DB 함수로 보내고 응답·SQL에 원문이 없다', async () => {
   const { d, calls } = deps();
-  const raw = csv(`2026-11-28,인터넷+TV,가상고객,010-1234-5678,동의합니다,서울 강남구`);
+  const raw = csv(`2026-11-28 10:00:01,인터넷+TV,가상고객,010-1234-5678,동의합니다,서울 강남구`);
   const res = await importNaverForm(d, raw);
   const text = await res.text();
   assert.equal(res.status, 200);
@@ -50,9 +52,9 @@ test('NF2 정상 행은 암호화·HMAC 후 대표 전용 DB 함수로 보내고
 test('NF3 비동의·미승인 상품·잘못된 값은 행 번호만 반환하고 유효 행만 처리한다', async () => {
   const { d, calls } = deps();
   const raw = csv([
-    `2026-11-28,인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`,
-    `2026-11-28,인터넷만,가상고객,01011113333,동의합니다,서울 송파구`,
-    `2026-11-28,인터넷+TV,가상고객,01011114444,동의하지 않습니다,서울 마포구`,
+    `2026-11-28 10:00:01,인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`,
+    `2026-11-28 10:00:02,인터넷만,가상고객,01011113333,동의합니다,서울 송파구`,
+    `2026-11-28 10:00:03,인터넷+TV,가상고객,01011114444,동의하지 않습니다,서울 마포구`,
   ].join('\n'));
   const res = await importNaverForm(d, raw);
   const b = await res.json() as { imported: number; rejected: Array<{ row: number; code: string }> };
@@ -64,17 +66,30 @@ test('NF3 비동의·미승인 상품·잘못된 값은 행 번호만 반환하�
 test('NF4 대표 외 역할은 파일 파싱·암호화·DB 전에 차단한다', async () => {
   for (const role of ['counselor', 'reviewer', 'policy_editor'] as const) {
     const { d, calls } = deps(role);
-    const res = await importNaverForm(d, csv(`2026-11-28,인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`));
+    const res = await importNaverForm(d, csv(`2026-11-28 10:00:01,인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`));
     assert.equal(res.status, 403);
     assert.equal(calls.tx, 0);
   }
 });
 
 test('NF5 행·열·필드 한도와 DB 원문 오류 노출을 막는다', async () => {
-  assert.throws(() => parseNaverFormExport(csv(Array.from({ length: 101 }, (_, i) => `x,인터넷+TV,가상${i},01011112222,동의합니다,서울`).join('\n'))), /TOO_MANY_ROWS/);
+  assert.throws(() => parseNaverFormExport(csv(Array.from({ length: 101 }, (_, i) => `2026-11-28 10:00:01,인터넷+TV,가상${i},01011112222,동의합니다,서울`).join('\n'))), /TOO_MANY_ROWS/);
   const { d } = deps('owner', 'unexpected');
-  const res = await importNaverForm(d, csv(`2026-11-28,인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`));
+  const res = await importNaverForm(d, csv(`2026-11-28 10:00:01,인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`));
   assert.deepEqual([res.status, (await res.json() as { code: string }).code], [503, 'DB_UNAVAILABLE']);
+});
+
+test('NF5b 응답일시는 고지 적용 구간·30일 보유기간·미래 시각을 벗어나면 거부한다', async () => {
+  for (const [time, code] of [
+    ['2026-11-26 23:59:59', 'CONSENT_VERSION_MISMATCH'],
+    ['2026-10-01 12:00:00', 'CONSENT_VERSION_MISMATCH'],
+    ['2026-11-29 12:00:00', 'INVALID_RESPONSE_TIME'],
+  ] as const) {
+    const { d } = deps();
+    const res = await importNaverForm(d, csv(`${time},인터넷+TV,가상고객,01011112222,동의합니다,서울 강남구`));
+    const body = await res.json() as { rejected: Array<{ code: string }> };
+    assert.equal(body.rejected[0]?.code, code);
+  }
 });
 
 test('NF6 라우트는 CSV/TSV만 받고 교차 출처·256KB 초과를 인증 전에 차단한다', async () => {

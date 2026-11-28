@@ -40,6 +40,8 @@ grant select, insert, update on security.staff_sessions to fideon_api;
 grant usage on all sequences in schema core, pii to fideon_api;
 revoke update, delete on core.audit_logs from fideon_api;          -- 감사 로그는 추가 전용
 grant delete on core.lead_notes to fideon_api;   -- 0063: 파기 시 상담 메모 삭제(api.purge_* 안에서만)
+revoke insert, update, delete on core.naver_form_notice_windows from fideon_api;  -- 0071: 폼 고지 구간은 마이그레이션으로만 변경
+revoke update, delete on pii.naver_form_import_receipts from fideon_api;  -- 0071: 가져오기 영수증은 추가 전용
 revoke all on security.server_keys from fideon_api;
 
 -- 5) RLS: core·pii·security 모든 테이블 enable + force, 허용 정책은 fideon_api만
@@ -169,7 +171,7 @@ grant execute on function
   api.contract_status(uuid, uuid, text, uuid, text, date),   -- 0069: 설치 완료·취소·해지 → 환수 위험 판정
   api.settlement_record(uuid, uuid, text, uuid, text, int, date),   -- 0069: 정산 원장(추가 전용)
   api.contract_list(uuid, uuid, text, text),   -- 0069: 설치·정산·환수 목록(대표만)
-  api.naver_form_import(uuid, uuid, text, text, text, text, text, text, text, text, boolean, text)   -- 0071: 네이버 폼 결과 가져오기(대표만)
+  api.naver_form_import(uuid, uuid, text, text, text, text, text, text, text, timestamptz, text, boolean, text)   -- 0071: 네이버 폼 결과 가져오기(대표만)
   to app_staff;
 
 -- 0021 계정 합산·집행 종료일 보조 함수: api 함수 소유자(fideon_api)만 실행
