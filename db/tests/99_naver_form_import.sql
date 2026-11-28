@@ -6,21 +6,23 @@ select '00000000-0000-4000-8000-000000000001'::uuid as owner_id,
        '10000000-0000-4000-8000-000000000001'::uuid as owner_session,
        '00000000-0000-4000-8000-000000000002'::uuid as counselor_id,
        '10000000-0000-4000-8000-000000000002'::uuid as counselor_session \gset
+select test.staff_token(:'owner_id', :'owner_session') as owner_token,
+       test.staff_token(:'counselor_id', :'counselor_session') as counselor_token \gset
 
 set role app_staff;
 select test.expect_error(
   format($$select api.naver_form_import(%L,%L,%L,'v1:n','가*객','v1:p',repeat('d',64),'2222','v1:a','naver-%s',true,'naver-form-2026-11-28')$$,
-    :'counselor_id', :'counselor_session', test.staff_token(:'counselor_id', :'counselor_session'), repeat('1',58)),
+    :'counselor_id', :'counselor_session', :'counselor_token', repeat('1',58)),
   '42501', 'NFDB1 대표 외 가져오기 차단');
 
 select test.expect_error_msg(
   format($$select api.naver_form_import(%L,%L,%L,'v1:n','가*객','v1:p',repeat('d',64),'2222','v1:a','naver-%s',false,'naver-form-2026-11-28')$$,
-    :'owner_id', :'owner_session', test.staff_token(:'owner_id', :'owner_session'), repeat('2',58)),
+    :'owner_id', :'owner_session', :'owner_token', repeat('2',58)),
   '22023', 'CONSENT_REQUIRED', 'NFDB2 비동의 차단');
 
 select test.expect_eq(
   format($$select api.naver_form_import(%L,%L,%L,'v1:name','가*객','v1:phone',repeat('d',64),'2222','v1:area','naver-%s',true,'naver-form-2026-11-28')$$,
-    :'owner_id', :'owner_session', test.staff_token(:'owner_id', :'owner_session'), repeat('3',58)),
+    :'owner_id', :'owner_session', :'owner_token', repeat('3',58)),
   'imported', 'NFDB3 신규 접수');
 select test.expect_eq($$select count(*)::text from core.leads where idempotency_key = 'naver-$$ || repeat('3',58) || $$' and interest = 'internet_tv' and utm_source = 'naver'$$, '1', 'NFDB4 출처·상품 저장');
 select test.expect_eq($$select count(*)::text from pii.consents c join pii.customers p on p.id=c.customer_id where p.phone_hmac=repeat('d',64) and c.doc_version='naver-form-2026-11-28' and c.granted$$, '1', 'NFDB5 동의 기록');
@@ -32,11 +34,11 @@ select test.expect_eq($$select body from core.notice_texts where version='naver-
 
 select test.expect_eq(
   format($$select api.naver_form_import(%L,%L,%L,'v1:name','가*객','v1:phone',repeat('d',64),'2222','v1:area','naver-%s',true,'naver-form-2026-11-28')$$,
-    :'owner_id', :'owner_session', test.staff_token(:'owner_id', :'owner_session'), repeat('3',58)),
+    :'owner_id', :'owner_session', :'owner_token', repeat('3',58)),
   'already', 'NFDB8 같은 파일 재업로드 멱등');
 select test.expect_eq(
   format($$select api.naver_form_import(%L,%L,%L,'v1:name','가*객','v1:phone',repeat('d',64),'2222','v1:area','naver-%s',true,'naver-form-2026-11-28')$$,
-    :'owner_id', :'owner_session', test.staff_token(:'owner_id', :'owner_session'), repeat('4',58)),
+    :'owner_id', :'owner_session', :'owner_token', repeat('4',58)),
   'duplicate', 'NFDB9 같은 연락처 새 응답은 중복 리드 차단·동의 갱신');
 select test.expect_eq($$select count(*)::text from core.leads l join pii.customers p on p.id=l.customer_id where p.phone_hmac=repeat('d',64)$$, '1', 'NFDB10 중복 리드 없음');
 select test.expect_eq($$select count(*)::text from pii.consents c join pii.customers p on p.id=c.customer_id where p.phone_hmac=repeat('d',64) and c.doc_version='naver-form-2026-11-28'$$, '2', 'NFDB11 응답별 동의 2건');
