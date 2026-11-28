@@ -125,6 +125,7 @@ echo "NOTICE:  PASS | SCH-par 스케줄러 100회 동시(여러 연결): 예약 
 run db/tests/99_lead_followups.sql >/dev/null   # 대표 직접 연락 동의·후속 연락 목록(0023, PM 11/22 ②)
 run db/tests/99_recontact_schedule.sql >/dev/null   # 날짜별 재연락 일정·수신 거부(0060, PM 11/25 ③)
 run db/tests/99_install_settlement.sql >/dev/null   # 설치·정산·환수(0069, PM 11/27 CRM ⑤)
+run db/tests/99_naver_form_import.sql >/dev/null   # 네이버 폼 결과 → CRM 안전 가져오기(0071)
 run db/tests/99_crm_unify.sql >/dev/null   # 고객·접수·CRM 통합(0061, PM 11/25 ①③)
 run db/tests/99_purge_scope.sql >/dev/null   # 파기 범위 분리(0062, PM 11/25 B)
 run db/tests/99_purge_notes_retention.sql >/dev/null   # 메모 파기·5년 보존 분리(0063)
