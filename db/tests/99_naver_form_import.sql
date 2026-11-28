@@ -29,7 +29,7 @@ select test.expect_eq($$select count(*)::text from core.leads where idempotency_
 select test.expect_eq($$select count(*)::text from pii.consents c join pii.customers p on p.id=c.customer_id where p.phone_hmac=repeat('e9',32) and c.doc_version='naver-form-2026-11-28' and c.granted$$, '1', 'NFDB5 동의 기록');
 select test.expect_eq($$select count(*)::text from pii.notice_exposures e join pii.customers p on p.id=e.customer_id where p.phone_hmac=repeat('e9',32) and e.doc_version='naver-form-2026-11-28' and e.body_sha256=(select body_sha256 from core.notice_texts where version=e.doc_version and notice_key=e.notice_key)$$, '1', 'NFDB6 고지 해시 기록');
 select test.expect_eq($$select count(*)::text from pii.customers where phone_hmac=repeat('e9',32) and address_enc='v1:area'$$, '1', 'NFDB7 지역 암호문 저장');
-select test.expect_eq($$select count(*)::text from pii.customers where phone_hmac=repeat('e9',32) and retention_until between now()+interval '29 days 23 hours' and now()+interval '30 days 1 hour'$$, '1', 'NFDB7b 네이버 고지와 같은 30일 보유');
+select test.expect_eq($$select count(*)::text from pii.customers c join pii.naver_form_import_receipts r on r.customer_id=c.id where c.phone_hmac=repeat('e9',32) and c.retention_until=r.responded_at+interval '30 days'$$, '1', 'NFDB7b 응답시각부터 정확히 30일 보유');
 select test.expect_eq($$select body from core.notice_texts where version='naver-form-2026-11-28' and notice_key='collection_use'$$,
   E'수집 및 이용하는 개인정보 항목\n성함, 휴대전화번호, 설치 희망 지역(시·군·구)\n수집 및 이용 목적\n인터넷 가입 접수 확인, 가입 조건 안내 및 연락\n보유 및 이용기간\n접수일로부터 30일 후 파기. 단, 관계 법령에 따라 보존이 필요한 경우 해당 법령에서 정한 기간', 'NFDB7c 실제 네이버 고지 원문 고정');
 
